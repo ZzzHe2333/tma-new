@@ -1,0 +1,2999 @@
+{
+  "evidence": "static DFM; localized captions and runtime visibility unknown",
+  "menus": [
+    {
+      "name": "File1",
+      "caption": "文件",
+      "english": "File",
+      "children": [
+        {
+          "name": "Open1",
+          "caption": "打开",
+          "english": "Open",
+          "children": [],
+          "shortcut": "Ctrl+O"
+        },
+        {
+          "name": "Reopen1",
+          "caption": "重新打开",
+          "english": "Reopen",
+          "children": []
+        },
+        {
+          "name": "Close1",
+          "caption": "关闭",
+          "english": "Close",
+          "children": []
+        },
+        {
+          "name": "CloseAll1",
+          "caption": "全部关闭",
+          "english": "Close All",
+          "children": []
+        },
+        {
+          "name": "N111",
+          "caption": "-",
+          "children": []
+        },
+        {
+          "name": "RemoveAnalysis1",
+          "caption": "删除分析",
+          "english": "Remove Analysis",
+          "children": []
+        },
+        {
+          "name": "SaveAnalysis1",
+          "caption": "保存分析",
+          "english": "Save Analysis",
+          "children": [
+            {
+              "name": "AnalysisOnly1",
+              "caption": "仅分析",
+              "english": "Analysis Only",
+              "children": []
+            },
+            {
+              "name": "AnalysisAndData1",
+              "caption": "分析和数据",
+              "english": "Analysis and Data",
+              "children": [],
+              "shortcut": "Ctrl+S"
+            }
+          ]
+        },
+        {
+          "name": "SaveSession1",
+          "caption": "保存会话",
+          "english": "Save Session",
+          "children": []
+        },
+        {
+          "name": "EditParamBlock1",
+          "caption": "编辑参数块",
+          "english": "Edit Param Block",
+          "children": []
+        },
+        {
+          "name": "N11",
+          "caption": "-",
+          "children": []
+        },
+        {
+          "name": "MainOptions1",
+          "caption": "选项",
+          "english": "Options",
+          "children": []
+        },
+        {
+          "name": "ExportPlot1",
+          "caption": "导出绘图",
+          "english": "Export Plot",
+          "children": []
+        },
+        {
+          "name": "ExportPDFFile1",
+          "caption": "导出 PDF 文件",
+          "english": "Export PDF File",
+          "children": []
+        },
+        {
+          "name": "ExportDataFile1",
+          "caption": "导出数据文件",
+          "english": "Export Data File",
+          "children": [
+            {
+              "name": "TTSSignals1",
+              "caption": "TTS 信号",
+              "english": "TTS Signals",
+              "children": []
+            },
+            {
+              "name": "FileSignalsOnly1",
+              "caption": "仅文件信号",
+              "english": "File Signals Only",
+              "children": []
+            },
+            {
+              "name": "PlotSignalsOnly1",
+              "caption": "仅绘图信号",
+              "english": "Plot Signals Only",
+              "children": []
+            },
+            {
+              "name": "FileAndPlotSignals1",
+              "caption": "文件和绘图信号",
+              "english": "File And Plot Signals",
+              "children": []
+            }
+          ]
+        },
+        {
+          "name": "N222",
+          "caption": "-",
+          "children": []
+        },
+        {
+          "name": "Print1",
+          "caption": "打印",
+          "english": "Print",
+          "children": [],
+          "shortcut": "Ctrl+P"
+        },
+        {
+          "name": "PrintSetup1",
+          "caption": "打印设置",
+          "english": "Print Setup",
+          "children": []
+        },
+        {
+          "name": "PrintPreview1",
+          "caption": "打印预览",
+          "english": "Print Preview",
+          "children": []
+        },
+        {
+          "name": "N3",
+          "caption": "-",
+          "children": []
+        },
+        {
+          "name": "LoginLogout1",
+          "caption": "登录",
+          "english": "Login",
+          "children": []
+        },
+        {
+          "name": "Exit1",
+          "caption": "退出",
+          "english": "Exit",
+          "children": []
+        }
+      ]
+    },
+    {
+      "name": "Edit1",
+      "caption": "编辑",
+      "english": "Edit",
+      "children": [
+        {
+          "name": "Copy3",
+          "caption": "复制",
+          "english": "Copy",
+          "children": [],
+          "shortcut": "Ctrl+C"
+        },
+        {
+          "name": "Paste1",
+          "caption": "粘贴",
+          "english": "Paste",
+          "children": [],
+          "shortcut": "Ctrl+V"
+        },
+        {
+          "name": "SelectAll1",
+          "caption": "全选",
+          "english": "Select All",
+          "children": [],
+          "shortcut": "Ctrl+A"
+        },
+        {
+          "name": "N4",
+          "caption": "-",
+          "children": []
+        },
+        {
+          "name": "FileInformation1",
+          "caption": "文件信息",
+          "english": "File Information",
+          "children": []
+        },
+        {
+          "name": "Annotate1",
+          "caption": "批注",
+          "english": "Annotate",
+          "children": []
+        },
+        {
+          "name": "AddScaleBar1",
+          "caption": "添加刻度尺",
+          "english": "Add Scale Bar",
+          "children": []
+        },
+        {
+          "name": "AdjustLastResult1",
+          "caption": "调整上一个结果",
+          "english": "Adjust Last Result",
+          "children": []
+        },
+        {
+          "name": "DeleteResults1",
+          "caption": "删除结果",
+          "english": "Delete Results",
+          "children": [
+            {
+              "name": "Last1",
+              "caption": "最后的",
+              "english": "Last",
+              "children": []
+            },
+            {
+              "name": "Select1",
+              "caption": "选择",
+              "english": "Select",
+              "children": []
+            },
+            {
+              "name": "All1",
+              "caption": "全部",
+              "english": "All",
+              "children": []
+            },
+            {
+              "name": "Axis1",
+              "caption": "坐标轴",
+              "english": "Axis",
+              "children": []
+            }
+          ]
+        },
+        {
+          "name": "Modify1",
+          "caption": "修改",
+          "english": "Modify",
+          "children": []
+        },
+        {
+          "name": "ExcludeData1",
+          "caption": "排除数据",
+          "english": "Exclude Data",
+          "children": []
+        },
+        {
+          "name": "MpxList1",
+          "caption": "Multiplexed Signals",
+          "english": "Multiplexed Signals",
+          "children": []
+        },
+        {
+          "name": "CycleList1",
+          "caption": "周期列表",
+          "english": "Cycle List",
+          "children": []
+        },
+        {
+          "name": "N36",
+          "caption": "-",
+          "children": []
+        },
+        {
+          "name": "AnalysisLogComment1",
+          "caption": "分析日志注释",
+          "english": "Analysis Log Comment",
+          "children": []
+        },
+        {
+          "name": "AuditTrailComment1",
+          "caption": "审计追踪注释",
+          "english": "Audit Trail Comment",
+          "children": []
+        }
+      ]
+    },
+    {
+      "name": "Rescale1",
+      "caption": "重定刻度",
+      "english": "Rescale",
+      "children": [
+        {
+          "name": "ManualRescale1",
+          "caption": "手动",
+          "english": "Manual",
+          "children": []
+        },
+        {
+          "name": "ZoomOut1",
+          "caption": "缩小",
+          "english": "Zoom Out",
+          "children": [],
+          "shortcut": "Ctrl+Z"
+        },
+        {
+          "name": "PreviousLimits1",
+          "caption": "前一界限",
+          "english": "Previous Limits",
+          "children": [],
+          "shortcut": "Ctrl+U"
+        },
+        {
+          "name": "N7",
+          "caption": "-",
+          "children": []
+        },
+        {
+          "name": "FullScaleAxis1",
+          "caption": "坐标轴满刻度",
+          "english": "Full Scale Axis",
+          "children": []
+        },
+        {
+          "name": "FullScaleAll1",
+          "caption": "全部坐标轴满刻度",
+          "english": "Full Scale All",
+          "children": []
+        },
+        {
+          "name": "CommonScale1",
+          "caption": "通用刻度",
+          "english": "Common Scale",
+          "children": []
+        },
+        {
+          "name": "SameScale1",
+          "caption": "相同刻度",
+          "english": "Same Scale",
+          "children": []
+        },
+        {
+          "name": "StackAxes1",
+          "caption": "坐标轴堆叠",
+          "english": "Stack Axes",
+          "children": []
+        },
+        {
+          "name": "N19",
+          "caption": "-",
+          "children": []
+        },
+        {
+          "name": "ExactScalingX1",
+          "caption": "X 轴精确刻度",
+          "english": "Exact Scaling X",
+          "children": []
+        },
+        {
+          "name": "ExactScalingY1",
+          "caption": "Y 轴精确刻度",
+          "english": "Exact Scaling Y",
+          "children": []
+        }
+      ]
+    },
+    {
+      "name": "Graph1",
+      "caption": "曲线图",
+      "english": "Graph",
+      "children": [
+        {
+          "name": "SpreadsheetView1",
+          "caption": "电子表格视图",
+          "english": "Spreadsheet View",
+          "children": []
+        },
+        {
+          "name": "N27",
+          "caption": "-",
+          "children": []
+        },
+        {
+          "name": "Signals1",
+          "caption": "信号",
+          "english": "Signals",
+          "children": []
+        },
+        {
+          "name": "Units1",
+          "caption": "单位",
+          "english": "Units",
+          "children": []
+        },
+        {
+          "name": "InstrParams1",
+          "caption": "仪器参数",
+          "english": "Instrument Params",
+          "children": []
+        },
+        {
+          "name": "ParamsSameAs1",
+          "caption": "参数同于",
+          "english": "Params Same As",
+          "children": [
+            {
+              "name": "PMoreFiles",
+              "caption": "PMore Files",
+              "english": "PMore Files",
+              "children": []
+            }
+          ]
+        },
+        {
+          "name": "DataLimits1",
+          "caption": "数据界限",
+          "english": "Data Limits",
+          "children": [
+            {
+              "name": "FullRangeLimits1",
+              "caption": "全范围",
+              "english": "Full Range",
+              "children": []
+            },
+            {
+              "name": "CursorLimits1",
+              "caption": "图形界限",
+              "english": "Graphic Limits",
+              "children": []
+            },
+            {
+              "name": "TimeLimits1",
+              "caption": "时间",
+              "english": "Time",
+              "children": []
+            },
+            {
+              "name": "TemperatureLimits1",
+              "caption": "温度",
+              "english": "Temperature",
+              "children": []
+            },
+            {
+              "name": "CycleLimits1",
+              "caption": "周期",
+              "english": "Cycle",
+              "children": []
+            }
+          ]
+        },
+        {
+          "name": "Refresh1",
+          "caption": "刷新",
+          "english": "Refresh",
+          "children": [
+            {
+              "name": "Data1",
+              "caption": "数据",
+              "english": "Data",
+              "children": []
+            },
+            {
+              "name": "Plot1",
+              "caption": "绘图",
+              "english": "Plot",
+              "children": []
+            }
+          ]
+        },
+        {
+          "name": "N13",
+          "caption": "-",
+          "children": []
+        },
+        {
+          "name": "XAxis1",
+          "caption": "X 轴",
+          "english": "X Axis",
+          "children": [
+            {
+              "name": "XTime1",
+              "caption": "时间",
+              "english": "Time",
+              "children": []
+            },
+            {
+              "name": "XTemp1",
+              "caption": "温度",
+              "english": "Temperature",
+              "children": []
+            },
+            {
+              "name": "XSignal1",
+              "caption": "X 信号",
+              "english": "X Signal",
+              "children": []
+            }
+          ]
+        },
+        {
+          "name": "YAxis1",
+          "caption": "Y 轴",
+          "english": "Y Axis",
+          "children": [
+            {
+              "name": "Y1",
+              "caption": "Y1",
+              "english": "Y1",
+              "children": []
+            },
+            {
+              "name": "Y2",
+              "caption": "Y2",
+              "english": "Y2",
+              "children": []
+            },
+            {
+              "name": "Y3",
+              "caption": "Y3",
+              "english": "Y3",
+              "children": []
+            },
+            {
+              "name": "Y4",
+              "caption": "Y4",
+              "english": "Y4",
+              "children": []
+            }
+          ]
+        },
+        {
+          "name": "Curve1",
+          "caption": "曲线",
+          "english": "Curve",
+          "children": []
+        },
+        {
+          "name": "N12",
+          "caption": "-",
+          "children": []
+        },
+        {
+          "name": "Overlay1",
+          "caption": "叠加",
+          "english": "Overlay",
+          "children": [
+            {
+              "name": "AutoConfigure1",
+              "caption": "自动配置",
+              "english": "Auto Configure",
+              "children": []
+            },
+            {
+              "name": "ManualSetup1",
+              "caption": "手动设置",
+              "english": "Manual Setup",
+              "children": []
+            },
+            {
+              "name": "Edit4",
+              "caption": "编辑叠加",
+              "english": "Edit Overlay",
+              "children": [
+                {
+                  "name": "E1",
+                  "caption": "E",
+                  "english": "E",
+                  "children": []
+                },
+                {
+                  "name": "E2",
+                  "caption": "E",
+                  "english": "E",
+                  "children": []
+                },
+                {
+                  "name": "E3",
+                  "caption": "E",
+                  "english": "E",
+                  "children": []
+                },
+                {
+                  "name": "E4",
+                  "caption": "E",
+                  "english": "E",
+                  "children": []
+                },
+                {
+                  "name": "E5",
+                  "caption": "E",
+                  "english": "E",
+                  "children": []
+                },
+                {
+                  "name": "E6",
+                  "caption": "E",
+                  "english": "E",
+                  "children": []
+                },
+                {
+                  "name": "E7",
+                  "caption": "E",
+                  "english": "E",
+                  "children": []
+                },
+                {
+                  "name": "E8",
+                  "caption": "E",
+                  "english": "E",
+                  "children": []
+                },
+                {
+                  "name": "E9",
+                  "caption": "E",
+                  "english": "E",
+                  "children": []
+                },
+                {
+                  "name": "E10",
+                  "caption": "E",
+                  "english": "E",
+                  "children": []
+                },
+                {
+                  "name": "E11",
+                  "caption": "E",
+                  "english": "E",
+                  "children": []
+                },
+                {
+                  "name": "E12",
+                  "caption": "E",
+                  "english": "E",
+                  "children": []
+                },
+                {
+                  "name": "E13",
+                  "caption": "E",
+                  "english": "E",
+                  "children": []
+                },
+                {
+                  "name": "E14",
+                  "caption": "E",
+                  "english": "E",
+                  "children": []
+                },
+                {
+                  "name": "E15",
+                  "caption": "E",
+                  "english": "E",
+                  "children": []
+                },
+                {
+                  "name": "E16",
+                  "caption": "E",
+                  "english": "E",
+                  "children": []
+                },
+                {
+                  "name": "E17",
+                  "caption": "E",
+                  "english": "E",
+                  "children": []
+                },
+                {
+                  "name": "E18",
+                  "caption": "E",
+                  "english": "E",
+                  "children": []
+                },
+                {
+                  "name": "E19",
+                  "caption": "E",
+                  "english": "E",
+                  "children": []
+                },
+                {
+                  "name": "E20",
+                  "caption": "E",
+                  "english": "E",
+                  "children": []
+                }
+              ]
+            },
+            {
+              "name": "Copy4",
+              "caption": "复制叠加",
+              "english": "Copy Overlay",
+              "children": [
+                {
+                  "name": "C1",
+                  "caption": "C",
+                  "english": "C",
+                  "children": []
+                },
+                {
+                  "name": "C2",
+                  "caption": "C",
+                  "english": "C",
+                  "children": []
+                },
+                {
+                  "name": "C3",
+                  "caption": "C",
+                  "english": "C",
+                  "children": []
+                },
+                {
+                  "name": "C4",
+                  "caption": "C",
+                  "english": "C",
+                  "children": []
+                },
+                {
+                  "name": "C5",
+                  "caption": "C",
+                  "english": "C",
+                  "children": []
+                },
+                {
+                  "name": "C6",
+                  "caption": "C",
+                  "english": "C",
+                  "children": []
+                },
+                {
+                  "name": "C7",
+                  "caption": "C",
+                  "english": "C",
+                  "children": []
+                },
+                {
+                  "name": "C8",
+                  "caption": "C",
+                  "english": "C",
+                  "children": []
+                },
+                {
+                  "name": "C9",
+                  "caption": "C",
+                  "english": "C",
+                  "children": []
+                },
+                {
+                  "name": "C10",
+                  "caption": "C",
+                  "english": "C",
+                  "children": []
+                },
+                {
+                  "name": "C11",
+                  "caption": "C",
+                  "english": "C",
+                  "children": []
+                },
+                {
+                  "name": "C12",
+                  "caption": "C",
+                  "english": "C",
+                  "children": []
+                },
+                {
+                  "name": "C13",
+                  "caption": "C",
+                  "english": "C",
+                  "children": []
+                },
+                {
+                  "name": "C14",
+                  "caption": "C",
+                  "english": "C",
+                  "children": []
+                },
+                {
+                  "name": "C15",
+                  "caption": "C",
+                  "english": "C",
+                  "children": []
+                },
+                {
+                  "name": "C16",
+                  "caption": "C",
+                  "english": "C",
+                  "children": []
+                },
+                {
+                  "name": "C17",
+                  "caption": "C",
+                  "english": "C",
+                  "children": []
+                },
+                {
+                  "name": "C18",
+                  "caption": "C",
+                  "english": "C",
+                  "children": []
+                },
+                {
+                  "name": "C19",
+                  "caption": "C",
+                  "english": "C",
+                  "children": []
+                },
+                {
+                  "name": "C20",
+                  "caption": "C",
+                  "english": "C",
+                  "children": []
+                }
+              ]
+            },
+            {
+              "name": "N32",
+              "caption": "-",
+              "children": []
+            },
+            {
+              "name": "ShowOverlayPlot1",
+              "caption": "显示叠加绘图",
+              "english": "Show Overlay Plot",
+              "children": [
+                {
+                  "name": "OP1",
+                  "caption": "OP",
+                  "english": "OP",
+                  "children": []
+                },
+                {
+                  "name": "OP2",
+                  "caption": "OP",
+                  "english": "OP",
+                  "children": []
+                },
+                {
+                  "name": "OP3",
+                  "caption": "OP",
+                  "english": "OP",
+                  "children": []
+                },
+                {
+                  "name": "OP4",
+                  "caption": "OP",
+                  "english": "OP",
+                  "children": []
+                },
+                {
+                  "name": "OP5",
+                  "caption": "OP",
+                  "english": "OP",
+                  "children": []
+                },
+                {
+                  "name": "OP6",
+                  "caption": "OP",
+                  "english": "OP",
+                  "children": []
+                },
+                {
+                  "name": "OP7",
+                  "caption": "OP",
+                  "english": "OP",
+                  "children": []
+                },
+                {
+                  "name": "OP8",
+                  "caption": "OP",
+                  "english": "OP",
+                  "children": []
+                },
+                {
+                  "name": "OP9",
+                  "caption": "OP",
+                  "english": "OP",
+                  "children": []
+                },
+                {
+                  "name": "OP10",
+                  "caption": "OP",
+                  "english": "OP",
+                  "children": []
+                },
+                {
+                  "name": "OP11",
+                  "caption": "OP",
+                  "english": "OP",
+                  "children": []
+                },
+                {
+                  "name": "OP12",
+                  "caption": "OP",
+                  "english": "OP",
+                  "children": []
+                },
+                {
+                  "name": "OP13",
+                  "caption": "OP",
+                  "english": "OP",
+                  "children": []
+                },
+                {
+                  "name": "OP14",
+                  "caption": "OP",
+                  "english": "OP",
+                  "children": []
+                },
+                {
+                  "name": "OP15",
+                  "caption": "OP",
+                  "english": "OP",
+                  "children": []
+                },
+                {
+                  "name": "OP16",
+                  "caption": "OP",
+                  "english": "OP",
+                  "children": []
+                },
+                {
+                  "name": "OP17",
+                  "caption": "OP",
+                  "english": "OP",
+                  "children": []
+                },
+                {
+                  "name": "OP18",
+                  "caption": "OP",
+                  "english": "OP",
+                  "children": []
+                },
+                {
+                  "name": "OP19",
+                  "caption": "OP",
+                  "english": "OP",
+                  "children": []
+                },
+                {
+                  "name": "OP20",
+                  "caption": "OP",
+                  "english": "OP",
+                  "children": []
+                }
+              ]
+            },
+            {
+              "name": "ShowNormalPlot1",
+              "caption": "显示正常绘图",
+              "english": "Show Normal Plot",
+              "children": []
+            }
+          ]
+        },
+        {
+          "name": "N14",
+          "caption": "-",
+          "children": []
+        },
+        {
+          "name": "PlotHeader1",
+          "caption": "绘图标题",
+          "english": "Plot Header",
+          "children": []
+        },
+        {
+          "name": "Plotlegend1",
+          "caption": "绘图图例",
+          "english": "Plot Legend",
+          "children": []
+        },
+        {
+          "name": "InsetView1",
+          "caption": "插入视图",
+          "english": "Inset View",
+          "children": []
+        },
+        {
+          "name": "GraphOptions1",
+          "caption": "曲线图选项",
+          "english": "Graph Options",
+          "children": []
+        },
+        {
+          "name": "N20",
+          "caption": "-",
+          "children": []
+        },
+        {
+          "name": "PlotFullRange1",
+          "caption": "全范围绘图",
+          "english": "Plot Full Range",
+          "children": []
+        },
+        {
+          "name": "AutoScaleNewDataX1",
+          "caption": "新数据 X 轴自动刻度",
+          "english": "Auto Scale New Data X",
+          "children": []
+        },
+        {
+          "name": "AutoScaleNewDataY1",
+          "caption": "新数据 Y 轴自动刻度",
+          "english": "Auto Scale New Data Y",
+          "children": []
+        },
+        {
+          "name": "IgnoreBreaksInData1",
+          "caption": "忽略数据断点",
+          "english": "Ignore Breaks In Data",
+          "children": []
+        },
+        {
+          "name": "IgnoreInvalidData1",
+          "caption": "忽略无效数据",
+          "english": "Ignore Invalid Data",
+          "children": []
+        },
+        {
+          "name": "AutoRefreshData1",
+          "caption": "自动刷新数据",
+          "english": "Auto Refresh Data",
+          "children": []
+        },
+        {
+          "name": "HideResults1",
+          "caption": "隐藏结果",
+          "english": "Hide Results",
+          "children": []
+        }
+      ]
+    },
+    {
+      "name": "Analyze1",
+      "caption": "分析",
+      "english": "Analyse",
+      "children": [
+        {
+          "name": "StepTransition1",
+          "caption": "步阶转变",
+          "english": "Step Transition",
+          "children": []
+        },
+        {
+          "name": "WeightChange1",
+          "caption": "重量变化",
+          "english": "Weight Change",
+          "children": []
+        },
+        {
+          "name": "TempAtWeightPercent1",
+          "caption": "温度于重量%",
+          "english": "Temp at Weight %",
+          "children": []
+        },
+        {
+          "name": "TimeAtWeightPercent1",
+          "caption": "时间于重量%",
+          "english": "Time at Weight %",
+          "children": []
+        },
+        {
+          "name": "WeightAtTemp1",
+          "caption": "重量于温度",
+          "english": "Weight at Temp",
+          "children": []
+        },
+        {
+          "name": "WeightAtTime1",
+          "caption": "重量于时间",
+          "english": "Weight at Time",
+          "children": []
+        },
+        {
+          "name": "WeightLossTemp1",
+          "caption": "重量损失温度",
+          "english": "Weight Loss Temp",
+          "children": []
+        },
+        {
+          "name": "WeightLossTime1",
+          "caption": "重量损失时间",
+          "english": "Weight Loss Time",
+          "children": []
+        },
+        {
+          "name": "Residue1",
+          "caption": "残余",
+          "english": "Residue",
+          "children": []
+        },
+        {
+          "name": "ModifySize1",
+          "caption": "修改大小",
+          "english": "Modify Size",
+          "children": [
+            {
+              "name": "ManualLimits2",
+              "caption": "手动界限",
+              "english": "Manual Limits",
+              "children": []
+            },
+            {
+              "name": "GraphicLimits1",
+              "caption": "图形界限",
+              "english": "Graphic Limits",
+              "children": []
+            },
+            {
+              "name": "GraphicStart1",
+              "caption": "图形起点",
+              "english": "Graphic Start",
+              "children": []
+            },
+            {
+              "name": "GraphicFinish1",
+              "caption": "图形止点",
+              "english": "Graphic Stop",
+              "children": []
+            }
+          ]
+        },
+        {
+          "name": "AlphaAtX1",
+          "caption": "Alpha于X",
+          "english": "Alpha at X",
+          "children": []
+        },
+        {
+          "name": "AlphaX1ToX21",
+          "caption": "Alpha X1 至 X2",
+          "english": "Alpha X1 to X2",
+          "children": []
+        },
+        {
+          "name": "AlphaFitX1ToX21",
+          "caption": "线性拟合Alpha X1 至 X2",
+          "english": "Alpha Fit X1 to X2",
+          "children": []
+        },
+        {
+          "name": "DimensionChange1",
+          "caption": "尺寸变化",
+          "english": "Dimension Change",
+          "children": []
+        },
+        {
+          "name": "ResetSize1",
+          "caption": "重设大小",
+          "english": "Reset Size",
+          "children": []
+        },
+        {
+          "name": "N5",
+          "caption": "-",
+          "children": []
+        },
+        {
+          "name": "IntegratePeak1",
+          "caption": "峰值积分",
+          "english": "Integrate Peak",
+          "children": [
+            {
+              "name": "Linear1",
+              "caption": "线性",
+              "english": "Linear",
+              "children": []
+            },
+            {
+              "name": "SigHorizontal1",
+              "caption": "水平 S 形曲线",
+              "english": "Sig Horizontal",
+              "children": []
+            },
+            {
+              "name": "SigTangent1",
+              "caption": "切线 S 形曲线",
+              "english": "Sig Tangent",
+              "children": []
+            },
+            {
+              "name": "Extrapolated1",
+              "caption": "外推法",
+              "english": "Extrapolated",
+              "children": []
+            },
+            {
+              "name": "N6",
+              "caption": "-",
+              "children": []
+            },
+            {
+              "name": "PerpendicularDrop1",
+              "caption": "垂线",
+              "english": "Perpendicular Drop",
+              "children": []
+            },
+            {
+              "name": "Tangent1",
+              "caption": "切线",
+              "english": "Tangent",
+              "children": []
+            },
+            {
+              "name": "DeletePeak1",
+              "caption": "删除峰",
+              "english": "Delete Peak",
+              "children": []
+            },
+            {
+              "name": "PeakRunningIntegral1",
+              "caption": "执行积分",
+              "english": "Running Integral",
+              "children": []
+            }
+          ]
+        },
+        {
+          "name": "PeakMax1",
+          "caption": "峰最大",
+          "english": "Peak Max",
+          "children": []
+        },
+        {
+          "name": "SignalMax1",
+          "caption": "信号最大",
+          "english": "Signal Max",
+          "children": []
+        },
+        {
+          "name": "SignalChange1",
+          "caption": "信号变化",
+          "english": "Signal Change",
+          "children": []
+        },
+        {
+          "name": "GlassTransition1",
+          "caption": "玻璃化转变",
+          "english": "Glass Transition",
+          "children": []
+        },
+        {
+          "name": "StepTransition2",
+          "caption": "步阶转变",
+          "english": "Step Transition",
+          "children": []
+        },
+        {
+          "name": "OnsetPoint1",
+          "caption": "始点",
+          "english": "Onset Point",
+          "children": []
+        },
+        {
+          "name": "OxidationTime1",
+          "caption": "氧化时间",
+          "english": "Oxidation Time",
+          "children": []
+        },
+        {
+          "name": "OxidationTemp1",
+          "caption": "氧化温度",
+          "english": "Oxidation Temp",
+          "children": []
+        },
+        {
+          "name": "Purity1",
+          "caption": "纯度",
+          "english": "Purity",
+          "children": [
+            {
+              "name": "AnalyzePurity1",
+              "caption": "Analyze Purity",
+              "english": "Analyze Purity",
+              "children": []
+            },
+            {
+              "name": "PurityOptions1",
+              "caption": "纯度选项",
+              "english": "Purity Options",
+              "children": []
+            }
+          ]
+        },
+        {
+          "name": "Humidity1",
+          "caption": "湿度",
+          "english": "Humidity",
+          "children": [
+            {
+              "name": "SorptionIsotherm1",
+              "caption": "恒温吸附",
+              "english": "Sorption Isotherm",
+              "children": []
+            },
+            {
+              "name": "BETAnalysis1",
+              "caption": "BETAnalysis",
+              "english": "BETAnalysis",
+              "children": []
+            },
+            {
+              "name": "GABAnalysis1",
+              "caption": "GABAnalysis",
+              "english": "GABAnalysis",
+              "children": []
+            },
+            {
+              "name": "MarkAdsorption1",
+              "caption": "标记吸附",
+              "english": "Mark Adsorption",
+              "children": []
+            },
+            {
+              "name": "MarkDesorption1",
+              "caption": "标记解吸附",
+              "english": "Mark Desorption",
+              "children": []
+            },
+            {
+              "name": "HumidityOptions1",
+              "caption": "湿度选项",
+              "english": "Humidity Options",
+              "children": []
+            }
+          ]
+        },
+        {
+          "name": "Slope1",
+          "caption": "斜率",
+          "english": "Slope",
+          "children": []
+        },
+        {
+          "name": "RunningIntegral1",
+          "caption": "执行积分",
+          "english": "Running Integral",
+          "children": []
+        },
+        {
+          "name": "N8",
+          "caption": "-",
+          "children": []
+        },
+        {
+          "name": "CurveValueAtX1",
+          "caption": "曲线值于X 轴",
+          "english": "Curve Value at X",
+          "children": []
+        },
+        {
+          "name": "CurveValueAtY1",
+          "caption": "曲线值于Y 轴",
+          "english": "Curve Value at Y",
+          "children": []
+        },
+        {
+          "name": "LabelAtXY1",
+          "caption": "在 X 和 Y 轴标值",
+          "english": "Label at X,Y",
+          "children": []
+        },
+        {
+          "name": "N10",
+          "caption": "-",
+          "children": []
+        },
+        {
+          "name": "AnalysisRange1",
+          "caption": "分析范围",
+          "english": "Analysis Range",
+          "children": [
+            {
+              "name": "FullRange1",
+              "caption": "全范围",
+              "english": "Full Range",
+              "children": []
+            },
+            {
+              "name": "EnterLimits1",
+              "caption": "输入界限",
+              "english": "Enter Limits",
+              "children": []
+            },
+            {
+              "name": "SelectCycle1",
+              "caption": "选择周期",
+              "english": "Select Cycle",
+              "children": []
+            },
+            {
+              "name": "SelectMPX1",
+              "caption": "Select MPX",
+              "english": "Select MPX",
+              "children": []
+            }
+          ]
+        },
+        {
+          "name": "Macro2",
+          "caption": "宏",
+          "english": "Macro",
+          "children": []
+        },
+        {
+          "name": "N9",
+          "caption": "-",
+          "children": []
+        },
+        {
+          "name": "AnalysisOptions1",
+          "caption": "分析选项",
+          "english": "Analysis Options",
+          "children": []
+        }
+      ]
+    },
+    {
+      "name": "Tools1",
+      "caption": "工具",
+      "english": "Tools",
+      "children": [
+        {
+          "name": "Smooth1",
+          "caption": "平滑",
+          "english": "Smooth",
+          "children": []
+        },
+        {
+          "name": "Shift1",
+          "caption": "平移",
+          "english": "Shift",
+          "children": []
+        },
+        {
+          "name": "Rotate1",
+          "caption": "旋转",
+          "english": "Rotate",
+          "children": []
+        },
+        {
+          "name": "Desmear1",
+          "caption": "去污",
+          "english": "Desmear",
+          "children": []
+        },
+        {
+          "name": "Sensitivity1",
+          "caption": "灵敏度",
+          "english": "Sensitivity",
+          "children": []
+        },
+        {
+          "name": "LinearTransform1",
+          "caption": "线性变换",
+          "english": "Linear Transform",
+          "children": [
+            {
+              "name": "YAxis2",
+              "caption": "线性 Y 变换",
+              "english": "Linear Y Transform",
+              "children": []
+            },
+            {
+              "name": "XAxis2",
+              "caption": "线性 X 变换",
+              "english": "Linear X Transform",
+              "children": []
+            }
+          ]
+        },
+        {
+          "name": "RemoveShifts1",
+          "caption": "删除平移",
+          "english": "Remove Shifts",
+          "children": []
+        },
+        {
+          "name": "N18",
+          "caption": "-",
+          "children": []
+        },
+        {
+          "name": "BaselineFile1",
+          "caption": "基线文件",
+          "english": "Baseline File",
+          "children": [
+            {
+              "name": "BNone",
+              "caption": "无",
+              "english": "None",
+              "children": []
+            },
+            {
+              "name": "BMoreFiles",
+              "caption": "BMore Files",
+              "english": "BMore Files",
+              "children": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "View1",
+      "caption": "视图",
+      "english": "View",
+      "children": [
+        {
+          "name": "Results1",
+          "caption": "结果",
+          "english": "Results",
+          "children": [
+            {
+              "name": "ResultsReport1",
+              "caption": "报表",
+              "english": "Report",
+              "children": []
+            },
+            {
+              "name": "ResultsSpreadsheet1",
+              "caption": "电子表格",
+              "english": "Spreadsheet",
+              "children": []
+            },
+            {
+              "name": "ResultsOptions1",
+              "caption": "选项",
+              "english": "Options",
+              "children": []
+            }
+          ]
+        },
+        {
+          "name": "DataTable1",
+          "caption": "数据表",
+          "english": "Data Table",
+          "children": [
+            {
+              "name": "DataTableReport1",
+              "caption": "报表",
+              "english": "Report",
+              "children": []
+            },
+            {
+              "name": "DataTableSpreadsheet1",
+              "caption": "电子表格",
+              "english": "Spreadsheet",
+              "children": []
+            }
+          ]
+        },
+        {
+          "name": "ParameterBlock1",
+          "caption": "参数块",
+          "english": "Parameter Block",
+          "children": []
+        },
+        {
+          "name": "MethodLog1",
+          "caption": "方法日志",
+          "english": "Method Log",
+          "children": []
+        },
+        {
+          "name": "AnalysisLog1",
+          "caption": "分析日志",
+          "english": "Analysis Log",
+          "children": []
+        },
+        {
+          "name": "AuditTrail1",
+          "caption": "审计追踪",
+          "english": "Audit Trail",
+          "children": []
+        },
+        {
+          "name": "CurrentMacroReport1",
+          "caption": "当前宏报表",
+          "english": "Current Macro Report",
+          "children": []
+        },
+        {
+          "name": "AutoqueueReport1",
+          "caption": "自动队列报表",
+          "english": "Autoqueue Report",
+          "children": []
+        },
+        {
+          "name": "AutoqueueLog1",
+          "caption": "自动队列日志",
+          "english": "Autoqueue Log",
+          "children": []
+        },
+        {
+          "name": "N23",
+          "caption": "-",
+          "children": []
+        },
+        {
+          "name": "ReportEditor1",
+          "caption": "报表编辑器",
+          "english": "Report Editor",
+          "children": []
+        },
+        {
+          "name": "Spreadsheet1",
+          "caption": "电子表格",
+          "english": "Spreadsheet",
+          "children": []
+        },
+        {
+          "name": "CustomReport1",
+          "caption": "自定义报表",
+          "english": "Custom Report",
+          "children": [
+            {
+              "name": "New3",
+              "caption": "新建",
+              "english": "New",
+              "children": []
+            },
+            {
+              "name": "Edit2",
+              "caption": "编辑",
+              "english": "Edit",
+              "children": []
+            },
+            {
+              "name": "N29",
+              "caption": "-",
+              "children": []
+            },
+            {
+              "name": "RMoreReports",
+              "caption": "RMore Reports",
+              "english": "RMore Reports",
+              "children": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Macros1",
+      "caption": "宏",
+      "english": "Macros",
+      "children": [
+        {
+          "name": "New1",
+          "caption": "新建",
+          "english": "New",
+          "children": []
+        },
+        {
+          "name": "Open2",
+          "caption": "打开",
+          "english": "Open",
+          "children": []
+        },
+        {
+          "name": "Copy1",
+          "caption": "复制",
+          "english": "Copy",
+          "children": [
+            {
+              "name": "MCopyLog",
+              "caption": "MCopy Log",
+              "english": "MCopy Log",
+              "children": []
+            }
+          ]
+        },
+        {
+          "name": "Import1",
+          "caption": "导入",
+          "english": "Import",
+          "children": []
+        },
+        {
+          "name": "Delete1",
+          "caption": "删除",
+          "english": "Delete",
+          "children": []
+        },
+        {
+          "name": "DeleteAll1",
+          "caption": "全部删除",
+          "english": "Delete All",
+          "children": []
+        },
+        {
+          "name": "Information1",
+          "caption": "信息",
+          "english": "Information",
+          "children": []
+        },
+        {
+          "name": "N24",
+          "caption": "-",
+          "children": []
+        },
+        {
+          "name": "NewFile1",
+          "caption": "新建文件",
+          "english": "New File",
+          "children": []
+        },
+        {
+          "name": "LoadFile1",
+          "caption": "加载文件",
+          "english": "Load File",
+          "children": []
+        },
+        {
+          "name": "SaveFile1",
+          "caption": "保存文件",
+          "english": "Save File",
+          "children": []
+        },
+        {
+          "name": "SaveFileAs1",
+          "caption": "文件另存为",
+          "english": "Save File As",
+          "children": []
+        },
+        {
+          "name": "N21",
+          "caption": "-",
+          "children": []
+        },
+        {
+          "name": "CaptureOn1",
+          "caption": "捕捉开启",
+          "english": "Capture On",
+          "children": [],
+          "shortcut": "Ctrl+T"
+        },
+        {
+          "name": "Run1",
+          "caption": "运行",
+          "english": "Run",
+          "children": [],
+          "shortcut": "Ctrl+R"
+        },
+        {
+          "name": "SingleStep1",
+          "caption": "单步",
+          "english": "Single Step",
+          "children": [],
+          "shortcut": "Ctrl+G"
+        },
+        {
+          "name": "Execute1",
+          "caption": "执行",
+          "english": "Execute",
+          "children": []
+        },
+        {
+          "name": "Stop1",
+          "caption": "止点",
+          "english": "Stop",
+          "children": []
+        },
+        {
+          "name": "N22",
+          "caption": "-",
+          "children": []
+        },
+        {
+          "name": "MacroEditor1",
+          "caption": "宏编辑器",
+          "english": "Macro Editor",
+          "children": [],
+          "shortcut": "Ctrl+E"
+        },
+        {
+          "name": "Autoqueue1",
+          "caption": "自动队列",
+          "english": "Autoqueue",
+          "children": [],
+          "shortcut": "Ctrl+Q"
+        }
+      ]
+    },
+    {
+      "name": "Window1",
+      "caption": "窗口",
+      "english": "Window",
+      "children": [
+        {
+          "name": "Tile1",
+          "caption": "平铺",
+          "english": "Tile",
+          "children": []
+        },
+        {
+          "name": "Cascade1",
+          "caption": "层叠",
+          "english": "Cascade",
+          "children": []
+        },
+        {
+          "name": "ArrangeIcons1",
+          "caption": "排列图标",
+          "english": "Arrange Icons",
+          "children": []
+        },
+        {
+          "name": "StayOnTop1",
+          "caption": "总在最前",
+          "english": "Stay On Top",
+          "children": []
+        },
+        {
+          "name": "N35",
+          "caption": "-",
+          "children": []
+        },
+        {
+          "name": "MoreWindows1",
+          "caption": "更多窗口",
+          "english": "More Windows",
+          "children": []
+        }
+      ]
+    },
+    {
+      "name": "Help1",
+      "caption": "帮助",
+      "english": "Help",
+      "children": [
+        {
+          "name": "HelpTopics1",
+          "caption": "帮助主题",
+          "english": "Help Topics",
+          "children": []
+        },
+        {
+          "name": "HowTo1",
+          "caption": "How To",
+          "english": "How To",
+          "children": []
+        },
+        {
+          "name": "GettingStartedGuide1",
+          "caption": "入门指南",
+          "english": "Getting Started Guide",
+          "children": []
+        },
+        {
+          "name": "Glossary1",
+          "caption": "词汇表",
+          "english": "Glossary",
+          "children": []
+        },
+        {
+          "name": "N16",
+          "caption": "-",
+          "children": []
+        },
+        {
+          "name": "AboutUniversalAnalysis1",
+          "caption": "关于 Universal Analysis / TMA Studio",
+          "english": "About Universal Analysis",
+          "children": []
+        }
+      ]
+    }
+  ],
+  "buttons": [
+    {
+      "name": "OpenDataFileButton",
+      "menu": "Open1",
+      "image_index": 1,
+      "caption": "打开",
+      "static_visible": false
+    },
+    {
+      "name": "ReopenDataFileButton",
+      "menu": "Reopen1",
+      "image_index": 2,
+      "caption": "重新打开",
+      "static_visible": false
+    },
+    {
+      "name": "CloseDataFileButton",
+      "menu": "Close1",
+      "image_index": 3,
+      "caption": "关闭",
+      "static_visible": false
+    },
+    {
+      "name": "CloseAllFilesButton",
+      "menu": "CloseAll1",
+      "image_index": 4,
+      "caption": "全部关闭",
+      "static_visible": false
+    },
+    {
+      "name": "RemoveSavedAnalysisButton",
+      "menu": "RemoveAnalysis1",
+      "image_index": 5,
+      "caption": "删除分析",
+      "static_visible": false
+    },
+    {
+      "name": "SaveAnalysisOnlyButton",
+      "menu": "AnalysisOnly1",
+      "image_index": 147,
+      "caption": "仅分析",
+      "static_visible": false
+    },
+    {
+      "name": "SaveAnalysisAndDataButton",
+      "menu": "AnalysisAndData1",
+      "image_index": 6,
+      "caption": "分析和数据",
+      "static_visible": false
+    },
+    {
+      "name": "SaveSessionButton",
+      "menu": "SaveSession1",
+      "image_index": 7,
+      "caption": "保存会话",
+      "static_visible": false
+    },
+    {
+      "name": "EditParamBlockButton",
+      "menu": "EditParamBlock1",
+      "image_index": 8,
+      "caption": "编辑参数块",
+      "static_visible": false
+    },
+    {
+      "name": "MainOptionsButton",
+      "menu": "MainOptions1",
+      "image_index": 9,
+      "caption": "选项",
+      "static_visible": false
+    },
+    {
+      "name": "ExportPlotButton",
+      "menu": "ExportPlot1",
+      "image_index": 10,
+      "caption": "导出绘图",
+      "static_visible": false
+    },
+    {
+      "name": "ExportPDFFileButton",
+      "menu": "ExportPDFFile1",
+      "image_index": 143,
+      "caption": "导出 PDF 文件",
+      "static_visible": false
+    },
+    {
+      "name": "ExportTTSSignalsButton",
+      "menu": "ExportTTSSignals1",
+      "image_index": 11,
+      "caption": "ExportTTSSignalsButton",
+      "static_visible": false
+    },
+    {
+      "name": "ExportFileSignalsOnlyButton",
+      "menu": "ExportFileSignalsOnly1",
+      "image_index": 12,
+      "caption": "ExportFileSignalsOnlyButton",
+      "static_visible": false
+    },
+    {
+      "name": "ExportPlotSignalsOnlyButton",
+      "menu": "ExportPlotSignalsOnly1",
+      "image_index": 13,
+      "caption": "ExportPlotSignalsOnlyButton",
+      "static_visible": false
+    },
+    {
+      "name": "ExportFileAndPlotSignalsButton",
+      "menu": "ExportFileAndPlotSignals1",
+      "image_index": 14,
+      "caption": "ExportFileAndPlotSignalsButton",
+      "static_visible": false
+    },
+    {
+      "name": "PrintButton",
+      "menu": "Print1",
+      "image_index": 15,
+      "caption": "打印",
+      "static_visible": false
+    },
+    {
+      "name": "PrintSetupButton",
+      "menu": "PrintSetup1",
+      "image_index": 16,
+      "caption": "打印设置",
+      "static_visible": false
+    },
+    {
+      "name": "PrintPreviewButton",
+      "menu": "PrintPreview1",
+      "image_index": 17,
+      "caption": "打印预览",
+      "static_visible": false
+    },
+    {
+      "name": "LoginLogoutButton",
+      "menu": "LoginLogout1",
+      "image_index": 144,
+      "caption": "登录",
+      "static_visible": false
+    },
+    {
+      "name": "ExitProgramButton",
+      "menu": "Exit1",
+      "image_index": 18,
+      "caption": "退出",
+      "static_visible": false
+    },
+    {
+      "name": "CopyButton",
+      "menu": "Copy3",
+      "image_index": 119,
+      "caption": "复制",
+      "static_visible": false
+    },
+    {
+      "name": "CopyPlotButton",
+      "menu": "Copy3",
+      "image_index": 19,
+      "caption": "复制",
+      "static_visible": false
+    },
+    {
+      "name": "PasteButton",
+      "menu": "Paste1",
+      "image_index": 120,
+      "caption": "粘贴",
+      "static_visible": false
+    },
+    {
+      "name": "SelectAllButton",
+      "menu": "SelectAll1",
+      "image_index": 121,
+      "caption": "全选",
+      "static_visible": false
+    },
+    {
+      "name": "SelectAllLabelsButton",
+      "menu": "SelectAllLabels1",
+      "image_index": 20,
+      "caption": "SelectAllLabelsButton",
+      "static_visible": false
+    },
+    {
+      "name": "AnnotatePlotButton",
+      "menu": "Annotate1",
+      "image_index": 21,
+      "caption": "批注",
+      "static_visible": false
+    },
+    {
+      "name": "FileInformationButton",
+      "menu": "FileInformation1",
+      "image_index": 141,
+      "caption": "文件信息",
+      "static_visible": false
+    },
+    {
+      "name": "AddScaleBarButton",
+      "menu": "AddScaleBar1",
+      "image_index": 122,
+      "caption": "添加刻度尺",
+      "static_visible": false
+    },
+    {
+      "name": "AdjustLastResultButton",
+      "menu": "AdjustLastResult1",
+      "image_index": 22,
+      "caption": "调整上一个结果",
+      "static_visible": false
+    },
+    {
+      "name": "DeleteLastResultButton",
+      "menu": "DeleteLastResult1",
+      "image_index": 23,
+      "caption": "DeleteLastResultButton",
+      "static_visible": false
+    },
+    {
+      "name": "DeleteSelectedResultsButton",
+      "menu": "DeleteSelectedResults1",
+      "image_index": 24,
+      "caption": "DeleteSelectedResultsButton",
+      "static_visible": false
+    },
+    {
+      "name": "DeleteAllResultsButton",
+      "menu": "DeleteAllResults1",
+      "image_index": 25,
+      "caption": "DeleteAllResultsButton",
+      "static_visible": false
+    },
+    {
+      "name": "DeleteAxisResultsButton",
+      "menu": "DeleteAxisResults1",
+      "image_index": 26,
+      "caption": "DeleteAxisResultsButton",
+      "static_visible": false
+    },
+    {
+      "name": "ModifyButton",
+      "menu": "Modify1",
+      "image_index": 123,
+      "caption": "修改",
+      "static_visible": false
+    },
+    {
+      "name": "ExcludeDataButton",
+      "menu": "ExcludeData1",
+      "image_index": 27,
+      "caption": "排除数据",
+      "static_visible": false
+    },
+    {
+      "name": "MpxListButton",
+      "menu": "MpxList1",
+      "image_index": 28,
+      "caption": "Multiplexed Signals",
+      "static_visible": false
+    },
+    {
+      "name": "CycleListButton",
+      "menu": "CycleList1",
+      "image_index": 136,
+      "caption": "周期列表",
+      "static_visible": false
+    },
+    {
+      "name": "AnalysisLogCommentButton",
+      "menu": "AnalysisLogComment1",
+      "image_index": 148,
+      "caption": "分析日志注释",
+      "static_visible": false
+    },
+    {
+      "name": "AuditTrailCommentButton",
+      "menu": "AuditTrailComment1",
+      "image_index": 150,
+      "caption": "审计追踪注释",
+      "static_visible": false
+    },
+    {
+      "name": "ManualRescaleButton",
+      "menu": "ManualRescale1",
+      "image_index": 29,
+      "caption": "手动",
+      "static_visible": false
+    },
+    {
+      "name": "ZoomOutButton",
+      "menu": "ZoomOut1",
+      "image_index": 30,
+      "caption": "缩小",
+      "static_visible": false
+    },
+    {
+      "name": "PreviousLimitsButton",
+      "menu": "PreviousLimits1",
+      "image_index": 31,
+      "caption": "前一界限",
+      "static_visible": false
+    },
+    {
+      "name": "FullScaleAxisButton",
+      "menu": "FullScaleAxis1",
+      "image_index": 32,
+      "caption": "坐标轴满刻度",
+      "static_visible": false
+    },
+    {
+      "name": "FullScaleAllButton",
+      "menu": "FullScaleAll1",
+      "image_index": 33,
+      "caption": "全部坐标轴满刻度",
+      "static_visible": false
+    },
+    {
+      "name": "CommonScaleButton",
+      "menu": "CommonScale1",
+      "image_index": 34,
+      "caption": "通用刻度",
+      "static_visible": false
+    },
+    {
+      "name": "SameScaleButton",
+      "menu": "SameScale1",
+      "image_index": 138,
+      "caption": "相同刻度",
+      "static_visible": false
+    },
+    {
+      "name": "StackAxesButton",
+      "menu": "StackAxes1",
+      "image_index": 35,
+      "caption": "坐标轴堆叠",
+      "static_visible": false
+    },
+    {
+      "name": "SpreadSheetViewButton",
+      "menu": "SpreadsheetView1",
+      "image_index": 124,
+      "caption": "电子表格视图",
+      "static_visible": false
+    },
+    {
+      "name": "SignalSelectionButton",
+      "menu": "Signals1",
+      "image_index": 36,
+      "caption": "信号",
+      "static_visible": false
+    },
+    {
+      "name": "UnitsSelectionButton",
+      "menu": "UnitsSelection1",
+      "image_index": 37,
+      "caption": "UnitsSelectionButton",
+      "static_visible": false
+    },
+    {
+      "name": "InstrumentParametersButton",
+      "menu": "InstrumentParameters1",
+      "image_index": 38,
+      "caption": "InstrumentParametersButton",
+      "static_visible": false
+    },
+    {
+      "name": "ParametersSameAsButton",
+      "menu": "ParamsSameAs1",
+      "image_index": 39,
+      "caption": "参数同于",
+      "static_visible": false
+    },
+    {
+      "name": "FullRangeLimitsButton",
+      "menu": "FullRangeLimits1",
+      "image_index": 40,
+      "caption": "全范围",
+      "static_visible": false
+    },
+    {
+      "name": "CursorLimitsButton",
+      "menu": "CursorLimits1",
+      "image_index": 41,
+      "caption": "图形界限",
+      "static_visible": false
+    },
+    {
+      "name": "TimeLimitsButton",
+      "menu": "TimeLimits1",
+      "image_index": 42,
+      "caption": "时间",
+      "static_visible": false
+    },
+    {
+      "name": "TemperatureLimitsButton",
+      "menu": "TemperatureLimits1",
+      "image_index": 43,
+      "caption": "温度",
+      "static_visible": false
+    },
+    {
+      "name": "CycleLimitsButton",
+      "menu": "CycleLimits1",
+      "image_index": 44,
+      "caption": "周期",
+      "static_visible": false
+    },
+    {
+      "name": "RefreshDataButton",
+      "menu": "RefreshData1",
+      "image_index": 135,
+      "caption": "RefreshDataButton",
+      "static_visible": false
+    },
+    {
+      "name": "RefreshPlotButton",
+      "menu": "RefreshPlot1",
+      "image_index": 45,
+      "caption": "RefreshPlotButton",
+      "static_visible": false
+    },
+    {
+      "name": "XAxisTimeButton",
+      "menu": "XAxisTime1",
+      "image_index": 46,
+      "caption": "XAxisTimeButton",
+      "static_visible": false
+    },
+    {
+      "name": "XAxisTemperatureButton",
+      "menu": "XAxisTemperature1",
+      "image_index": 47,
+      "caption": "XAxisTemperatureButton",
+      "static_visible": false
+    },
+    {
+      "name": "XAxisXSignalButton",
+      "menu": "XAxisXSignal1",
+      "image_index": 48,
+      "caption": "XAxisXSignalButton",
+      "static_visible": false
+    },
+    {
+      "name": "SelectCurveButton",
+      "menu": "Curve1",
+      "image_index": 49,
+      "caption": "曲线",
+      "static_visible": false
+    },
+    {
+      "name": "OverlayAutoConfigureButton",
+      "menu": "AutoConfigure1",
+      "image_index": 50,
+      "caption": "自动配置",
+      "static_visible": false
+    },
+    {
+      "name": "OverlayManualSetupButton",
+      "menu": "ManualSetup1",
+      "image_index": 51,
+      "caption": "手动设置",
+      "static_visible": false
+    },
+    {
+      "name": "OverlayEditButton",
+      "menu": "OverlayEdit1",
+      "image_index": 137,
+      "caption": "OverlayEditButton",
+      "static_visible": false
+    },
+    {
+      "name": "OverlayCopyButton",
+      "menu": "OverlayCopy1",
+      "image_index": 142,
+      "caption": "OverlayCopyButton",
+      "static_visible": false
+    },
+    {
+      "name": "ShowOverlayPlotButton",
+      "menu": "ShowOverlayPlot1",
+      "image_index": 52,
+      "caption": "显示叠加绘图",
+      "static_visible": false
+    },
+    {
+      "name": "ShowNormalPlotButton",
+      "menu": "ShowNormalPlot1",
+      "image_index": 134,
+      "caption": "显示正常绘图",
+      "static_visible": true
+    },
+    {
+      "name": "PlotHeaderSetupButton",
+      "menu": "PlotHeaderSetup1",
+      "image_index": 129,
+      "caption": "PlotHeaderSetupButton",
+      "static_visible": false
+    },
+    {
+      "name": "PlotLegendSetupButton",
+      "menu": "PlotLegendSetup1",
+      "image_index": 53,
+      "caption": "PlotLegendSetupButton",
+      "static_visible": false
+    },
+    {
+      "name": "InsetViewButton",
+      "menu": "InsetView1",
+      "image_index": 125,
+      "caption": "插入视图",
+      "static_visible": false
+    },
+    {
+      "name": "GraphOptionsButton",
+      "menu": "GraphOptions1",
+      "image_index": 54,
+      "caption": "曲线图选项",
+      "static_visible": false
+    },
+    {
+      "name": "WeightChangeButton",
+      "menu": "WeightChange1",
+      "image_index": 55,
+      "caption": "重量变化",
+      "static_visible": false
+    },
+    {
+      "name": "TempAtWeightPercentButton",
+      "menu": "TempAtWeightPercent1",
+      "image_index": 56,
+      "caption": "温度于重量%",
+      "static_visible": false
+    },
+    {
+      "name": "TimeAtWeightPercentButton",
+      "menu": "TimeAtWeightPercent1",
+      "image_index": 57,
+      "caption": "时间于重量%",
+      "static_visible": false
+    },
+    {
+      "name": "WeightAtTempButton",
+      "menu": "WeightAtTemp1",
+      "image_index": 58,
+      "caption": "重量于温度",
+      "static_visible": false
+    },
+    {
+      "name": "WeightAtTimeButton",
+      "menu": "WeightAtTime1",
+      "image_index": 59,
+      "caption": "重量于时间",
+      "static_visible": false
+    },
+    {
+      "name": "WeightLossTempButton",
+      "menu": "WeightLossTemp1",
+      "image_index": 60,
+      "caption": "重量损失温度",
+      "static_visible": false
+    },
+    {
+      "name": "WeightLossTimeButton",
+      "menu": "WeightLossTime1",
+      "image_index": 61,
+      "caption": "重量损失时间",
+      "static_visible": false
+    },
+    {
+      "name": "ResidueButton",
+      "menu": "Residue1",
+      "image_index": 62,
+      "caption": "残余",
+      "static_visible": false
+    },
+    {
+      "name": "ModSizeManualLimitsButton",
+      "menu": "ModSizeManualLimits1",
+      "image_index": 63,
+      "caption": "ModSizeManualLimitsButton",
+      "static_visible": false
+    },
+    {
+      "name": "ModSizeGraphicLimitsButton",
+      "menu": "ModSizeGraphicLimits1",
+      "image_index": 64,
+      "caption": "ModSizeGraphicLimitsButton",
+      "static_visible": false
+    },
+    {
+      "name": "ModSizeGraphicStartButton",
+      "menu": "ModSizeGraphicStart1",
+      "image_index": 65,
+      "caption": "ModSizeGraphicStartButton",
+      "static_visible": false
+    },
+    {
+      "name": "ModSizeGraphicFinishButton",
+      "menu": "ModSizeGraphicFinish1",
+      "image_index": 66,
+      "caption": "ModSizeGraphicFinishButton",
+      "static_visible": false
+    },
+    {
+      "name": "AlphaAtXButton",
+      "menu": "AlphaAtX1",
+      "image_index": 67,
+      "caption": "Alpha于X",
+      "static_visible": false
+    },
+    {
+      "name": "AlphaX1ToX2Button",
+      "menu": "AlphaX1ToX21",
+      "image_index": 68,
+      "caption": "Alpha X1 至 X2",
+      "static_visible": false
+    },
+    {
+      "name": "AlphaFitX1ToX2Button",
+      "menu": "AlphaFitX1ToX21",
+      "image_index": 69,
+      "caption": "线性拟合Alpha X1 至 X2",
+      "static_visible": false
+    },
+    {
+      "name": "DimensionChangeButton",
+      "menu": "DimensionChange1",
+      "image_index": 70,
+      "caption": "尺寸变化",
+      "static_visible": false
+    },
+    {
+      "name": "ResetSizeButton",
+      "menu": "ResetSize1",
+      "image_index": 153,
+      "caption": "重设大小",
+      "static_visible": false
+    },
+    {
+      "name": "IntegrateLinearButton",
+      "menu": "Linear1",
+      "image_index": 71,
+      "caption": "线性",
+      "static_visible": false
+    },
+    {
+      "name": "IntegrateSigHorizontalButton",
+      "menu": "SigHorizontal1",
+      "image_index": 72,
+      "caption": "水平 S 形曲线",
+      "static_visible": false
+    },
+    {
+      "name": "IntegrateSigTangentButton",
+      "menu": "IntegrateSigTangent1",
+      "image_index": 73,
+      "caption": "IntegrateSigTangentButton",
+      "static_visible": false
+    },
+    {
+      "name": "IntegrateExtrapolatedButton",
+      "menu": "IntegrateExtrapolated1",
+      "image_index": 74,
+      "caption": "IntegrateExtrapolatedButton",
+      "static_visible": false
+    },
+    {
+      "name": "IntegratePerpDropButton",
+      "menu": "IntegratePerpDrop1",
+      "image_index": 75,
+      "caption": "IntegratePerpDropButton",
+      "static_visible": false
+    },
+    {
+      "name": "IntegrateTangentButton",
+      "menu": "IntegrateTangent1",
+      "image_index": 76,
+      "caption": "IntegrateTangentButton",
+      "static_visible": false
+    },
+    {
+      "name": "IntegrateDeletePeakButton",
+      "menu": "IntegrateDeletePeak1",
+      "image_index": 77,
+      "caption": "IntegrateDeletePeakButton",
+      "static_visible": false
+    },
+    {
+      "name": "IntegrateRunningIntegralButton",
+      "menu": "IntegrateRunningIntegral1",
+      "image_index": 78,
+      "caption": "IntegrateRunningIntegralButton",
+      "static_visible": false
+    },
+    {
+      "name": "PeakMaximumButton",
+      "menu": "PeakMax1",
+      "image_index": 79,
+      "caption": "峰最大",
+      "static_visible": false
+    },
+    {
+      "name": "SignalMaximumButton",
+      "menu": "SignalMax1",
+      "image_index": 80,
+      "caption": "信号最大",
+      "static_visible": false
+    },
+    {
+      "name": "SignalChangeButton",
+      "menu": "SignalChange1",
+      "image_index": 152,
+      "caption": "信号变化",
+      "static_visible": false
+    },
+    {
+      "name": "GlassStepTransitionButton",
+      "menu": "GlassTransition1",
+      "image_index": 81,
+      "caption": "玻璃化转变",
+      "static_visible": false
+    },
+    {
+      "name": "OnsetPointButton",
+      "menu": "OnsetPoint1",
+      "image_index": 82,
+      "caption": "始点",
+      "static_visible": false
+    },
+    {
+      "name": "OxidationTimeButton",
+      "menu": "OxidationTime1",
+      "image_index": 83,
+      "caption": "氧化时间",
+      "static_visible": false
+    },
+    {
+      "name": "OxidationTemperatureButton",
+      "menu": "OxidationTemperature1",
+      "image_index": 84,
+      "caption": "OxidationTemperatureButton",
+      "static_visible": false
+    },
+    {
+      "name": "AnalyzePurityButton",
+      "menu": "AnalyzePurity1",
+      "image_index": 139,
+      "caption": "Analyze Purity",
+      "static_visible": false
+    },
+    {
+      "name": "PurityOptionsButton",
+      "menu": "PurityOptions1",
+      "image_index": 140,
+      "caption": "纯度选项",
+      "static_visible": false
+    },
+    {
+      "name": "SorptionIsothermButton",
+      "menu": "SorptionIsotherm1",
+      "image_index": 154,
+      "caption": "恒温吸附",
+      "static_visible": false
+    },
+    {
+      "name": "BETAnalysisButton",
+      "menu": "BETAnalysis1",
+      "image_index": 155,
+      "caption": "BETAnalysis",
+      "static_visible": false
+    },
+    {
+      "name": "GABAnalysisButton",
+      "menu": "GABAnalysis1",
+      "image_index": 156,
+      "caption": "GABAnalysis",
+      "static_visible": false
+    },
+    {
+      "name": "MarkAdsorptionButton",
+      "menu": "MarkAdsorption1",
+      "image_index": 158,
+      "caption": "标记吸附",
+      "static_visible": true
+    },
+    {
+      "name": "MarkDesorptionButton",
+      "menu": "MarkDesorption1",
+      "image_index": 159,
+      "caption": "标记解吸附",
+      "static_visible": true
+    },
+    {
+      "name": "HumidityOptionsButton",
+      "menu": "HumidityOptions1",
+      "image_index": 157,
+      "caption": "湿度选项",
+      "static_visible": false
+    },
+    {
+      "name": "SlopeButton",
+      "menu": "Slope1",
+      "image_index": 85,
+      "caption": "斜率",
+      "static_visible": false
+    },
+    {
+      "name": "RunningIntegralButton",
+      "menu": "RunningIntegral1",
+      "image_index": 86,
+      "caption": "执行积分",
+      "static_visible": false
+    },
+    {
+      "name": "CurveValueAtXButton",
+      "menu": "CurveValueAtX1",
+      "image_index": 87,
+      "caption": "曲线值于X 轴",
+      "static_visible": false
+    },
+    {
+      "name": "CurveValueAtYButton",
+      "menu": "CurveValueAtY1",
+      "image_index": 88,
+      "caption": "曲线值于Y 轴",
+      "static_visible": false
+    },
+    {
+      "name": "LabelAtXYButton",
+      "menu": "LabelAtXY1",
+      "image_index": 89,
+      "caption": "在 X 和 Y 轴标值",
+      "static_visible": false
+    },
+    {
+      "name": "AnalysisRangeFullButton",
+      "menu": "AnalysisRangeFull1",
+      "image_index": 90,
+      "caption": "AnalysisRangeFullButton",
+      "static_visible": false
+    },
+    {
+      "name": "AnalysisRangeEnterLimitsButton",
+      "menu": "AnalysisRangeEnterLimits1",
+      "image_index": 91,
+      "caption": "AnalysisRangeEnterLimitsButton",
+      "static_visible": false
+    },
+    {
+      "name": "AnalysisRangeSelectCycleButton",
+      "menu": "AnalysisRangeSelectCycle1",
+      "image_index": 92,
+      "caption": "AnalysisRangeSelectCycleButton",
+      "static_visible": false
+    },
+    {
+      "name": "AnalysisRangeSelectMpxButton",
+      "menu": "AnalysisRangeSelectMpx1",
+      "image_index": 93,
+      "caption": "AnalysisRangeSelectMpxButton",
+      "static_visible": false
+    },
+    {
+      "name": "ExecuteMacroButton",
+      "menu": "ExecuteMacro1",
+      "image_index": 94,
+      "caption": "ExecuteMacroButton",
+      "static_visible": false
+    },
+    {
+      "name": "AnalysisOptionsButton",
+      "menu": "AnalysisOptions1",
+      "image_index": 95,
+      "caption": "分析选项",
+      "static_visible": false
+    },
+    {
+      "name": "SmoothCurveButton",
+      "menu": "Smooth1",
+      "image_index": 96,
+      "caption": "平滑",
+      "static_visible": false
+    },
+    {
+      "name": "ShiftCurveButton",
+      "menu": "Shift1",
+      "image_index": 97,
+      "caption": "平移",
+      "static_visible": false
+    },
+    {
+      "name": "RotateCurveButton",
+      "menu": "RotateCurve1",
+      "image_index": 98,
+      "caption": "RotateCurveButton",
+      "static_visible": false
+    },
+    {
+      "name": "DesmearCurveButton",
+      "menu": "DesmearCurve1",
+      "image_index": 146,
+      "caption": "DesmearCurveButton",
+      "static_visible": false
+    },
+    {
+      "name": "AnalyzeSensitivityButton",
+      "menu": "AnalyzeSensitivity1",
+      "image_index": 151,
+      "caption": "AnalyzeSensitivityButton",
+      "static_visible": false
+    },
+    {
+      "name": "LinearYTransformButton",
+      "menu": "LinearYTransform1",
+      "image_index": 99,
+      "caption": "LinearYTransformButton",
+      "static_visible": false
+    },
+    {
+      "name": "LinearXTransformButton",
+      "menu": "LinearXTransform1",
+      "image_index": 100,
+      "caption": "LinearXTransformButton",
+      "static_visible": false
+    },
+    {
+      "name": "RemoveShiftsButton",
+      "menu": "RemoveShifts1",
+      "image_index": 101,
+      "caption": "删除平移",
+      "static_visible": false
+    },
+    {
+      "name": "SelectBaselineFileButton",
+      "menu": "SelectBaselineFile1",
+      "image_index": 102,
+      "caption": "SelectBaselineFileButton",
+      "static_visible": false
+    },
+    {
+      "name": "ResultsReportButton",
+      "menu": "ResultsReport1",
+      "image_index": 103,
+      "caption": "报表",
+      "static_visible": false
+    },
+    {
+      "name": "ResultsSpreadsheetButton",
+      "menu": "ResultsSpreadsheet1",
+      "image_index": 126,
+      "caption": "电子表格",
+      "static_visible": false
+    },
+    {
+      "name": "ResultsOptionsButton",
+      "menu": "ResultsOptions1",
+      "image_index": 130,
+      "caption": "选项",
+      "static_visible": false
+    },
+    {
+      "name": "DataTableReportButton",
+      "menu": "DataTableReport1",
+      "image_index": 104,
+      "caption": "报表",
+      "static_visible": false
+    },
+    {
+      "name": "DataTableSpreadsheetButton",
+      "menu": "DataTableSpreadsheet1",
+      "image_index": 127,
+      "caption": "电子表格",
+      "static_visible": false
+    },
+    {
+      "name": "ParameterBlockReportButton",
+      "menu": "ParameterBlockReport1",
+      "image_index": 105,
+      "caption": "ParameterBlockReportButton",
+      "static_visible": false
+    },
+    {
+      "name": "MethodLogReportButton",
+      "menu": "MethodLogReport1",
+      "image_index": 106,
+      "caption": "MethodLogReportButton",
+      "static_visible": false
+    },
+    {
+      "name": "AnalysisLogReportButton",
+      "menu": "AnalysisLogReport1",
+      "image_index": 145,
+      "caption": "AnalysisLogReportButton",
+      "static_visible": false
+    },
+    {
+      "name": "ViewAuditTrailButton",
+      "menu": "ViewAuditTrail1",
+      "image_index": 149,
+      "caption": "ViewAuditTrailButton",
+      "static_visible": false
+    },
+    {
+      "name": "CurrentMacroReportButton",
+      "menu": "CurrentMacroReport1",
+      "image_index": 107,
+      "caption": "当前宏报表",
+      "static_visible": false
+    },
+    {
+      "name": "AutoqueueReportButton",
+      "menu": "AutoqueueReport1",
+      "image_index": 108,
+      "caption": "自动队列报表",
+      "static_visible": false
+    },
+    {
+      "name": "AutoqueueLogReportButton",
+      "menu": "AutoqueueLogReport1",
+      "image_index": 109,
+      "caption": "AutoqueueLogReportButton",
+      "static_visible": false
+    },
+    {
+      "name": "ReportEditorButton",
+      "menu": "ReportEditor1",
+      "image_index": 110,
+      "caption": "报表编辑器",
+      "static_visible": false
+    },
+    {
+      "name": "SpreadsheetButton",
+      "menu": "Spreadsheet1",
+      "image_index": 128,
+      "caption": "电子表格",
+      "static_visible": false
+    },
+    {
+      "name": "CustomReportNewButton",
+      "menu": "CustomReportNew1",
+      "image_index": 131,
+      "caption": "CustomReportNewButton",
+      "static_visible": false
+    },
+    {
+      "name": "CustomReportEditButton",
+      "menu": "CustomReportEdit1",
+      "image_index": 132,
+      "caption": "CustomReportEditButton",
+      "static_visible": false
+    },
+    {
+      "name": "CustomReportsButton",
+      "menu": "CustomReports1",
+      "image_index": 133,
+      "caption": "CustomReportsButton",
+      "static_visible": false
+    },
+    {
+      "name": "MacroEditorButton",
+      "menu": "MacroEditor1",
+      "image_index": 111,
+      "caption": "宏编辑器",
+      "static_visible": false
+    },
+    {
+      "name": "AutoqueueButton",
+      "menu": "Autoqueue1",
+      "image_index": 112,
+      "caption": "自动队列",
+      "static_visible": false
+    },
+    {
+      "name": "TileButton",
+      "menu": "Tile1",
+      "image_index": 113,
+      "caption": "平铺",
+      "static_visible": false
+    },
+    {
+      "name": "CascadeButton",
+      "menu": "Cascade1",
+      "image_index": 114,
+      "caption": "层叠",
+      "static_visible": false
+    },
+    {
+      "name": "ArrangeIconsButton",
+      "menu": "ArrangeIcons1",
+      "image_index": 115,
+      "caption": "排列图标",
+      "static_visible": false
+    },
+    {
+      "name": "HelpTopicsButton",
+      "menu": "HelpTopics1",
+      "image_index": 116,
+      "caption": "帮助主题",
+      "static_visible": false
+    },
+    {
+      "name": "UserManualButton",
+      "menu": "UserManual1",
+      "image_index": 117,
+      "caption": "UserManualButton",
+      "static_visible": false
+    },
+    {
+      "name": "GlossaryButton",
+      "menu": "Glossary1",
+      "image_index": 118,
+      "caption": "词汇表",
+      "static_visible": false
+    }
+  ]
+}

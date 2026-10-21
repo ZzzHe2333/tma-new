@@ -1,0 +1,16 @@
+__pycache__/
+.pytest_cache/
+.venv/
+build/
+dist/
+*.spec
+*.tmas
+artifacts/
+
+# 运行期日志与临时目录
+*.log
+tmptw8wbkwb/
+fontlist-*.json
+
+# 可再生成的解析中间产物（体积大，不入库）
+analysis/winua_strings.txt
