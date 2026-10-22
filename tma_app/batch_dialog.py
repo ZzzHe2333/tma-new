@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import threading
 import uuid
 
 from PySide6.QtCore import QObject, Qt, Signal, Slot
 from PySide6.QtGui import QColor, QKeySequence
-from PySide6.QtWidgets import (QApplication, QAbstractItemView, QDialog, QFileDialog,
+from PySide6.QtWidgets import (QApplication, QAbstractItemView, QComboBox, QDialog, QFileDialog,
     QHeaderView, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTableWidget,
     QTableWidgetItem, QVBoxLayout)
 
@@ -55,6 +56,8 @@ class BatchJob(QObject):
                     elif self.action == "xlsx":
                         rows, path = request
                         self.emit_result(key, {"xlsx": backend.write_xlsx(rows, path)})
+                    elif self.action == "history":
+                        self.emit_result(key, {"history": backend.save_history(request)})
                 except Exception as exc:
                     self.emit_result(key, {"export_error": str(exc)})
         finally:
@@ -80,6 +83,10 @@ class BatchDialog(QDialog):
         super().__init__(owner)
         self.owner = owner
         self.rows = []
+        self.view_rows = []
+        self.latest_batch_id = None
+        self.history_dirty = False
+        self.view_mode = "latest"
         self.job = None
         self._job_total = 0
         self._job_completed = set()
@@ -94,6 +101,29 @@ class BatchDialog(QDialog):
         self.hint = QLabel("导入即计算 · V233 算法\n温度单位 °C；M 单位 mg；H 单位 µm。M 使用「设置 → 数据路径 → m」，未匹配则留空。")
         self.hint.setWordWrap(True)
         layout.addWidget(self.hint)
+        filters = QHBoxLayout()
+        self.latest_button = QPushButton("本次导入")
+        self.all_button = QPushButton("全部记录")
+        self.issue_button = QPushButton("仅看异常")
+        for button in (self.latest_button, self.all_button, self.issue_button):
+            button.setCheckable(True)
+            button.setFixedHeight(27)
+            filters.addWidget(button)
+        self.latest_button.setObjectName("BatchLatest")
+        self.all_button.setObjectName("BatchAll")
+        self.issue_button.setObjectName("BatchIssues")
+        self.latest_button.clicked.connect(self.show_latest)
+        self.all_button.clicked.connect(self.show_all)
+        self.issue_button.toggled.connect(self.refresh_view)
+        filters.addSpacing(8)
+        filters.addWidget(QLabel("导入批次"))
+        self.batch_filter = QComboBox()
+        self.batch_filter.setObjectName("BatchFilter")
+        self.batch_filter.currentIndexChanged.connect(self.filter_changed)
+        filters.addWidget(self.batch_filter, 1)
+        self.count_label = QLabel("0 条")
+        filters.addWidget(self.count_label)
+        layout.addLayout(filters)
         self.table = ResultsTable(0, 4)
         self.table.setObjectName("BatchResultsTable")
         self.table.setHorizontalHeaderLabels(backend.HEADERS)
@@ -101,6 +131,7 @@ class BatchDialog(QDialog):
         self.table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
         self.table.verticalHeader().setDefaultSectionSize(30)
         self.table.verticalHeader().setFixedWidth(260)
+        self.table.verticalHeader().setStyleSheet("QHeaderView { background: #fcf7fd; }")
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -133,6 +164,14 @@ class BatchDialog(QDialog):
             buttons.addWidget(button)
             setattr(self, name, button)
         layout.addLayout(buttons)
+        try:
+            self.rows = backend.load_history()
+        except (OSError, ValueError) as exc:
+            self.feedback.setText(f"历史记录未载入：{exc}")
+        if self.rows:
+            self.latest_batch_id = self.rows[-1]["batch_id"]
+        self.update_batch_filter()
+        self.refresh_view()
         self.update_buttons()
 
     def choose_files(self):
@@ -157,21 +196,80 @@ class BatchDialog(QDialog):
         except (OSError, ValueError) as exc:
             self.feedback.setText(f"m 路径配置未读取：{exc}")
             source = ""
+        stamp = datetime.now(timezone(timedelta(hours=8))).isoformat(timespec="seconds")
+        batch_id = uuid.uuid4().hex
+        number = len({row["batch_id"] for row in self.rows}) + 1
+        batch_label = f"第 {number} 批 · {stamp[:19].replace('T', ' ')} · {len(paths)} 个文件"
+        self.latest_batch_id = batch_id
         for path in paths:
             row = dict(id=uuid.uuid4().hex, file=path, name=Path(path).name,
-                       state="排队中", mass_config=source, error="", warning="")
+                       state="排队中", mass_config=source, error="", warning="",
+                       batch_id=batch_id, batch_label=batch_label, imported_at=stamp)
             self.rows.append(row)
-            index = self.table.rowCount()
-            self.table.insertRow(index)
-            self.render_row(index)
+        self.history_dirty = True
+        self.update_batch_filter()
+        self.show_latest()
         self.feedback.setText(f"已加入 {len(paths)} 个文件，按导入顺序处理；可继续追加文件。")
         self.start_pending()
+
+    def update_batch_filter(self):
+        previous = self.batch_filter.currentData()
+        self.batch_filter.blockSignals(True)
+        self.batch_filter.clear()
+        self.batch_filter.addItem("全部批次", None)
+        batches = {}
+        for row in self.rows:
+            batches.setdefault(row["batch_id"], row["batch_label"])
+        for key, label in reversed(list(batches.items())):
+            self.batch_filter.addItem(label, key)
+        index = self.batch_filter.findData(previous)
+        self.batch_filter.setCurrentIndex(max(0, index))
+        self.batch_filter.blockSignals(False)
+
+    def show_latest(self):
+        self.view_mode = "latest"
+        self.batch_filter.blockSignals(True)
+        self.batch_filter.setCurrentIndex(max(0, self.batch_filter.findData(self.latest_batch_id)))
+        self.batch_filter.blockSignals(False)
+        self.issue_button.setChecked(False)
+        self.refresh_view()
+
+    def show_all(self):
+        self.view_mode = "all"
+        self.batch_filter.blockSignals(True)
+        self.batch_filter.setCurrentIndex(0)
+        self.batch_filter.blockSignals(False)
+        self.issue_button.setChecked(False)
+        self.refresh_view()
+
+    def filter_changed(self):
+        self.view_mode = "filter" if self.batch_filter.currentData() else "all"
+        self.refresh_view()
+
+    def refresh_view(self):
+        key = self.latest_batch_id if self.view_mode == "latest" else self.batch_filter.currentData()
+        rows = [row for row in self.rows if key is None or row["batch_id"] == key]
+        if self.issue_button.isChecked():
+            rows = [row for row in rows if row.get("error") or row.get("warning") or row.get("export_error") or row["state"] in ("未完成", "已取消")]
+        self.view_rows = rows
+        self.table.setRowCount(0)
+        self.table.setRowCount(len(rows))
+        for index in range(len(rows)):
+            self.render_row(index)
+        self.latest_button.setChecked(self.view_mode == "latest")
+        self.all_button.setChecked(self.view_mode == "all")
+        self.count_label.setText(f"{len(rows)} / {len(self.rows)} 条")
+        self.update_buttons()
 
     def start_pending(self):
         if self.job is not None:
             return
         pending = [row for row in self.rows if row["state"] == "排队中"]
         if not pending:
+            if self.history_dirty:
+                self.history_dirty = False
+                self.start_job(BatchJob("history", [("history", backend.history_snapshot(self.rows))]))
+                return
             self.update_buttons()
             return
         # Separate queues when the weighing source changes between imports.
@@ -197,7 +295,10 @@ class BatchDialog(QDialog):
     def row_ready(self, key, result):
         if self.job is None or self.job.cancelled.is_set():
             return
-        if self.job.action == "xlsx":
+        if self.job.action == "history":
+            if result.get("export_error"):
+                self.feedback.setText("历史记录未保存：" + result["export_error"])
+        elif self.job.action == "xlsx":
             self.feedback.setText("XLSX 已保存：" + result["xlsx"] if "xlsx" in result else "导出失败：" + result.get("export_error", ""))
             self._job_completed.add(key)
         else:
@@ -205,7 +306,13 @@ class BatchDialog(QDialog):
             if index is None:
                 return
             self.rows[index].update(result)
-            self.render_row(index)
+            self.history_dirty = True
+            if self.issue_button.isChecked():
+                self.refresh_view()
+            else:
+                visible = next((i for i, row in enumerate(self.view_rows) if row["id"] == key), None)
+                if visible is not None:
+                    self.render_row(visible)
             if self.job.action == "plot" or result.get("state") in ("完成", "M 未匹配", "读取失败"):
                 self._job_completed.add(key)
         self.progress.setValue(len(self._job_completed))
@@ -222,15 +329,15 @@ class BatchDialog(QDialog):
             elif job.action == "calculate":
                 failed = sum(bool(row.get("error")) for row in self.rows)
                 missing = sum(row.get("state") == "M 未匹配" for row in self.rows)
-                self.feedback.setText(f"共 {len(self.rows)} 个文件；读取失败 {failed} 个；M 未匹配 {missing} 个。选择行后出图/导出/复制；未选择时处理全部行。")
+                self.feedback.setText(f"历史共 {len(self.rows)} 个文件；读取失败 {failed} 个；M 未匹配 {missing} 个。未选中行时，出图/导出/复制仅处理当前筛选结果。")
             job.deleteLater()
         self.progress.hide()
         self.start_pending()
         self.update_buttons()
 
     def render_row(self, index):
-        row = self.rows[index]
-        tooltip = f"{row['file']}\n{row['state']}"
+        row = self.view_rows[index]
+        tooltip = f"{row['batch_label']}\n{row['file']}\n{row['state']}"
         for key in ("error", "warning", "mass_source", "export_error", "png"):
             if row.get(key):
                 tooltip += "\n" + str(row[key])
@@ -249,18 +356,20 @@ class BatchDialog(QDialog):
 
     def selected_rows(self):
         indices = sorted({item.row() for item in self.table.selectedIndexes()})
-        return [self.rows[i] for i in indices] if indices else list(self.rows)
+        return [self.view_rows[i] for i in indices] if indices else list(self.view_rows)
 
     def selection_changed(self):
         indices = sorted({item.row() for item in self.table.selectedIndexes()})
         if not indices:
             return
-        row = self.rows[indices[0]]
+        if indices[0] >= len(self.view_rows):
+            return
+        row = self.view_rows[indices[0]]
         self.feedback.setText(f"已选 {len(indices)} 行 · {row['name']} · {row['state']}" +
                               ("\n" + str(row.get("error") or row.get("warning") or row.get("png") or row["file"])))
 
     def update_buttons(self):
-        ready = bool(self.rows) and self.job is None
+        ready = bool(self.view_rows) and self.job is None
         for button in (self.ExportBatchPlots, self.ExportBatchXlsx, self.CopyBatch):
             button.setEnabled(ready)
         self.CancelBatch.setEnabled(self.job is not None)
@@ -314,11 +423,19 @@ class BatchDialog(QDialog):
     def cancel_processing(self):
         if self.job is not None:
             self.job.cancelled.set()
-        for index, row in enumerate(self.rows):
+        for row in self.rows:
             if row["state"] in ("排队中", "计算中", "匹配 M…"):
                 row["state"] = "已取消"
-                self.render_row(index)
+                self.history_dirty = True
+        self.refresh_view()
         self.feedback.setText("已取消，已完成结果保留；正在进行的文件读取返回后停止。")
+
+    def prepare_shutdown(self):
+        self.cancel_processing()
+        try:
+            backend.save_history(self.rows)
+        except (OSError, ValueError):
+            pass
 
     def reject(self):
         self.cancel_processing()
