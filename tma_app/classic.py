@@ -1113,7 +1113,17 @@ class ClassicMainWindow(MainWindow):
         c = self.selected()
         if c not in curves: c = curves[0] if curves else None
         if c is None: return
-        text, accepted = QInputDialog.getText(self, "批注", "文字")
+        from .mass_lookup import default_note_text
+        dialog = QInputDialog(self)
+        dialog.setWindowTitle("批注")
+        dialog.setLabelText("文字（支持多行）")
+        dialog.setOption(QInputDialog.InputDialogOption.UsePlainTextEditForTextInput)
+        dialog.setTextValue(default_note_text(c.sample_name))
+        dialog.setOkButtonText("确定"); dialog.setCancelButtonText("取消")
+        dialog.setMinimumSize(560, 300); dialog.resize(680, 380)
+        accepted = dialog.exec() == QDialog.DialogCode.Accepted
+        text = dialog.textValue()
+        dialog.deleteLater()
         if not accepted or not text.strip(): return
         axis = self.axes[c.axis]
         # 默认放在鼠标位置；否则放在该坐标轴视图中心（显示像素坐标）。

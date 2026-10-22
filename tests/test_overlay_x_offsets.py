@@ -97,7 +97,10 @@ def test_csv_table_and_status_distinguish_display_spacing_from_source(ui,tmp_pat
 
 def test_notes_anchor_once_and_copy_session_normal_views_preserve_spacing(ui,tmp_path,monkeypatch):
     imported(ui,tmp_path,2);spacing(ui,[8,0,0,0]);curve=ui.selected();source=ui.active_document()
-    monkeypatch.setattr(QInputDialog,"getText",lambda *a:("标记",True))
+    def accept_note(dialog):
+        dialog.setTextValue("标记")
+        return QInputDialog.DialogCode.Accepted
+    monkeypatch.setattr(QInputDialog,"exec",accept_note)
     ui._context_point=ui.axes[0].transData.transform((111,2));ui.add_note();result=deepcopy(ui.results[-1])
     assert result["values"]["x"]==pytest.approx(103)
     note=next(annotation for entry,annotation in ui._result_annotations if entry is ui.results[-1]);assert note.xy[0]==pytest.approx(111)

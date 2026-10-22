@@ -241,3 +241,12 @@ def lookup_record(sample, source=None):
 def lookup_mass(filename):
     """Compatibility wrapper returning the matched source value without unit conversion."""
     return lookup_record(filename).value
+
+
+def default_note_text(sample):
+    match = lookup_record(sample)
+    # The requested note expresses m in mg; unlabelled weighing values use mg.
+    mass = 0.50 if match.value is None else match.value * (1000 if match.unit == 'g' else 1)
+    return ("方法日志：30 ℃ 平衡，施加 0.06 N\n"
+            "                    20 ℃/min加热至 250 ℃\n"
+            f"称取质量：{mass:.2f} mg")
