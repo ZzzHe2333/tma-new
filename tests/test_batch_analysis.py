@@ -198,3 +198,81 @@ def test_bottom_xlsx_and_plot_actions_really_write_outputs(ui, samples, tmp_path
     wait_until(lambda: dialog.job is None)
     assert Path(dialog.rows[0]["png"]).is_file()
     assert not dialog.rows[0].get("export_error")
+
+
+def test_latest_only_all_batches_filter_and_restart(ui, samples):
+    dialog = ui.show_batch_analysis([samples[0], samples[0]])
+    wait_until(lambda: dialog.job is None)
+    first_batch = dialog.latest_batch_id
+    dialog.enqueue_files([samples[-1]])
+    wait_until(lambda: dialog.job is None)
+    assert len(dialog.rows) == 3 and len(dialog.view_rows) == 1
+    assert dialog.table.rowCount() == 1 and dialog.table.columnCount() == 4
+    dialog.all_button.click()
+    assert len(dialog.view_rows) == 3
+    dialog.batch_filter.setCurrentIndex(dialog.batch_filter.findData(first_batch))
+    assert len(dialog.view_rows) == 2
+    dialog.CopyBatch.click()
+    assert len(QApplication.clipboard().text().splitlines()) == 3
+    dialog.latest_button.click()
+    assert len(dialog.view_rows) == 1
+    assert batch.history_path().is_file()
+    stored = batch.load_history()
+    assert len(stored) == 3 and "xs" not in stored[0] and "ys" not in stored[0]
+    from tma_app.batch_dialog import BatchDialog
+    reopened = BatchDialog(ui)
+    assert len(reopened.rows) == 3 and len(reopened.view_rows) == 1
+    reopened.all_button.click()
+    assert len(reopened.view_rows) == 3
+    reopened.close()
+
+
+def test_popup_setting_persists_and_silent_import_still_calculates(ui, samples):
+    from tma_app.path_settings import batch_popup_enabled, load_paths, save_paths
+    dialog = ui.show_path_settings()
+    dialog.batch_popup.setChecked(False)
+    dialog.accept()
+    assert not batch_popup_enabled()
+    save_paths({**load_paths(), "future": "future.csv"})
+    assert not batch_popup_enabled()
+    ui.import_files([samples[0], samples[-1]])
+    batch_dialog = ui.batch_dialog
+    assert not batch_dialog.isVisible()
+    wait_until(lambda: batch_dialog.job is None and ui.worker is None)
+    assert len(batch_dialog.rows) == 2 and all(row.get("T1") is not None for row in batch_dialog.rows)
+    assert ui.show_batch_analysis().isVisible()
+    setting = ui.show_path_settings()
+    assert not setting.batch_popup.isChecked()
+    setting.batch_popup.setChecked(True)
+    setting.accept()
+    assert batch_popup_enabled()
+
+
+def test_saved_history_can_plot_and_rejects_changed_source(samples, tmp_path):
+    local = tmp_path / "local.001"
+    local.write_bytes(samples[0].read_bytes())
+    row = batch.calculate_file(local)
+    row.update(id="row", batch_id="batch", batch_label="first")
+    batch.save_history([row])
+    stored = batch.load_history()[0]
+    assert "xs" not in stored
+    batch.write_plot(stored, tmp_path / "history.png")
+    assert (tmp_path / "history.png").is_file()
+    local.write_bytes(local.read_bytes() + b"changed")
+    with pytest.raises(ValueError, match="已变化"):
+        batch.write_plot(stored, tmp_path / "changed.png")
+
+
+def test_queued_normal_import_adds_exactly_one_batch(ui, samples, monkeypatch):
+    import tma_app.app as app_module
+    read = app_module.read_dataset
+    def slower_read(path):
+        time.sleep(.05)
+        return read(path)
+    monkeypatch.setattr(app_module, "read_dataset", slower_read)
+    ui.import_files([samples[0]])
+    ui.import_files([samples[0], samples[-1]])
+    dialog = ui.batch_dialog
+    wait_until(lambda: ui.worker is None and dialog.job is None)
+    assert len(ui.curves) == 3 and len(dialog.rows) == 2
+    assert len({row["batch_id"] for row in dialog.rows}) == 1

@@ -399,12 +399,12 @@ class MainWindow(QMainWindow):
         if paths:
             self.import_files(paths)
 
-    def import_files(self, paths, synchronous=False):
+    def import_files(self, paths, synchronous=False, *, batch_results=True):
         paths = [str(p) for p in paths]
         if not paths:
             return
         numeric_paths = [p for p in paths if Path(p).suffix[1:].isdigit()]
-        if not synchronous and len(numeric_paths) > 1:
+        if batch_results and not synchronous and len(numeric_paths) > 1:
             from .path_settings import batch_popup_enabled
             self.show_batch_analysis(numeric_paths, popup=batch_popup_enabled())
         if synchronous:
@@ -433,7 +433,7 @@ class MainWindow(QMainWindow):
         self.worker = None
         queued = getattr(self, '_pending_import_paths', [])
         self._pending_import_paths = []
-        if queued: QTimer.singleShot(0, lambda: self.import_files(queued))
+        if queued: QTimer.singleShot(0, lambda: self.import_files(queued, batch_results=False))
 
     def show_batch_analysis(self, paths=None, popup=True):
         from .batch_dialog import BatchDialog
@@ -1427,7 +1427,8 @@ class MainWindow(QMainWindow):
 
 
 def main():
-    verify_mode = len(sys.argv) > 2 and sys.argv[1] == "--verify-launch"
+    batch_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-batch"
+    verify_mode = len(sys.argv) > 2 and sys.argv[1] in ("--verify-launch", "--verify-batch")
     if verify_mode:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     application = QApplication(sys.argv)
@@ -1447,6 +1448,12 @@ def main():
         window.showMaximized()
     else:
         window.show()
+    if batch_verify:
+        from .batch_qa import verify_batch
+        verify_batch(window, Path(sys.argv[2]), [Path(arg) for arg in sys.argv[3:]])
+        window.dirty = False
+        window.close()
+        return
     if verify_mode:
         output = Path(sys.argv[2])
         try:

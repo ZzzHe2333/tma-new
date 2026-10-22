@@ -107,6 +107,7 @@ class BatchDialog(QDialog):
         self.issue_button = QPushButton("仅看异常")
         for button in (self.latest_button, self.all_button, self.issue_button):
             button.setCheckable(True)
+            button.setAutoDefault(False)
             button.setFixedHeight(27)
             filters.addWidget(button)
         self.latest_button.setObjectName("BatchLatest")
@@ -372,7 +373,7 @@ class BatchDialog(QDialog):
         ready = bool(self.view_rows) and self.job is None
         for button in (self.ExportBatchPlots, self.ExportBatchXlsx, self.CopyBatch):
             button.setEnabled(ready)
-        self.CancelBatch.setEnabled(self.job is not None)
+        self.CancelBatch.setEnabled(self.job is not None and self.job.action != "history")
 
     def copy_selection(self):
         if self.job is not None:
@@ -421,7 +422,7 @@ class BatchDialog(QDialog):
         self.start_job(PlotJob("plot", [(row["id"], None) for row in rows]))
 
     def cancel_processing(self):
-        if self.job is not None:
+        if self.job is not None and self.job.action != "history":
             self.job.cancelled.set()
         for row in self.rows:
             if row["state"] in ("排队中", "计算中", "匹配 M…"):
