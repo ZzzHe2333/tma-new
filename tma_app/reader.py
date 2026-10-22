@@ -263,7 +263,8 @@ def read_dataset(path: str | Path) -> Dataset:
     Unrecognized binary layouts raise :class:`ParseError` instead of returning
     plausible-looking guessed data.
     """
-    path = Path(path).expanduser().resolve()
+    from .cloud_storage import resolve_source
+    path = resolve_source(path)
     buf = path.read_bytes()
     if not buf:
         raise ParseError("文件为空")

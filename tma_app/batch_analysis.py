@@ -10,6 +10,8 @@ import os
 import json
 from pathlib import Path
 import tempfile
+import threading
+from functools import wraps
 
 import numpy as np
 from . import piliang_core as original
@@ -18,6 +20,16 @@ from .mass_lookup import lookup_record
 KEYS = ("T1", "T2", "M", "H")
 HEADERS = ("T1 (°C)", "T2 (°C)", "M (mg)", "H (µm)")
 LOGGER = logging.getLogger(__name__)
+_BATCH_LOCK = threading.RLock()
+
+
+def serialized(function):
+    """GUI batch jobs and MCP share algorithm/cache/Agg export operations."""
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        with _BATCH_LOCK:
+            return function(*args, **kwargs)
+    return wrapped
 
 
 def history_path():
@@ -66,12 +78,15 @@ def save_history(rows):
     return str(path)
 
 
+@serialized
 def calculate_file(path):
     """Use exactly the supplied reader, V233 detection and raw interpolation."""
-    path = Path(path).resolve()
-    result = dict(file=str(path), name=path.name, T1=None, T2=None, M=None, H=None,
+    result = dict(file=str(path), name=Path(path).name, T1=None, T2=None, M=None, H=None,
                   error="", warning="", mass_source="", state="计算中", png="")
     try:
+        from .cloud_storage import resolve_source
+        path = resolve_source(path)
+        result.update(file=str(path), name=path.name)
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
         text, read_meta = original.load_text_prefer_tajm(str(path), LOGGER)
         xs, ys, _ = original.extract_xy_from_file(original.parse_lines(text), LOGGER)
@@ -91,6 +106,7 @@ def calculate_file(path):
     return result
 
 
+@serialized
 def match_mass(result, source):
     """Retain file-name matching; configured sources support mg or explicit g."""
     result = dict(result)
@@ -138,6 +154,7 @@ def protect_output(path, rows):
                 raise ValueError("输出不能覆盖原始数据或称量表")
 
 
+@serialized
 def write_xlsx(rows, path):
     """Four numeric columns; file identity/status is stored in cell comments."""
     from openpyxl import Workbook
@@ -145,6 +162,8 @@ def write_xlsx(rows, path):
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.worksheet.table import Table, TableStyleInfo
 
+    from .cloud_storage import touch_path
+    for row in rows: touch_path(row["file"])
     path = Path(path)
     protect_output(path, rows)
     workbook = Workbook()
@@ -211,17 +230,20 @@ def plot_paths(rows, directory):
     return result
 
 
+@serialized
 def write_plot(row, path):
     """V14 cross/temperature/height layout, with the app's white border and credit."""
     from matplotlib.figure import Figure
     from matplotlib.backends.backend_agg import FigureCanvasAgg
     from matplotlib.ticker import MultipleLocator, AutoMinorLocator
 
+    from .cloud_storage import resolve_source
+    source_file = resolve_source(row["file"])
     if row.get("error") or row.get("T1") is None:
         raise ValueError("此文件没有可出图的结果")
     if "xs" not in row or "ys" not in row:
         row = dict(row)
-        source = Path(row["file"])
+        source = source_file
         if hashlib.sha256(source.read_bytes()).hexdigest() != row.get("sha256"):
             raise ValueError("原始文件已变化，请重新导入计算后出图")
         text, _ = original.load_text_prefer_tajm(str(source), LOGGER)

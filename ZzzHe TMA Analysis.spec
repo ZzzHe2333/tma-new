@@ -1,12 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 
+from PyInstaller.utils.hooks import copy_metadata
+
 a = Analysis(
     ['run.py'],
     pathex=[],
     binaries=[],
-    datas=[('tma_app\\assets', 'tma_app\\assets')],
-    hiddenimports=[],
+    datas=[('tma_app\\assets', 'tma_app\\assets')] + copy_metadata('mcp'),
+    hiddenimports=['uvicorn.loops.asyncio', 'uvicorn.protocols.http.h11_impl', 'uvicorn.lifespan.on'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

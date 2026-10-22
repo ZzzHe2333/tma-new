@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from io import BytesIO
 
 import numpy as np
-from PySide6.QtCore import Qt, QSize, Signal, QTimer, QSignalBlocker
+from PySide6.QtCore import Qt, QSize, Signal, QTimer, QSignalBlocker, QEvent
 from PySide6.QtGui import QAction, QColor, QIcon, QPixmap, QFont, QPalette, QImage, QPainter
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -115,6 +115,24 @@ class PlotDocument(QMdiSubWindow):
         self.canvas.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.canvas.customContextMenuRequested.connect(lambda point: owner.show_plot_context_menu(self, point))
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
+        self.mass_normalize_button=QPushButton('统一化',self.canvas)
+        self.mass_normalize_button.setObjectName('MassNormalizeButton')
+        self.mass_normalize_button.setFixedSize(112,28)
+        self.mass_normalize_button.setToolTip('逐条确认 m，将当前叠图换算到 0.50 mg')
+        self.mass_normalize_button.setStyleSheet('QPushButton {background:#dff2eb; color:#4b7770; border:1px solid #bdded2; border-radius:6px;} QPushButton:hover {background:#d1eae0;}')
+        self.mass_normalize_button.setVisible(owner._is_overlay(key))
+        self.mass_normalize_button.clicked.connect(lambda:owner.show_mass_normalization(self))
+        self.canvas.installEventFilter(self)
+        self.position_mass_button()
+
+    def position_mass_button(self):
+        if hasattr(self,'mass_normalize_button'):
+            self.mass_normalize_button.move(max(8,self.canvas.width()-124),32)
+            self.mass_normalize_button.raise_()
+
+    def eventFilter(self,watched,event):
+        if watched is self.canvas and event.type()==QEvent.Type.Resize:self.position_mass_button()
+        return super().eventFilter(watched,event)
 
     def closeEvent(self, event):
         self.closed_document.emit(self)
@@ -136,6 +154,10 @@ class ClassicMainWindow(MainWindow):
         self._last_document=None
         super().__init__()
         self.setStyleSheet(CLASSIC_STYLE)
+        # Style polishing otherwise resets the generic QPushButton minimum
+        # width and lets QToolBar shrink the two text buttons differently.
+        self.batch_processing_button.setFixedSize(112, 24)
+        self.single_report_button.setFixedSize(112, 24)
         self.setPalette(classic_palette())
         self.setWindowTitle(f"{APP_NAME} {__version__}")
         self.setWindowIcon(app_icon())
@@ -217,6 +239,8 @@ class ClassicMainWindow(MainWindow):
         settings_menu = self.menuBar().addMenu("设置")
         settings_menu.addAction("数据路径…", self.show_path_settings).setObjectName("PathSettings1")
         settings_menu.addAction("批量窗口设置…", self.show_path_settings).setObjectName("BatchWindowSettings1")
+        settings_menu.addAction("MCP · AI 连接…", self.show_mcp_settings).setObjectName("McpSettings1")
+        settings_menu.addAction("云盘 · WebDAV…", lambda: self.show_cloud()).setObjectName("CloudSettings1")
 
         def append(parent, item):
             caption, name = item["caption"], item["name"]
@@ -268,6 +292,10 @@ class ClassicMainWindow(MainWindow):
                 report.triggered.connect(self.show_single_report)
                 parent.insertAction(parent.actions()[2], report)
                 self.classic_actions["SingleReport1"] = report
+                cloud = QAction("从云盘导入…", self)
+                cloud.setObjectName("CloudImport1")
+                cloud.triggered.connect(lambda: self.show_cloud())
+                parent.insertAction(parent.actions()[3], cloud)
         height = QAction("高度差", self)
         height.setObjectName("HeightChange")
         height.triggered.connect(lambda: self.start_point_measurement("height_change"))
@@ -350,10 +378,17 @@ class ClassicMainWindow(MainWindow):
             toolbar.addAction(action)
             toolbar.widgetForAction(action).setFixedSize(24, 24)
         toolbar.addSeparator()
+        self.batch_processing_button = QPushButton("批量处理", self)
+        self.batch_processing_button.setObjectName("BatchProcessingButton")
+        self.batch_processing_button.setIcon(action_icon("Signals1"))
+        self.batch_processing_button.setFixedSize(112, 24)
+        self.batch_processing_button.setAutoDefault(False)
+        self.batch_processing_button.clicked.connect(self.show_batch_analysis)
+        toolbar.addWidget(self.batch_processing_button)
         self.single_report_button = QPushButton("单样品报告", self)
         self.single_report_button.setObjectName("SingleReportButton")
         self.single_report_button.setIcon(action_icon("AnalysisOptions1"))
-        self.single_report_button.setFixedHeight(24)
+        self.single_report_button.setFixedSize(112, 24)
         self.single_report_button.setAutoDefault(False)
         self.single_report_button.clicked.connect(self.show_single_report)
         toolbar.addWidget(self.single_report_button)
@@ -700,11 +735,15 @@ class ClassicMainWindow(MainWindow):
         active = self.active_document()
         if not isinstance(active, PlotDocument):
             return
+        self.touch_cloud_usage()
         self._drag_legend = None
         self.figure, self.canvas, self.toolbar = active.figure, active.canvas, active.navigation
         curves = self.visible_curves()
         options = self.plot_options.get(active.key, default_plot_options())
-        signature = (self.domain, tuple((id(c.dataset), c.y_index, c.axis, c.x_shift, c.scale, c.offset,self.display_x_offset(c), id(c.working),tuple(sorted((c.unit_options or {}).items())),
+        if self._is_overlay(active.key):
+            from .mass_normalization import invalidate_incomplete
+            invalidate_incomplete(self,active)
+        signature = (self.domain, tuple((id(c.dataset), c.y_index, c.axis, c.x_shift, c.scale, c.mass_normalization_factor, c.offset,self.display_x_offset(c), id(c.working),tuple(sorted((c.unit_options or {}).items())),
             (c.sample_size_mm,tuple(c.data_indices) if c.data_indices is not None else None) if c.unit_options is not None else None) for c in curves))
         old_limits = {i: (axis.get_xlim(), axis.get_ylim()) for i, axis in active.plot_axes.items()} if active.plot_signature == signature else {}
         MainWindow.redraw(self)
@@ -1310,6 +1349,19 @@ class ClassicMainWindow(MainWindow):
             doc.showMaximized()
             self.mdi.setActiveSubWindow(doc)
             self.document_activated(doc)
+
+    def show_mass_normalization(self,document=None):
+        from .mass_normalization_dialog import MassNormalizationDialog
+        document=document or self.active_document()
+        try:
+            from .mass_normalization import members
+            members(self,document)
+            self._show_document(document.key)
+            dialog=MassNormalizationDialog(self,document)
+        except ValueError as exc:self.warn(str(exc));return
+        self.dialogs['mass_normalization']=dialog
+        dialog.show()
+        return dialog
 
     def document_closed(self, doc):
         if self._syncing_documents:

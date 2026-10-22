@@ -14,7 +14,19 @@ if sys.stderr is None:
     except OSError:
         sys.stderr = open(os.devnull, "w", encoding="utf-8")
 
-from tma_app.app import main
-
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) > 2 and sys.argv[1] == "--verify-cloud-schedule":
+        from tma_app.cloud_qa import verify_scheduled_cleanup
+        sys.exit(0 if verify_scheduled_cleanup(sys.argv[2])["status"] == "passed" else 1)
+    elif "--cloud-cleanup" in sys.argv:
+        if "--cloud-config-folder" in sys.argv:
+            index = sys.argv.index("--cloud-config-folder")
+            folder = Path(sys.argv[index + 1]).resolve()
+            if folder.name != "ZzzHeTMA":
+                raise ValueError("云缓存配置目录名称必须为 ZzzHeTMA")
+            os.environ["LOCALAPPDATA"] = str(folder.parent)
+        from tma_app.cloud_storage import cleanup_main
+        sys.exit(cleanup_main())
+    else:
+        from tma_app.app import main
+        main()

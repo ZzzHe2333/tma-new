@@ -25,7 +25,7 @@ class SettingsDialog(QDialog):
             self.original_paths.setdefault("open_folder", legacy)
         for name, path in {"m": "", "open_folder": "", "particle_folder": "", **self.original_paths}.items(): self.add_row(name, path)
         row = QHBoxLayout()
-        for caption, callback in (("选择文件…", self.choose_file), ("选择文件夹…", self.choose_folder), ("新增路径", self.add_path), ("删除路径", self.remove_path), ("测试 m 匹配", self.test_mass)):
+        for caption, callback in (("选择文件…", self.choose_file), ("云盘文件…", self.choose_cloud_file), ("选择文件夹…", self.choose_folder), ("新增路径", self.add_path), ("删除路径", self.remove_path), ("测试 m 匹配", self.test_mass)):
             button = QPushButton(caption); button.clicked.connect(callback); row.addWidget(button)
         layout.addLayout(row)
         self.feedback = QLabel(); self.feedback.setWordWrap(True); self.feedback.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse); layout.addWidget(self.feedback)
@@ -42,6 +42,13 @@ class SettingsDialog(QDialog):
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             item.setData(Qt.ItemDataRole.UserRole, name)
         self.paths.setItem(index, 0, item); self.paths.setItem(index, 1, QTableWidgetItem(path))
+
+    def choose_cloud_file(self):
+        index = max(0, self.paths.currentRow())
+        if self.paths.item(index, 0).data(Qt.ItemDataRole.UserRole) in ("open_folder", "particle_folder"):
+            self.feedback.setText("默认打开目录用于本地文件选择；云文件请在云盘窗口浏览。")
+            return
+        self.owner.show_cloud(selected_callback=lambda path: self.paths.item(index, 1).setText(path))
 
     def add_path(self):
         self.add_row("", ""); self.paths.setCurrentCell(self.paths.rowCount()-1, 0)

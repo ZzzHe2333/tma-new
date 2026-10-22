@@ -34,8 +34,8 @@ QPushButton:disabled { background: #f4eff6; border-color: #e6dfe9; color: #a99da
 QPushButton:focus, QToolButton:focus { border-color: #a68abf; }
 QPushButton#BatchLatest:checked, QPushButton#BatchAll:checked { background: #dcefe5; border-color: #b0d4c3; color: #365f52; }
 QPushButton#BatchIssues:checked { background: #f9e1ec; border-color: #dcb5ca; color: #84536f; }
-QPushButton#SingleReportButton { background: #e0f2e9; border-color: #b7dace; color: #365f52; }
-QPushButton#SingleReportButton:hover { background: #cfeadf; }
+QPushButton#SingleReportButton, QPushButton#BatchProcessingButton { background: #e0f2e9; border-color: #b7dace; color: #365f52; min-width: 94px; max-width: 94px; }
+QPushButton#SingleReportButton:hover, QPushButton#BatchProcessingButton:hover { background: #cfeadf; }
 QGroupBox { background: #fcf6fc; border: 1px solid #e2d3e9; margin-top: 9px; padding: 8px; border-radius: 8px; }
 QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 3px; color: #795982; }
 QLabel { background: transparent; }

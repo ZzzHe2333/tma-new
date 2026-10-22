@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from collections import OrderedDict
 import hashlib
 import logging
 import math
@@ -9,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import tempfile
+import threading
 
 import fitz
 import matplotlib
@@ -18,10 +20,38 @@ from . import report_internal_core as core
 from .report_template_core import PDFTemplateEditor
 from .mass_lookup import lookup_record, _batch_keys
 from .path_settings import config_path
+from .batch_analysis import serialized
 
 LOGGER = logging.getLogger(__name__)
 TEMPLATE_KEYS = ("tmaname", "lijing", "qifawd", "zuidawd", "tmamd", "shengchan")
 FIELD_KEYS = ("sample_name", "T1", "T2", "M", "H", "TMA", "D50", "SPAN", "tma_time", "particle_time")
+_PARTICLE_CACHE = OrderedDict()
+_PARTICLE_LOCK = threading.RLock()
+
+
+def clear_particle_cache():
+    with _PARTICLE_LOCK: _PARTICLE_CACHE.clear()
+
+
+def p9m_data(path):
+    """Network datasets are parsed once per file revision, not per record click."""
+    stat = path.stat()
+    key = (os.path.normcase(str(path)), stat.st_size, stat.st_mtime_ns, stat.st_ino)
+    with _PARTICLE_LOCK:
+        if key in _PARTICLE_CACHE:
+            _PARTICLE_CACHE.move_to_end(key)
+            return _PARTICLE_CACHE[key]
+        records = core._p9m_parse_records(str(path))
+        checksum = digest(path)
+        after = path.stat()
+        if (after.st_size, after.st_mtime_ns, after.st_ino) != key[1:]:
+            raise ValueError("粒径文件在读取期间发生变化，请重新读取")
+        # Drop stale revisions of this path and keep at most four datasets.
+        for old in list(_PARTICLE_CACHE):
+            if old[0] == key[0]: _PARTICLE_CACHE.pop(old)
+        _PARTICLE_CACHE[key] = (records, checksum)
+        while len(_PARTICLE_CACHE) > 4: _PARTICLE_CACHE.popitem(last=False)
+        return records, checksum
 
 
 class TemplateError(ValueError):
@@ -29,6 +59,8 @@ class TemplateError(ValueError):
 
 
 def digest(path):
+    from .cloud_storage import resolve_source
+    path = resolve_source(path)
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
@@ -42,8 +74,32 @@ def _number(value, label, *, allow_zero=False):
     return number
 
 
+def measurement_datetime(value):
+    """Accept the instrument's space/ISO timestamps without guessing file dates."""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        date = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if date.tzinfo is not None:
+            date = date.astimezone(timezone(timedelta(hours=8)))
+        return date.strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        pass
+    # The source helper recursively retries matching date text. Do not pass an
+    # invalid calendar date back into that recursion.
+    for fmt in ("%Y/%m/%d %H:%M:%S", "%Y.%m.%d %H:%M:%S", "%d-%b-%Y %H:%M:%S",
+                "%Y/%m/%d %H:%M", "%m/%d/%Y %H:%M:%S", "%d/%m/%Y %H:%M:%S"):
+        try:
+            return datetime.strptime(text, fmt).strftime("%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            continue
+    return ""
+
+
 def read_tma(path, source, algorithm="auto"):
-    path = Path(path).resolve()
+    from .cloud_storage import resolve_source
+    path = resolve_source(path)
     if not path.is_file():
         raise ValueError("请选择有效的 TMA 数据文件")
     text, _ = core.load_text_prefer_tajm(str(path), LOGGER)
@@ -122,23 +178,33 @@ def _image_metrics(image):
         return {}
 
 
-def read_particle(path, sample_name="", record_index=None):
-    path = Path(path).resolve()
+def read_particle(path, sample_name="", record_index=None, *, require_match=False, expected_revision=None):
+    from .cloud_storage import resolve_source
+    path = resolve_source(path)
     if not path.is_file():
         raise ValueError("请选择有效的粒径文件")
-    result = dict(file=str(path), sha256=digest(path), fields={}, records=[], selected_index=None, method="", warning="")
+    result = dict(file=str(path), fields={}, records=[], selected_index=None, method="", warning="")
     suffix = path.suffix.casefold()
     if suffix == ".p9m":
-        records = core._p9m_parse_records(str(path))
+        records, checksum = p9m_data(path)
+        keys = _batch_keys(Path(sample_name).stem)
+        matches = [i for i, record in enumerate(records) if keys & (_batch_keys(record.sample_no) | _batch_keys(record.sample_name))]
+        if expected_revision and checksum != expected_revision:
+            result.update(records=records, sha256=checksum, matched_indices=matches, method="P9M 原始记录",
+                          warning="粒径数据集已更新，已清除旧记录选择；请重新选择测量记录。")
+            return result
         index = record_index
         if index is None:
-            keys = _batch_keys(sample_name)
-            matches = [i for i, record in enumerate(records) if keys & (_batch_keys(record.sample_no) | _batch_keys(record.sample_name))]
             if len(matches) == 1:
                 index = matches[0]
-            elif len(records) == 1:
+            elif len(matches) > 1:
+                averages = [i for i in matches if records[i].is_average]
+                if len(averages) == 1:
+                    index = averages[0]
+                    result["warning"] = f"匹配 {len(matches)} 条测量记录，已选唯一平均记录，可在粒径记录中切换。"
+            elif len(records) == 1 and not require_match:
                 index = 0
-        result.update(records=records, selected_index=index, method="P9M 原始记录")
+        result.update(records=records, sha256=checksum, selected_index=index, matched_indices=matches, method="P9M 原始记录")
         if index is None:
             result["warning"] = "此 P9M 有多条记录，请选择要使用的粒径记录"
             return result
@@ -146,8 +212,9 @@ def read_particle(path, sample_name="", record_index=None):
             raise ValueError("所选粒径记录不存在，请重新选择")
         record = records[index]
         result["fields"] = {"D50": core._p9m_n3(record.d50), "SPAN": core._p9m_n3(record.span),
-                            "particle_time": core._normalize_datetime_seconds(record.measurement_time)}
+                            "particle_time": measurement_datetime(record.measurement_time)}
         return result
+    result["sha256"] = digest(path)
     values = {}
     if suffix == ".pdf":
         with fitz.open(path) as doc:
@@ -180,11 +247,11 @@ def read_particle(path, sample_name="", record_index=None):
     return result
 
 
-def read_sources(tma_path, particle_path, source, *, algorithm="auto", record_index=None, progress=None, parts=("tma", "particle")):
+def read_sources(tma_path, particle_path, source, *, algorithm="auto", record_index=None, particle_revision=None, progress=None, parts=("tma", "particle")):
     result = dict(fields={}, tma=None, particle=None, warnings=[], errors=[])
     for key, label, path, fn in (
         ("tma", "TMA", tma_path, lambda: read_tma(tma_path, source, algorithm)),
-        ("particle", "粒径", particle_path, lambda: read_particle(particle_path, Path(tma_path).stem, record_index)),
+        ("particle", "粒径", particle_path, lambda: read_particle(particle_path, Path(tma_path).stem, record_index, expected_revision=particle_revision)),
     ):
         if not path or key not in parts:
             continue
@@ -206,7 +273,8 @@ def validate_template(path):
     if not str(path).strip():
         return None
     try:
-        path = Path(path)
+        from .cloud_storage import resolve_source
+        path = resolve_source(path)
         if path.suffix.casefold() != ".pdf" or not path.is_file():
             raise ValueError("模板不是有效的 PDF 文件路径")
         with fitz.open(path) as doc:
@@ -220,7 +288,7 @@ def validate_template(path):
         raise TemplateError(str(exc)) from exc
 
 
-def collect_values(fields, data):
+def collect_values(fields, data, *, require_span=True):
     name = str(fields.get("sample_name", "")).strip()
     if not name:
         raise ValueError("请填写报告编号")
@@ -235,13 +303,14 @@ def collect_values(fields, data):
         raise ValueError("T1 必须小于 T2")
     height = _number(fields.get("H"), "H")
     d50 = _number(fields.get("D50"), "D50")
-    span = _number(fields.get("SPAN"), "SPAN", allow_zero=True)
+    span_text = str(fields.get("SPAN", "")).strip()
+    span = _number(span_text, "SPAN", allow_zero=True) if require_span or span_text else None
     mass = str(fields.get("M", "")).strip()
     if mass:
         _number(mass, "M")
     density = str(fields.get("TMA", "")).strip()
     density = _number(density, "TMA") if density else core.calc_tma_from_m_h(_number(mass, "M"), height)
-    return dict(tmaname=name, lijing=f"{d50:.3f}", span=f"{span:.3f}", qifawd=f"{t1:.2f}", zuidawd=f"{t2:.2f}",
+    return dict(tmaname=name, lijing=f"{d50:.3f}", span="" if span is None else f"{span:.3f}", qifawd=f"{t1:.2f}", zuidawd=f"{t2:.2f}",
                 tmamd=f"{density:.3f}", shengchan=datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S"),
                 tma_time=str(fields.get("tma_time", "")), p9m_time=str(fields.get("particle_time", "")))
 
@@ -289,26 +358,37 @@ def _protect_output(path, request, data):
         raise ValueError("输出 PDF 不能覆盖 TMA、粒径、模板或称量表源文件")
 
 
+@serialized
 def generate_report(request, data=None, *, force_internal=False, progress=None, cancelled=None):
     """An invalid/failed selected template always raises; the GUI asks first."""
+    from .cloud_storage import resolve_source
+    request = dict(request)
+    for key in ("tma_path", "particle_path"):
+        if request.get(key): request[key] = str(resolve_source(request[key]))
+    if request.get("template_path"):
+        try: request["template_path"] = str(resolve_source(request["template_path"]))
+        except Exception as exc:
+            if not force_internal: raise TemplateError(str(exc)) from exc
     provided_data = data is not None
     if data is None:
         data = read_sources(request["tma_path"], request["particle_path"], request.get("mass_source", ""),
-                            algorithm=request.get("algorithm", "auto"), record_index=request.get("record_index"), progress=progress)
+                            algorithm=request.get("algorithm", "auto"), record_index=request.get("record_index"),
+                            particle_revision=request.get("particle_revision"), progress=progress)
     if data.get("errors"):
         raise ValueError("\n".join(data["errors"]))
+    template = None if force_internal else validate_template(request.get("template_path", ""))
     fields = dict(data["fields"])
     fields.update({key: value for key, value in request.get("fields", {}).items() if provided_data or str(value).strip()})
-    values = collect_values(fields, data)
+    values = collect_values(fields, data, require_span=not bool(template))
     for key in ("tma", "particle"):
         source = data[key]
         if str(Path(request[key + "_path"]).resolve()) != source["file"] or digest(source["file"]) != source["sha256"]:
+            if key == "particle": clear_particle_cache()
             raise ValueError("源文件已变化，请重新读取信息后生成报告")
     path = Path(request["output_path"]).resolve()
     _protect_output(path, request, data)
     if path.suffix.casefold() != ".pdf":
         raise ValueError("报告输出须为 .pdf")
-    template = None if force_internal else validate_template(request.get("template_path", ""))
     work_root = config_path().parent / "report-work"
     work_root.mkdir(parents=True, exist_ok=True)
     path.parent.mkdir(parents=True, exist_ok=True)

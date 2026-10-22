@@ -164,16 +164,118 @@ class MainWindow(QMainWindow):
         self._drag_measurement = None
         self._pending_measurement = None
         self._editing_measurement = None
+        from .mcp_service import McpService
+        self.mcp_service = McpService()
+        self._mcp_closed = False
+        self.cloud_maintenance = None
+        self._cloud_usage = {}
+        self._cloud_pending_use = set()
+        self.cloud_touch_job = None
         self._menu()
         self._build()
         self._build_measurement_controls()
         self.statusBar().showMessage("就绪 · 拖入 TA 数据文件，或点击「导入数据」")
         self.redraw()
+        QTimer.singleShot(0, self.start_saved_mcp)
+        self.cloud_timer = QTimer(self)
+        self.cloud_timer.setInterval(60 * 60 * 1000)
+        self.cloud_timer.timeout.connect(self.start_cloud_maintenance)
+        self.cloud_timer.start()
+        QTimer.singleShot(0, lambda: self.start_cloud_maintenance(schedule=True))
+
+    def start_cloud_maintenance(self, *, schedule=False):
+        if self._mcp_closed or self.cloud_maintenance is not None:
+            return
+        from .path_settings import _settings_data
+        try:
+            if "cloud" not in _settings_data(): return
+        except (OSError, ValueError): return
+        from .cloud_dialog import CloudJob
+        from . import cloud_storage
+        def work(job):
+            result = {"cleanup": cloud_storage.cleanup()}
+            if schedule:
+                from .cloud_schedule import install_daily_task
+                result["schedule"] = install_daily_task()
+            return result
+        self.cloud_maintenance = job = CloudJob(work)
+        job.done.connect(self.cloud_maintenance_finished)
+        job.start()
+
+    def ensure_cloud_schedule(self):
+        self.start_cloud_maintenance(schedule=True)
+
+    def cloud_maintenance_finished(self, result):
+        self.cloud_maintenance = None
+        if "error" in result:
+            self.log.appendPlainText("云缓存清理：" + result["error"])
+        else:
+            status = result["value"].get("schedule")
+            if status:
+                self._cloud_schedule_status = status["message"]
+                for dialog in getattr(self, "cloud_dialogs", []):
+                    dialog.schedule_status.setText(status["message"])
+
+    def show_cloud(self, *, target="import", selected_callback=None):
+        from .cloud_dialog import CloudDialog
+        dialog = CloudDialog(self, target=target, selected_callback=selected_callback)
+        self.cloud_dialogs = [d for d in getattr(self, "cloud_dialogs", []) if d.isVisible() or d.job]
+        self.cloud_dialogs.append(dialog)
+        dialog.schedule_status.setText(getattr(self, "_cloud_schedule_status", "每日 03:00 清理；保存挂载或时长后建立计划任务"))
+        dialog.show(); dialog.raise_()
+        return dialog
+
+    def touch_cloud_usage(self):
+        import time
+        from .cloud_storage import touch_path, cache_root
+        now = time.monotonic()
+        for curve in self.visible_curves():
+            path = str(curve.dataset.path)
+            if not Path(path).absolute().is_relative_to(cache_root().absolute()): continue
+            if now - self._cloud_usage.get(path, -60) < 60: continue
+            self._cloud_usage[path] = now
+            self._cloud_pending_use.add(path)
+        if not self._cloud_pending_use or self.cloud_touch_job is not None: return
+        from .cloud_dialog import CloudJob
+        paths = list(self._cloud_pending_use); self._cloud_pending_use.clear()
+        def work(job):
+            for path in paths: touch_path(path)
+        self.cloud_touch_job = job = CloudJob(work)
+        job.done.connect(self.cloud_usage_finished)
+        job.start()
+
+    def cloud_usage_finished(self, value):
+        self.cloud_touch_job = None
+        if "error" in value: self.log.appendPlainText("云缓存使用时间未更新：" + value["error"])
+        if self._cloud_pending_use and not self._mcp_closed: self.touch_cloud_usage()
+
+    def start_saved_mcp(self):
+        if self._mcp_closed:
+            return
+        from .mcp_service import load_settings
+        try:
+            self.mcp_service.start(load_settings())
+        except (ValueError, OSError) as exc:
+            self.mcp_service.state, self.mcp_service.error = "error", str(exc)
+            self.statusBar().showMessage("MCP 未启动：" + str(exc))
+
+    def show_mcp_settings(self):
+        from .mcp_dialog import McpDialog
+        dialog = getattr(self, "mcp_dialog", None)
+        if dialog is None:
+            self.mcp_dialog = dialog = McpDialog(self)
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
 
     def _menu(self):
+        settings_menu = self.menuBar().addMenu("设置")
+        settings_menu.addAction("MCP · AI 连接…", self.show_mcp_settings)
+        settings_menu.addAction("云盘 · WebDAV…", lambda: self.show_cloud())
         filemenu = self.menuBar().addMenu("文件")
         actions = [
             ("导入数据…", self.open_files, "Ctrl+O"),
+            ("从云盘导入…", lambda: self.show_cloud(), ""),
             ("批量处理 T1 / T2 / M / H…", self.show_batch_analysis, "Ctrl+Shift+B"),
             ("单样品报告…", self.show_single_report, "Ctrl+Shift+R"),
             ("打开会话…", self.open_session, "Ctrl+Shift+O"),
@@ -694,6 +796,7 @@ class MainWindow(QMainWindow):
         if getattr(self, '_import_batch', False): return
         if not hasattr(self, "figure"):
             return
+        self.touch_cloud_usage()
         if hasattr(self, "span"):
             self.span.disconnect_events()
         self.figure.clear()
@@ -1321,6 +1424,7 @@ class MainWindow(QMainWindow):
             self.warn(f"会话未打开：{exc}")
 
     def export_plot(self, preferred=None):
+        self.touch_cloud_usage()
         visible = self.visible_curves()
         curve = self.selected()
         if curve not in visible: curve = visible[0] if visible else None
@@ -1436,14 +1540,23 @@ class MainWindow(QMainWindow):
             report = getattr(self, "single_report_dialog", None)
             if report is not None:
                 report.shutdown()
+            self._mcp_closed = True
+            self.cloud_timer.stop()
+            for dialog in getattr(self, "cloud_dialogs", []): dialog.close()
+            self.mcp_service.stop()
             event.accept()
         else:
             event.ignore()
 
 
 def main():
+    mass_normalization_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-mass-normalization"
+    recommendation_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-recommendation"
+    cloud_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-cloud"
+    mcp_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-mcp"
     batch_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-batch"
-    verify_mode = len(sys.argv) > 2 and sys.argv[1] in ("--verify-launch", "--verify-batch")
+    report_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-report"
+    verify_mode = len(sys.argv) > 2 and sys.argv[1] in ("--verify-launch", "--verify-batch", "--verify-report", "--verify-mcp", "--verify-cloud", "--verify-recommendation", "--verify-mass-normalization")
     if verify_mode:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     application = QApplication(sys.argv)
@@ -1463,6 +1576,26 @@ def main():
         window.showMaximized()
     else:
         window.show()
+    if mass_normalization_verify:
+        from .mass_normalization_qa import verify
+        verify(window, Path(sys.argv[2]), [Path(arg).absolute() for arg in sys.argv[3:]])
+        return
+    if recommendation_verify:
+        from .particle_recommendation_qa import verify_recommendation
+        verify_recommendation(window, Path(sys.argv[2]), [Path(arg).absolute() for arg in sys.argv[3:]])
+        return
+    if cloud_verify:
+        from .cloud_qa import verify_cloud
+        verify_cloud(window, Path(sys.argv[2]), [Path(arg).resolve() for arg in sys.argv[3:]])
+        return
+    if mcp_verify:
+        from .mcp_qa import verify_mcp
+        verify_mcp(window, Path(sys.argv[2]), [Path(arg).resolve() for arg in sys.argv[3:]])
+        return
+    if report_verify:
+        from .single_report_qa import verify_single_report
+        verify_single_report(window, Path(sys.argv[2]), [Path(arg) for arg in sys.argv[3:]])
+        return
     if batch_verify:
         from .batch_qa import verify_batch
         verify_batch(window, Path(sys.argv[2]), [Path(arg) for arg in sys.argv[3:]])

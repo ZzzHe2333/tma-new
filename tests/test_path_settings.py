@@ -113,4 +113,4 @@ def test_folder_cancel_clear_and_preserve_other_paths(ui,tmp_path):
     assert settings.import_folder()==str(tmp_path)
     dialog=ui.show_path_settings();dialog.paths.item(1,1).setText('');dialog.accept()
     assert settings.import_folder()==''
-    assert settings.load_paths()=={'m':'mass.xlsx','open_folder':'','future':'next'}
+    assert settings.load_paths()=={'m':'mass.xlsx','open_folder':'','particle_folder':'','future':'next'}

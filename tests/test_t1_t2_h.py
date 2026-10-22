@@ -76,3 +76,19 @@ def test_cli_handles_windows_gbk_console_and_missing_input(tmp_path):
     assert result.returncode == 1
     report = json.loads(path.read_text(encoding="utf-8"))
     assert report["results"] == [] and len(report["errors"]) == 1
+
+
+def test_standalone_core_dependencies_exclude_cloud_and_gui(tmp_path):
+    import ast
+    import sys
+    from tools.build_t1_t2_h_standalone import build
+    path = build(tmp_path / "extract_t1_t2_h.py")
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            assert not node.level
+            modules = [node.module]
+        elif isinstance(node, ast.Import):
+            modules = [alias.name for alias in node.names]
+        else: continue
+        assert all(module.split(".")[0] in sys.stdlib_module_names | {"numpy", "matplotlib"} for module in modules)

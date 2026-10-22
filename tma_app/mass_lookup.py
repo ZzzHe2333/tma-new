@@ -217,7 +217,8 @@ def lookup_record(sample, source=None):
     try:
         source = configured_source() if source is None else str(source).strip()
         if not source: return MassMatch(message='未配置 m 数据源')
-        path = Path(source).expanduser()
+        from .cloud_storage import resolve_source
+        path = resolve_source(source)
         files = sorted((p for p in path.iterdir() if p.is_file() and p.suffix.lower() in ('.csv','.cvs','.xlsx','.xls') and not p.name.startswith('~$')), key=lambda p:p.name.casefold()) if path.is_dir() else [path]
         if not files: return MassMatch(source=source, message='文件夹中未找到 CSV、XLSX 或 XLS 文件')
         raw = {_normalize(c) for c in _batch_candidates(str(sample))}

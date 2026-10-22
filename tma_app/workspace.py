@@ -22,13 +22,13 @@ CURVE_FIELDS = ("y_index", "axis", "color", "visible", "width", "style", "x_shif
                 "marker", "legend_text", "show_legend", "overlay_enabled", "uid", "appearance_mode", "normal_appearance", "overlay_appearance",
                 "display_filename", "show_legend_text", "normal_enabled", "y_type", "smooth_width", "x_signal_index", "x_signal_type", "x_smooth_width",
                 "data_indices", "data_limit_spec", "reset_time", "smooth_domain", "smooth_reuse", "smooth_base_ops","smooth_x_config","working_rows","smooth_source_rows",
-                "overlay_views","active_overlay_key","normal_view_details","sample_size_mm","file_info","unit_options","derived")
+                "overlay_views","active_overlay_key","normal_view_details","sample_size_mm","file_info","unit_options","derived","mass_normalization_mg")
 CURVE_OPTION_DEFAULTS = {"marker": "", "legend_text": "", "show_legend": True, "overlay_enabled": True,
                          "appearance_mode": "normal", "normal_appearance": None, "overlay_appearance": None,
                          "display_filename": None, "show_legend_text": True, "normal_enabled": True,
                          "y_type": "normal", "smooth_width": 0., "x_signal_index": None, "x_signal_type": "normal", "x_smooth_width": 0.,
                          "data_indices":None,"data_limit_spec":None,"reset_time":False,"smooth_domain":None,"smooth_reuse":False,"smooth_base_ops":[],"smooth_x_config":None,"working_rows":None,"smooth_source_rows":None,
-                         "overlay_views":{},"active_overlay_key":None,"normal_view_details":None,"sample_size_mm":None,"file_info":{},"unit_options":None,"derived":None}
+                         "overlay_views":{},"active_overlay_key":None,"normal_view_details":None,"sample_size_mm":None,"file_info":{},"unit_options":None,"derived":None,"mass_normalization_mg":None}
 APPEARANCE_FIELDS = ("style", "color", "marker", "width", "offset")
 
 
@@ -82,7 +82,7 @@ def default_plot_options():
             "legend_line": True, "legend_file": False, "legend_symbol": True,
             "overlay_auto": default_auto_styles(), "overlay_configure": default_auto_configure(),
             "axis_flags": [{"line": False, "color": False, "symbol": False} for _ in range(4)],
-            "export_title": "", "export_align": "left", "window_name": "",
+            "export_title": "", "export_align": "left", "window_name": "", "mass_normalization_titles": None,
             "legend_anchor": None, "x_domain": None, "secondary_x": False, "signal_defaults": None,"smoothing_rules":[],"overlay_members":None,"axis_x_offsets":[0.]*4,"point_label_options":default_options(),"alpha_smoothing_width":None,"unit_defaults":None,"transition_options":None,"signal_change_options":None,"peak_onset_options":None,"integration_options":None,"sigmoid_iterations":None,"auto_limits_rules":[]}
 
 
@@ -126,6 +126,9 @@ def validate_plot_options(options):
         elif key in ("title", "x_label", "export_title"):
             result[key] = _text(value, key)
         elif key == "window_name": result[key] = _text(value, key, maximum=80)
+        elif key == "mass_normalization_titles":
+            if value is not None and (not isinstance(value,dict) or set(value)!={'title','window_name','export_title'}):raise ValueError('统一化原始标题无效')
+            result[key]=None if value is None else {name:_text(text,name,80 if name=='window_name' else 4096) for name,text in value.items()}
         elif key == "export_align":
             if value not in ("left", "center", "right"): raise ValueError("绘图标题对齐方式无效")
             result[key] = value
@@ -241,7 +244,10 @@ def _validate_curve_state(state, signal_count, sample_count=None):
         if not isinstance(derived,dict) or not isinstance(derived.get('positions'),list) or len(derived['positions'])<2:raise ValueError('派生积分描述无效')
         sample_count=len(derived['positions'])
     from .overlay_views import validate_views,validate_details,overlay_key
-    validate_views(state["overlay_views"])
+    state["overlay_views"]=validate_views(state["overlay_views"])
+    if state['mass_normalization_mg'] is not None:
+        from .mass_normalization import validate_mass
+        validate_mass(state['mass_normalization_mg'])
     if state["active_overlay_key"] is not None and not overlay_key(state["active_overlay_key"]):raise ValueError("当前叠图窗口键无效")
     if state["normal_view_details"] is not None:validate_details(state["normal_view_details"])
     if not isinstance(state["uid"], str) or not re.fullmatch(r"[0-9a-f]{32}", state["uid"]):
@@ -362,6 +368,7 @@ class Curve:
     file_info: dict = field(default_factory=dict)
     unit_options: dict | None = None
     derived: dict | None = None
+    mass_normalization_mg: float | None = None
     _x_cache: tuple | None = field(default=None, init=False, repr=False)
     history: list[tuple] = field(default_factory=list, repr=False)
 
@@ -436,7 +443,13 @@ class Curve:
         if self.derived is None and self.reset_time and self.y_index==time_index and not any(op=="normalize" or op.startswith("derivative:") for op in self.operations):y-=self.time_origin
         from .dimension_units import quantity,convert
         spec=quantity(self)
-        return x,convert(y,spec)*self.scale+self.offset*spec["factor"]
+        return x,convert(y,spec)*self.scale*self.mass_normalization_factor+self.offset*spec["factor"]
+
+    @property
+    def mass_normalization_factor(self):
+        if self.appearance_mode!='overlay' or self.active_overlay_key is None or self.mass_normalization_mg is None:return 1.
+        from .mass_normalization import TARGET_MASS_MG, validate_mass
+        return TARGET_MASS_MG/validate_mass(self.mass_normalization_mg)
 
     @property
     def active_rows(self):return np.arange(self.sample_count) if self.data_indices is None else np.asarray(self.data_indices,dtype=int)
@@ -519,7 +532,7 @@ class Curve:
         return channel_label(self,idx)[1] if idx is not None else ""
 
     def result_transform(self, domain):
-        result = {"x_shift": self.x_shift, "scale": self.scale, "offset": self.offset}
+        result = {"x_shift": self.x_shift, "scale": self.scale*self.mass_normalization_factor, "offset": self.offset}
         if self.derived is not None:result['derived_parent']=self.derived['parent_id']
         if domain == "signal": result["x_signal"] = {"index": self.x_signal_index, "type": self.x_signal_type, "width": self.x_smooth_width}
         if self.unit_options is not None:
@@ -605,6 +618,7 @@ class Curve:
             if self.normal_view_details is not None:
                 for name,value in self.normal_view_details.items():setattr(self,name,deepcopy(value))
         self.active_overlay_key=None
+        self.mass_normalization_mg=None
         if key is None:return
         if self.normal_view_details is None:self.normal_view_details={name:deepcopy(getattr(self,name)) for name in DETAIL_FIELDS}
         self.activate_appearance("overlay")
@@ -640,6 +654,8 @@ def save_session(path, curves, domain, results, plot_options=None):
             for i, curve in enumerate(curves):
                 curve.save_overlay_view()
                 ds = curve.dataset
+                from .cloud_storage import touch_path
+                touch_path(ds.path)
                 entry = {"path": str(ds.path), "instance_id": ds.instance_id, "opening_index": ds.opening_index, "metadata": ds.metadata, "warnings": ds.warnings,
                          "sha256": ds.sha256, "signals": [{"name": s.name, "unit": s.unit} for s in ds.signals]}
                 state = {key: getattr(curve, key) for key in CURVE_FIELDS}
@@ -787,7 +803,7 @@ def load_session(path, include_plot_options=False):
             # Archived values belong to their recorded processing state. The
             # current working buffer may cover another window; validate cursor
             # structure against immutable raw rows without replacing results.
-            archived=replace(curve,unit_options=transform.get("units"),data_indices=transform.get("data_indices"),data_limit_spec=None,reset_time=transform.get("reset_time",False),working=None,working_rows=None)
+            archived=replace(curve,unit_options=transform.get("units"),data_indices=transform.get("data_indices"),data_limit_spec=None,reset_time=transform.get("reset_time",False),working=None,working_rows=None,scale=transform['scale'],offset=transform['offset'],mass_normalization_mg=None)
             reference=transform.get('units_reference')
             if reference is not None:
                 if not isinstance(reference,dict) or set(reference)!={'original_size_mm','reference_mm','at25_um','effective_unit'}:raise ValueError('分析单位参考无效')

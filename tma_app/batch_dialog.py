@@ -152,6 +152,7 @@ class BatchDialog(QDialog):
         buttons = QHBoxLayout()
         for caption, name, callback in (
             ("导入文件…", "ImportBatch", self.choose_files),
+            ("云盘导入…", "CloudBatch", lambda: self.owner.show_cloud(target="batch")),
             ("读取已打开文件", "UseOpened", self.use_opened),
             ("出图…", "ExportBatchPlots", self.export_plots),
             ("导出 XLSX…", "ExportBatchXlsx", self.export_xlsx),

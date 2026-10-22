@@ -9,7 +9,7 @@ import re
 
 DETAIL_FIELDS=("axis","visible","legend_text","show_legend","display_filename","show_legend_text")
 STYLE_FIELDS=("style","color","marker","width","offset")
-VIEW_FIELDS=DETAIL_FIELDS+STYLE_FIELDS+("overlay_enabled",)
+VIEW_FIELDS=DETAIL_FIELDS+STYLE_FIELDS+("overlay_enabled", "mass_normalization_mg")
 
 
 def overlay_key(value):
@@ -18,11 +18,15 @@ def overlay_key(value):
 
 def validate_details(state,full=False):
     from .workspace import _number,_boolean,_text
+    if full and isinstance(state,dict) and "mass_normalization_mg" not in state:
+        state = dict(state, mass_normalization_mg=None)
     if not isinstance(state,dict) or set(state)!=set(VIEW_FIELDS if full else DETAIL_FIELDS):raise ValueError("绘图窗口曲线设置字段无效")
     if type(state["axis"]) is not int or not 0<=state["axis"]<4:raise ValueError("窗口曲线坐标轴无效")
     for key in ("visible","show_legend","show_legend_text"):_boolean(state[key],key)
     for key in ("legend_text","display_filename"):_text(state[key],key)
     if full:
+        from .mass_normalization import validate_mass
+        if state['mass_normalization_mg'] is not None:validate_mass(state['mass_normalization_mg'])
         _boolean(state["overlay_enabled"],"overlay_enabled")
         if state["style"] not in ("-","--","-.",":","None","long_dash","broken_dash","broken_double_dash"):raise ValueError("窗口曲线线型无效")
         if not isinstance(state["color"],str) or not re.fullmatch(r"#[0-9a-fA-F]{6}",state["color"]):raise ValueError("窗口曲线颜色无效")
@@ -34,10 +38,11 @@ def validate_details(state,full=False):
 
 def validate_views(views):
     if not isinstance(views,dict) or len(views)>1000:raise ValueError("叠图窗口设置无效")
+    result={}
     for key,state in views.items():
         if not overlay_key(key):raise ValueError("叠图窗口键无效")
-        validate_details(state,True)
-    return deepcopy(views)
+        result[key]=validate_details(state,True)
+    return result
 
 
 def snapshot(curve):

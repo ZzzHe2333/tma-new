@@ -11,8 +11,7 @@ from PySide6.QtWidgets import (QComboBox, QDialog, QFileDialog, QGridLayout, QGr
     QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QProgressBar,
     QPushButton, QVBoxLayout, QWidget)
 
-from . import single_report as backend
-from .path_settings import import_folder, mass_source, particle_folder, save_particle_folder
+from .path_settings import import_folder, mass_source, particle_folder
 from .theme import app_icon
 
 
@@ -38,18 +37,23 @@ class ReportJob(QObject):
                 self.cancelled.set()
 
     def run(self):
+        backend = None
         try:
+            from . import single_report as backend
             if self.action == "read":
                 data = backend.read_sources(self.request["tma_path"], self.request["particle_path"], self.request["mass_source"],
-                    algorithm=self.request["algorithm"], record_index=self.request["record_index"], progress=self.notify, parts=self.parts)
+                    algorithm=self.request["algorithm"], record_index=self.request["record_index"],
+                    particle_revision=self.request.get("particle_revision"), progress=self.notify, parts=self.parts)
                 result = dict(kind="read", data=data, parts=self.parts)
+            elif self.action == "recommend":
+                from .particle_recommendation import recommend
+                data = recommend(self.request["sample"], self.request["folder"], cancelled=self.cancelled, progress=self.notify)
+                result = dict(kind="recommended", data=data)
             else:
                 result = dict(kind="generated", result=backend.generate_report(self.request, self.data,
                     force_internal=self.force_internal, progress=self.notify, cancelled=self.cancelled))
-        except backend.TemplateError as exc:
-            result = dict(kind="template_error", error=str(exc))
         except Exception as exc:
-            result = dict(kind="error", error=str(exc))
+            result = dict(kind="template_error" if backend is not None and isinstance(exc, backend.TemplateError) else "error", error=str(exc))
         if not self.cancelled.is_set():
             try:
                 self.completed.emit(result)
@@ -93,10 +97,10 @@ class SingleReportDialog(QDialog):
         current.clicked.connect(self.use_selected)
         files.addWidget(current, 0, 3)
         self.particle_path = self._path_row(files, 1, "粒径文件", self.choose_particle, "ReportParticlePath")
-        folder = QPushButton("设置目录…")
-        folder.setObjectName("ReportParticleFolder")
-        folder.clicked.connect(self.choose_particle_folder)
-        files.addWidget(folder, 1, 3)
+        self.recommend_button = QPushButton("推荐数据")
+        self.recommend_button.setObjectName("ReportRecommendParticle")
+        self.recommend_button.clicked.connect(self.recommend_particle)
+        files.addWidget(self.recommend_button, 1, 3)
         self.folder_hint = QLabel()
         self.folder_hint.setObjectName("muted")
         self.folder_hint.setTextFormat(Qt.TextFormat.PlainText)
@@ -201,6 +205,21 @@ class SingleReportDialog(QDialog):
         button = QPushButton("选择…")
         button.setObjectName(name + "Browse")
         button.clicked.connect(callback)
+        if name != "ReportOutputPath":
+            from PySide6.QtWidgets import QMenu
+            menu = QMenu(button)
+            menu.addAction("本地文件…", callback)
+            def selected(path):
+                edit.setText(path)
+                if name == "ReportTmaPath": self.read_information(parts=("tma",))
+                elif name == "ReportParticlePath": self.read_information(parts=("particle",))
+            menu.addAction("云盘文件…", lambda: self.owner.show_cloud(selected_callback=selected))
+            button.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            button.customContextMenuRequested.connect(lambda point: menu.exec(button.mapToGlobal(point)))
+            button.setText("选择… ▾")
+            # Left click opens the same clear local/cloud choices.
+            button.clicked.disconnect(callback)
+            button.clicked.connect(lambda: menu.exec(button.mapToGlobal(button.rect().bottomLeft())))
         layout.addWidget(button, row, 1+span)
         return edit
 
@@ -221,7 +240,7 @@ class SingleReportDialog(QDialog):
             self.log.appendPlainText("主窗口尚未选中数据，请选择一个 TMA 文件。")
             return
         self.tma_path.setText(str(curve.dataset.path))
-        self.read_information(parts=("tma",))
+        self.read_information(parts=("tma", "particle") if self.particle_path.text().lower().endswith(".p9m") else ("tma",))
 
     def choose_particle(self):
         path, _ = QFileDialog.getOpenFileName(self, "选择粒径文件", particle_folder(),
@@ -230,14 +249,14 @@ class SingleReportDialog(QDialog):
             self.particle_path.setText(path)
             self.read_information(parts=("particle",))
 
-    def choose_particle_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "设置粒径默认文件夹", particle_folder())
-        if folder:
-            try:
-                save_particle_folder(folder)
-                self.update_folder_hint()
-            except (ValueError, OSError) as exc:
-                self.log.appendPlainText(f"粒径目录未保存：{exc}")
+    def recommend_particle(self):
+        if self.job is not None: return
+        sample = self.fields["sample_name"].text().strip() or Path(self.tma_path.text()).stem
+        try:
+            from .particle_recommendation import sample_date
+            sample_date(sample)
+            self.start_job(ReportJob("recommend", {"sample": sample, "folder": particle_folder()}))
+        except (ValueError, OSError) as exc: self.log.appendPlainText(str(exc))
 
     def choose_template(self):
         path, _ = QFileDialog.getOpenFileName(self, "选择 PDF 模板（可留空）", "", "PDF 模板 (*.pdf)")
@@ -259,6 +278,8 @@ class SingleReportDialog(QDialog):
         if part == "tma":
             path = self.tma_path.text().strip().strip('"')
             self.fields["sample_name"].setText(Path(path).stem if path else "")
+            if self.particle_path.text().strip().lower().endswith(".p9m"):
+                self.source_changed("particle")
         else:
             self.record_box.blockSignals(True)
             self.record_box.clear()
@@ -273,14 +294,36 @@ class SingleReportDialog(QDialog):
             self.fields[key].clear()
 
     def request(self):
+        particle = self.data.get("particle")
         return dict(tma_path=self.tma_path.text().strip().strip('"'), particle_path=self.particle_path.text().strip().strip('"'),
                     template_path=self.template_path.text().strip().strip('"'), output_path=self.output_path.text().strip().strip('"'),
                     mass_source=mass_source(), algorithm=self.algorithm.currentData(), record_index=self.record_box.currentData(),
+                    particle_revision=particle.get("sha256") if particle and particle.get("records") else None,
                     fields={key: edit.text().strip() for key, edit in self.fields.items()})
 
     def record_changed(self):
-        if self.job is None and self.record_box.currentData() is not None:
+        if self.job is not None: return
+        if self.record_box.currentData() is not None:
             self.read_information(parts=("particle",))
+        else:
+            particle = self.data.get("particle")
+            if particle and particle.get("records"):
+                particle["selected_index"] = None
+                particle["fields"] = {}
+                for key in ("D50", "SPAN", "particle_time"):
+                    self.fields[key].clear()
+                    self.data.get("fields", {}).pop(key, None)
+                self.last_output = ""
+                self.open_button.setEnabled(False)
+                self.status.setText("请选择测量记录")
+
+    def restore_particle_selection(self):
+        """An interrupted read never changes which loaded record is displayed."""
+        particle = self.data.get("particle")
+        if particle and particle.get("records"):
+            self.record_box.blockSignals(True)
+            self.record_box.setCurrentIndex(max(0, self.record_box.findData(particle["selected_index"])))
+            self.record_box.blockSignals(False)
 
     def read_information(self, checked=False, *, parts=("tma", "particle")):
         if self.job is not None:
@@ -312,8 +355,15 @@ class SingleReportDialog(QDialog):
         self.log.appendPlainText(message)
 
     def apply_data(self, data, parts=("tma", "particle")):
+        self.last_output = ""
+        self.open_button.setEnabled(False)
         for key in parts:
             self.data[key] = data.get(key)
+            # Clearing is required even when the path text did not change,
+            # e.g. a new ambiguous recommendation for the same monthly file.
+            keys = ("T1", "T2", "M", "H", "TMA", "tma_time") if key == "tma" else ("D50", "SPAN", "particle_time")
+            for field in keys: self.fields[field].clear()
+            if key == "tma": self._temperature_edited = False
         self.data["errors"] = []
         for key, value in data.get("fields", {}).items():
             if key in self.fields:
@@ -324,7 +374,11 @@ class SingleReportDialog(QDialog):
         self.record_box.clear()
         if particle and particle["records"]:
             self.record_box.addItem("请选择测量记录", None)
-            for index, record in enumerate(particle["records"]):
+            indices = particle.get("matched_indices") or list(range(len(particle["records"])))
+            if particle["selected_index"] is not None and particle["selected_index"] not in indices:
+                indices = [*indices, particle["selected_index"]]
+            for index in indices:
+                record = particle["records"][index]
                 label = f"{record.record_id or index+1} · {record.sample_name or record.sample_no} · {record.measurement_time}"
                 if record.is_average:
                     label += " · 平均"
@@ -347,14 +401,22 @@ class SingleReportDialog(QDialog):
         self.progress.hide()
         self.status.setText("就绪")
         if result["kind"] == "cancelled":
+            if job.action == "read" and "particle" in job.parts: self.restore_particle_selection()
             self.status.setText("已取消")
         elif result["kind"] == "read":
             self.apply_data(result["data"], result["parts"])
             for message in result["data"]["errors"] + result["data"]["warnings"]:
                 self.log.appendPlainText(message)
             self.log.appendPlainText("读取完成，请核对信息。")
+        elif result["kind"] == "recommended":
+            particle = result["data"]
+            self.particle_path.setText(particle.get("recommended_path", particle["file"]))
+            self.apply_data({"particle": particle, "fields": particle["fields"]}, ("particle",))
+            self.log.appendPlainText("已推荐：" + particle["file"])
+            if particle.get("warning"): self.log.appendPlainText(particle["warning"])
         elif result["kind"] == "error":
-            self.log.appendPlainText("未生成报告：" + result["error"])
+            if job.action == "read" and "particle" in job.parts: self.restore_particle_selection()
+            self.log.appendPlainText(("未找到推荐数据：" if job.action == "recommend" else "操作未完成：") + result["error"])
             self.status.setText("请检查输入信息")
         elif result["kind"] == "generated":
             output = result["result"]
@@ -376,6 +438,7 @@ class SingleReportDialog(QDialog):
             job.deleteLater()
 
     def update_density(self):
+        from . import single_report as backend
         try:
             self.fields["TMA"].setText(f"{backend.core.calc_tma_from_m_h(float(self.fields['M'].text()), float(self.fields['H'].text())):.3f}")
         except (ValueError, TypeError):
@@ -388,6 +451,7 @@ class SingleReportDialog(QDialog):
         data = self.data.get("tma")
         if data is None:
             return
+        from . import single_report as backend
         try:
             t1, t2 = float(self.fields["T1"].text()), float(self.fields["T2"].text())
             if not min(data["xs"]) <= t1 < t2 <= max(data["xs"]):
