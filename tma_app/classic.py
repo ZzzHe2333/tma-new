@@ -261,6 +261,13 @@ class ClassicMainWindow(MainWindow):
                 action.setIcon(action_icon("Signals1"))
                 parent.insertAction(parent.actions()[1], action)
                 self.classic_actions["BatchAnalysis1"] = action
+                report = QAction("单样品报告…", self)
+                report.setObjectName("SingleReport1")
+                report.setShortcut("Ctrl+Shift+R")
+                report.setIcon(action_icon("AnalysisOptions1"))
+                report.triggered.connect(self.show_single_report)
+                parent.insertAction(parent.actions()[2], report)
+                self.classic_actions["SingleReport1"] = report
         height = QAction("高度差", self)
         height.setObjectName("HeightChange")
         height.triggered.connect(lambda: self.start_point_measurement("height_change"))
@@ -342,6 +349,14 @@ class ClassicMainWindow(MainWindow):
                 target.setIcon(action.icon())
             toolbar.addAction(action)
             toolbar.widgetForAction(action).setFixedSize(24, 24)
+        toolbar.addSeparator()
+        self.single_report_button = QPushButton("单样品报告", self)
+        self.single_report_button.setObjectName("SingleReportButton")
+        self.single_report_button.setIcon(action_icon("AnalysisOptions1"))
+        self.single_report_button.setFixedHeight(24)
+        self.single_report_button.setAutoDefault(False)
+        self.single_report_button.clicked.connect(self.show_single_report)
+        toolbar.addWidget(self.single_report_button)
         self.classic_toolbar = toolbar
 
     @staticmethod

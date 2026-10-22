@@ -175,6 +175,7 @@ class MainWindow(QMainWindow):
         actions = [
             ("导入数据…", self.open_files, "Ctrl+O"),
             ("批量处理 T1 / T2 / M / H…", self.show_batch_analysis, "Ctrl+Shift+B"),
+            ("单样品报告…", self.show_single_report, "Ctrl+Shift+R"),
             ("打开会话…", self.open_session, "Ctrl+Shift+O"),
             ("保存会话…", self.save, "Ctrl+S"),
             ("导出图像…", self.export_plot, "Ctrl+E"),
@@ -207,6 +208,7 @@ class MainWindow(QMainWindow):
         caption.setObjectName("muted")
         header.addWidget(caption)
         header.addStretch()
+        header.addWidget(button("单样品报告", self.show_single_report))
         header.addWidget(button("打开会话", self.open_session))
         header.addWidget(button("保存会话", self.save))
         header.addWidget(button("＋ 导入数据", self.open_files, True))
@@ -445,6 +447,16 @@ class MainWindow(QMainWindow):
             dialog.raise_()
         if isinstance(paths, (list, tuple)) and paths:
             dialog.enqueue_files(paths)
+        return dialog
+
+    def show_single_report(self):
+        from .single_report_dialog import SingleReportDialog
+        dialog = getattr(self, "single_report_dialog", None)
+        if dialog is None:
+            dialog = self.single_report_dialog = SingleReportDialog(self)
+        dialog.update_folder_hint()
+        dialog.show()
+        dialog.raise_()
         return dialog
 
     def finish_import(self, datasets, failures):
@@ -1421,6 +1433,9 @@ class MainWindow(QMainWindow):
             batch = getattr(self, "batch_dialog", None)
             if batch is not None:
                 batch.prepare_shutdown()
+            report = getattr(self, "single_report_dialog", None)
+            if report is not None:
+                report.shutdown()
             event.accept()
         else:
             event.ignore()

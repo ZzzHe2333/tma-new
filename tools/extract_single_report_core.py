@@ -61,7 +61,7 @@ if __name__ == "__main__":
     roots = {"load_text_prefer_tajm", "parse_lines", "extract_xy_from_file", "detect_T2_T1_precise",
              "detect_T2_T1_super_gradient", "build_curve_cache", "interpolate_curve_height",
              "format_height_um", "format_plot_temp_c", "calc_tma_from_m_h", "generate_tma_tif",
-             "_extract_tma_internal_datetime", "build_final_pdf_internal", "_p9m_parse_records", "_p9m_generate_pdf"}
+             "_extract_tma_internal_datetime", "build_final_pdf_internal", "_p9m_parse_records", "_p9m_generate_pdf", "pdf_first_page_to_png"}
     reports = [extract("one_BG_neibuban.py", "report_internal_core.py", roots),
                extract("one_BG_claude_v6.py", "report_template_core.py", {"PDFTemplateEditor"})]
     out = ROOT / "artifacts/single-report-verification"

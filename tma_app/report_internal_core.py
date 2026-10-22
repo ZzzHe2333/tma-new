@@ -852,6 +852,19 @@ def calc_tma_from_m_h(mg: float, H_um: float) -> float:
     return 1000.0 * mg / (math.pi * 3.35 * 3.35 * (H_um / 1000.0))
 
 
+def pdf_first_page_to_png(pdf_path: str, out_png: str, zoom: float = 2.0) -> str:
+    doc = fitz.open(pdf_path)
+    try:
+        page = doc.load_page(0)
+        mat  = fitz.Matrix(zoom, zoom)
+        pix  = page.get_pixmap(matrix=mat, alpha=False)
+        os.makedirs(os.path.dirname(out_png), exist_ok=True)
+        pix.save(out_png)
+        return out_png
+    finally:
+        doc.close()
+
+
 def generate_tma_tif(
     xs: List[float], ys: List[float],
     T1: float, T2: float, H: float,

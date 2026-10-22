@@ -78,3 +78,17 @@ def import_folder():
         return os.path.expandvars(os.path.expanduser(value)) if value else ""
     except (ValueError, OSError):
         return ""
+
+
+def particle_folder():
+    """Independent start folder for single-report particle file selection."""
+    try:
+        value = load_paths().get("particle_folder", "").strip()
+        return os.path.expandvars(os.path.expanduser(value)) if value else ""
+    except (ValueError, OSError):
+        return ""
+
+
+def save_particle_folder(path):
+    paths = load_paths()
+    save_paths({**paths, "particle_folder": str(path).strip()})

@@ -23,7 +23,7 @@ class SettingsDialog(QDialog):
         if "默认打开文件夹" in self.original_paths:
             legacy = self.original_paths.pop("默认打开文件夹")
             self.original_paths.setdefault("open_folder", legacy)
-        for name, path in {"m": "", "open_folder": "", **self.original_paths}.items(): self.add_row(name, path)
+        for name, path in {"m": "", "open_folder": "", "particle_folder": "", **self.original_paths}.items(): self.add_row(name, path)
         row = QHBoxLayout()
         for caption, callback in (("选择文件…", self.choose_file), ("选择文件夹…", self.choose_folder), ("新增路径", self.add_path), ("删除路径", self.remove_path), ("测试 m 匹配", self.test_mass)):
             button = QPushButton(caption); button.clicked.connect(callback); row.addWidget(button)
@@ -37,8 +37,8 @@ class SettingsDialog(QDialog):
 
     def add_row(self, name, path):
         index = self.paths.rowCount(); self.paths.insertRow(index)
-        item = QTableWidgetItem("默认打开文件夹" if name == "open_folder" else name)
-        if name in ("m", "open_folder"):
+        item = QTableWidgetItem({"open_folder": "默认打开文件夹", "particle_folder": "粒径默认文件夹"}.get(name, name))
+        if name in ("m", "open_folder", "particle_folder"):
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             item.setData(Qt.ItemDataRole.UserRole, name)
         self.paths.setItem(index, 0, item); self.paths.setItem(index, 1, QTableWidgetItem(path))
@@ -48,13 +48,13 @@ class SettingsDialog(QDialog):
 
     def remove_path(self):
         index = self.paths.currentRow()
-        if index < 0 or self.paths.item(index, 0).data(Qt.ItemDataRole.UserRole) in ("m", "open_folder"):
+        if index < 0 or self.paths.item(index, 0).data(Qt.ItemDataRole.UserRole) in ("m", "open_folder", "particle_folder"):
             self.feedback.setText("此项保留，清空路径即可停用。")
         else: self.paths.removeRow(index)
 
     def choose_file(self):
         index = max(0, self.paths.currentRow())
-        if self.paths.item(index, 0).data(Qt.ItemDataRole.UserRole) == "open_folder":
+        if self.paths.item(index, 0).data(Qt.ItemDataRole.UserRole) in ("open_folder", "particle_folder"):
             self.choose_folder(); return
         path, _ = QFileDialog.getOpenFileName(self, "选择数据文件", self.paths.item(index, 1).text(), "称量表 (*.csv *.cvs *.xlsx *.xls);;所有文件 (*)")
         if path: self.paths.item(index, 1).setText(path)
