@@ -42,6 +42,9 @@ class CursorLimitsDialog(QDialog):
         super().__init__(owner)
         from .measurement import point_coordinates
         self.owner, self.entry = owner, owner._pending_measurement
+        self.data_limits=self.entry.get("purpose")=="data_limits"
+        self.read_only_y=self.data_limits or self.entry["kind"] in ("curve_value","alpha_at_x","alpha_secant","alpha_fit","step_transition","glass_transition","peak_max","onset_point","peak_linear","peak_sigmoid","slope")
+        self.at_y=self.entry["kind"]=="curve_value_y"
         self.setObjectName("CursorLimitsForm")
         self.setWindowTitle("手动界限")
         self.setWindowModality(Qt.WindowModality.WindowModal)
@@ -52,6 +55,11 @@ class CursorLimitsDialog(QDialog):
         state = self.entry["interactive"]
         coords = point_coordinates(self.x, self.y, state["indices"], state.get("positions"), state.get("manual_y"))
         self.manual_y = list(state.get("manual_y", [None]*len(coords)))
+        self.original_positions=list(state.get("positions",state["indices"]))
+        self.original_x_text=[format(coord[0],".8g") for coord in coords]
+        self.x_edited=set();self.y_edited=set()
+        self.original_target_y=state.get("target_y")
+        self.original_y_text=[format(self.original_target_y if self.at_y else coord[1],".8g") for coord in coords]
         self.fields, self.y_fields = [], []
         xlabel = curve.x_label(self.entry["domain"])
         for caption, left in ((xlabel, 96), (curve.result_label, 212)):
@@ -62,28 +70,46 @@ class CursorLimitsDialog(QDialog):
             xfield.setGeometry(96, 32+28*i, 89, 21); yfield.setGeometry(212, 32+28*i, 120, 21)
             enabled = i < len(coords)
             label.setEnabled(enabled); xfield.setEnabled(enabled); yfield.setEnabled(enabled)
+            if self.read_only_y:yfield.setReadOnly(True)
+            if self.at_y:xfield.setReadOnly(True)
             if enabled:
-                xfield.setText(format(coords[i][0], ".15g")); yfield.setText(format(coords[i][1], ".8g"))
+                xfield.setText(self.original_x_text[i]);xfield.setToolTip(format(coords[i][0],".15g"))
+                yfield.setText(self.original_y_text[i])
                 self.fields.append(xfield); self.y_fields.append(yfield)
+                xfield.textEdited.connect(lambda text,i=i:self.x_edited.add(i))
                 xfield.textChanged.connect(self.preview)
+                yfield.textEdited.connect(lambda text,i=i:self.y_edited.add(i))
                 yfield.textChanged.connect(lambda text, i=i: self.edit_y(i, text))
         self.error = QLabel(self); self.error.setGeometry(12, 202, 345, 34); self.error.setWordWrap(True)
         self.error.setStyleSheet("color: #a00000")
         for caption, left, callback in (("确定", 12, self.accept), ("光标", 100, self.reject), ("取消", 188, self.reject), ("帮助", 276, self.help)):
             button = QPushButton(caption, self); button.setGeometry(left, 242, 81, 25); button.clicked.connect(callback)
             if caption == "确定": button.setDefault(True)
-        self.fields[state.get("active_point", 0)].setFocus(); self.fields[state.get("active_point", 0)].selectAll()
+        focus=(self.y_fields if self.at_y else self.fields)[state.get("active_point",0)]
+        focus.setFocus();focus.selectAll()
 
     def positions(self):
-        from .measurement import position_at_x
+        from .measurement import position_at_x,position_at_y
+        if self.at_y:return [position_at_y(self.y,self.y_target(),self.curve.active_rows)]
         state = self.entry["interactive"]
         anchors = state.get("positions", state["indices"])
-        return [position_at_x(self.x, float(field.text()), anchor,self.curve.active_rows) for field, anchor in zip(self.fields, anchors)]
+        # Compact native fields display readable numbers; accepting an untouched
+        # field retains its exact original position rather than rounding it.
+        return [self.original_positions[i] if i not in self.x_edited and field.text()==self.original_x_text[i]
+                else position_at_x(self.x,float(field.text()),anchor,self.curve.active_rows)
+                for i,(field,anchor) in enumerate(zip(self.fields,anchors))]
+
+    def y_target(self):
+        field=self.y_fields[0]
+        return self.original_target_y if 0 not in self.y_edited and field.text()==self.original_y_text[0] else float(field.text())
 
     def preview(self):
         from .measurement import point_coordinates
         try:
             coords = point_coordinates(self.x, self.y, self.entry["interactive"]["indices"], self.positions())
+            if self.at_y:
+                self.fields[0].blockSignals(True);self.fields[0].setText(format(coords[0][0],".8g"));self.fields[0].blockSignals(False)
+                self.error.clear();return
             for i, (field, (_, value)) in enumerate(zip(self.y_fields, coords)):
                 if self.manual_y[i] is None:
                     field.blockSignals(True); field.setText(f"{value:.8g}"); field.blockSignals(False)
@@ -93,7 +119,8 @@ class CursorLimitsDialog(QDialog):
 
     def edit_y(self, point, text):
         # Keep invalid input local to this dialog until all fields validate.
-        self.manual_y[point] = text
+        if self.at_y:self.preview()
+        else:self.manual_y[point] = text
 
     def accept(self):
         from .measurement import point_values
@@ -102,9 +129,25 @@ class CursorLimitsDialog(QDialog):
         try:
             positions = self.positions()
             indices = [int(round(p)) for p in positions]
-            manual_y = [None if value is None else float(value) for value in self.manual_y]
+            manual_y = [None if self.read_only_y or self.at_y or value is None else float(value) for value in self.manual_y]
             values = point_values(self.x, self.y, self.entry["kind"], indices, positions, manual_y)
+            if self.entry['kind']=='slope':
+                from .slope import values as compute
+                values.update(compute(self.curve,self.entry,positions))
+            if self.entry["kind"] in ("alpha_at_x","alpha_secant","alpha_fit"):
+                from .alpha import alpha_values
+                values.update(alpha_values(self.curve,self.entry,positions))
+            if self.entry['kind'] in ('peak_max','onset_point'):
+                from .peak_onset import values as compute
+                values.update(compute(self.curve,self.entry,positions))
+            if self.entry['kind'] in ('peak_linear','peak_sigmoid'):
+                from .peak_integration import values as compute
+                values.update(compute(self.curve,self.entry,positions))
+            if self.entry['kind'] in ('step_transition','glass_transition'):
+                from .transitions import values as transition_values
+                values.update(transition_values(self.curve,self.entry,positions))
             self.entry["interactive"].update(indices=indices, positions=positions, manual_y=manual_y)
+            if self.at_y:self.entry["interactive"]["target_y"]=self.y_target()
             self.entry["values"] = values
             self.owner.redraw(); self.owner.activate_measurement_point(0); self.owner._update_measurement_controls()
             super().accept()
@@ -113,6 +156,22 @@ class CursorLimitsDialog(QDialog):
             self.error.setText(str(exc))
 
     def help(self):
+        if self.entry.get('purpose') in ('running_integral','delete_peak'):
+            purpose='进入积分类型设置' if self.entry['purpose']=='running_integral' else '删除选中的峰及其累计曲线'
+            QMessageBox.information(self,'选择峰','输入已有峰积分范围内的准确X坐标，Y由曲线计算。\n返回曲线后，右键确定或Enter'+purpose+'；取消不修改结果。')
+            return
+        if self.entry['kind']=='slope':
+            QMessageBox.information(self,'斜率','输入两个准确的X坐标，Y由相邻采集点计算。\n返回图中后，右键确定固定斜率；两个坐标标签与斜率文字可分别拖动。')
+            return
+        if self.at_y:
+            QMessageBox.information(self,"曲线值于Y轴","输入准确Y坐标，X取当前连续采集片段内按采集顺序遇到的第一个交点。\n确定后返回水平标记；右键确定或Enter进入标注选项。")
+            return
+        if self.entry["kind"]=="curve_value":
+            QMessageBox.information(self,"曲线值于X轴","输入准确X坐标，Y值沿相邻采集样点计算，不能手动覆盖。\n返回曲线后，右键确定或Enter选择时间、温度、信号、Y值及标记外观。")
+            return
+        if self.data_limits:
+            QMessageBox.information(self,"光标数据界限","输入准确温度或时间。重复横坐标时保留最靠近当前控制点的采集分支。Y 值仅供定位。\n确定后返回选点；右键‘确定’或按 Enter 读取两点之间的实际采集数据。")
+            return
         QMessageBox.information(self, "手动界限", "输入准确温度或时间；未编辑的 Y 值沿相邻采样点插值，也可直接输入 Y 坐标。重复温度时使用最靠近当前控制点的采集分支。\n确定后返回选点；右键‘确定’或按 Enter 固定结果。")
 
 
@@ -123,7 +182,7 @@ class RescaleDialog(QDialog):
     def __init__(self, owner, selected="x"):
         super().__init__(owner)
         self.owner = owner
-        self.document = owner.mdi.activeSubWindow()
+        self.document = owner.active_document()
         self.options = deepcopy(owner.plot_options.get(self.document.key, default_plot_options()))
         self.setWindowTitle("重定刻度")
         self.resize(530, 280)
@@ -271,7 +330,7 @@ class AddCurvesDialog(QDialog):
             self.error.setText("以下文件没有所选信号：" + "、".join(missing)); return
         candidates = [Curve(ds, y_index=next(i for i, s in enumerate(ds.signals) if s.label == label), axis=self.axis, color="#000000", width=.45) for ds in self.checked_datasets()]
         for candidate in candidates:
-            existing=next((c for c in self.source_curves if c.dataset.path==candidate.dataset.path and c.normal_enabled),None)
+            existing=next((c for c in self.source_curves if c.dataset.path==candidate.dataset.path and c.normal_enabled and c.derived is None),None)
             if existing:
                 candidate.data_indices=deepcopy(existing.data_indices);candidate.data_limit_spec=deepcopy(existing.data_limit_spec);candidate.reset_time=existing.reset_time
                 candidate.x_signal_index,candidate.x_signal_type,candidate.x_smooth_width=existing.x_signal_index,existing.x_signal_type,existing.x_smooth_width
@@ -283,26 +342,30 @@ class AddCurvesDialog(QDialog):
 
 class OverlayOptionsDialog(QDialog):
     """Ten slots per axis; six working tabs; OK/Cancel apply atomically."""
-    def __init__(self, owner, key="__overlay__"):
+    def __init__(self, owner, key=None):
         super().__init__(owner)
+        key=key or owner._overlay_key_for_edit()
         self.owner, self.key, self.axis = owner, key, 0
-        self.draft = [replace(c, operations=list(c.operations), history=list(c.history)) for c in owner.curves]
-        for curve in self.draft: curve.activate_appearance("overlay")
+        source=list(owner.curves)
+        if key in owner.documents and owner.documents[key].curve_uids is not None:
+            order=owner.documents[key].curve_uids;lookup={c.uid:c for c in source}
+            source=[lookup[uid] for uid in order if uid in lookup]+[c for c in source if c.uid not in order]
+        self.draft = [replace(c, operations=list(c.operations), history=list(c.history)) for c in source]
+        for curve in self.draft: curve.activate_view(key)
         base = default_plot_options(); base.update(owner.user_defaults("overlay")["options"])
         self.options = deepcopy(owner.plot_options.get(key, validate_plot_options(base)))
         if key not in owner.documents: owner.apply_default_appearance([c for c in self.draft if c.overlay_enabled], owner.user_defaults("overlay"))
+        self.setObjectName("OverlayOptionsForm")
         self.setWindowTitle("叠加绘图选项")
-        self.resize(660, 455)
-        layout = QVBoxLayout(self); layout.setContentsMargins(7, 7, 7, 7); layout.setSpacing(5)
-        self.tabs = QTabWidget(); layout.addWidget(self.tabs, 1)
+        # Native client640x420, with20px reserved for inline validation.
+        self.setFixedSize(640,440)
+        self.tabs=QTabWidget(self);self.tabs.setObjectName("PageControl");self.tabs.setGeometry(1,0,638,381)
         self.build_curves(); self.build_axes(); self.build_title(); self.build_legend(); self.build_grid(); self.build_auto()
-        self.error = QLabel(); self.error.setWordWrap(True); self.error.setStyleSheet("color: #a02020")
-        layout.addWidget(self.error)
-        row = QHBoxLayout(); row.addStretch()
-        for title, fn in (("确定", self.accept), ("保存", self.save), ("默认值", self.defaults), ("取消", self.reject), ("帮助", self.help)):
-            btn = QPushButton(title); btn.clicked.connect(fn); row.addWidget(btn)
+        self.error=QLabel(self);self.error.setGeometry(8,383,624,20);self.error.setStyleSheet("color:#a02020")
+        for title,name,left,fn in (("确定","OK",188,self.accept),("保存","Save",276,self.save),("默认值","Default",364,self.defaults),("取消","Cancel",452,self.reject),("帮助","Help",544,self.help)):
+            btn=QPushButton(title,self);btn.setObjectName(name);btn.setStyleSheet("min-width:0px;");btn.setGeometry(left,410,81,25);btn.clicked.connect(fn)
+            if title=="确定":btn.setDefault(True)
             if title == "保存": btn.setToolTip("只保存当前页的默认设置；分析会话由文件菜单保存")
-        layout.addLayout(row)
         self.populate()
 
     def build_curves(self):
@@ -351,7 +414,7 @@ class OverlayOptionsDialog(QDialog):
                 pix = QPixmap(14, 14); pix.fill(QColor(value)); color.addItem(QIcon(pix), name, value)
             color.addItem("自定义…", "custom")
             color.setCurrentIndex(max(0, color.findData(curve.color if curve else "#000000")))
-            offset = number(value=curve.overlay_offset if curve else 0, decimals=4); offset.setButtonSymbols(offset.ButtonSymbols.NoButtons)
+            offset = number(value=curve.display_y_offset(curve.overlay_offset) if curve else 0, decimals=4); offset.setButtonSymbols(offset.ButtonSymbols.NoButtons)
             filename = QLineEdit(curve.display_filename if curve else ""); filename.setMaxLength(4096)
             filename.setToolTip(str(curve.dataset.path) + "\n" + curve.result_label if curve else "")
             legend = QWidget(); lr = QHBoxLayout(legend); lr.setContentsMargins(0, 0, 0, 0); lr.setSpacing(1)
@@ -366,7 +429,7 @@ class OverlayOptionsDialog(QDialog):
                 line.currentIndexChanged.connect(lambda _, c=curve, b=line: setattr(c, "style", b.currentData()))
                 symbol.currentIndexChanged.connect(lambda _, c=curve, b=symbol: setattr(c, "marker", b.currentData()))
                 color.currentIndexChanged.connect(lambda _, c=curve, b=color: self.set_color(c, b))
-                offset.valueChanged.connect(lambda val, c=curve: setattr(c, "overlay_offset", val))
+                offset.valueChanged.connect(lambda val, c=curve: setattr(c, "overlay_offset", val/c.y_unit_factor()))
                 filename.textChanged.connect(lambda val, c=curve: setattr(c, "display_filename", val))
                 check.toggled.connect(lambda val, c=curve: setattr(c, "show_legend_text", val))
                 text.textChanged.connect(lambda val, c=curve: setattr(c, "legend_text", val))
@@ -410,7 +473,7 @@ class OverlayOptionsDialog(QDialog):
             step = axis_offset_step(self.owner, curves, self.axis, self.auto_page.collect())
             offsets = [i * step for i in range(len(curves))]
             if not np.isfinite(offsets).all(): raise ValueError("自动偏移超出有限范围")
-            for curve, offset in zip(curves, offsets): curve.overlay_offset = offset
+            for curve, offset in zip(curves, offsets): curve.overlay_offset = offset/curve.y_unit_factor()
             self.error.clear(); self.populate()
         except ValueError as exc:
             self.error.setText(str(exc))
@@ -468,20 +531,34 @@ class OverlayOptionsDialog(QDialog):
         menu.exec(self.table.viewport().mapToGlobal(point))
 
     def build_axes(self):
-        page = QWidget(); layout = QVBoxLayout(page); layout.setContentsMargins(8, 5, 8, 5); layout.setSpacing(3)
-        self.y_labels, self.axis_flag_boxes = [], []
+        page=QWidget();page.setObjectName("AxesSheet")
+        self.y_labels, self.axis_flag_boxes, self.axis_x_offsets = [], [], []
+        domain=self.options["x_domain"] or self.owner.domain
         for i in range(4):
-            group = QGroupBox(f"Y{i+1}"); rows = QVBoxLayout(group); rows.setContentsMargins(12, 5, 8, 4); rows.setSpacing(1)
-            row = QHBoxLayout(); row.addWidget(QLabel("名称"))
-            name = QLineEdit(self.options["y_labels"][i]); name.setMaxLength(40); self.y_labels.append(name); row.addWidget(name, 1)
+            group=QGroupBox(f"Y{i+1}",page);group.setObjectName(f"Y{i+1}Group");group.setGeometry(16,12+72*i,601,65)
+            label=QLabel("名称:",group);label.setGeometry(32,20,40,17)
+            name=QLineEdit(self.options["y_labels"][i],group);name.setMaxLength(40);name.setGeometry(72,16,289,21)
+            name.setObjectName(f"Y{i+1}NameEdit");self.y_labels.append(name)
             curve = next((c for c in self.draft if c.overlay_enabled and c.axis == i), None)
-            row.addWidget(QLabel(curve.result_unit if curve else "")); rows.addLayout(row)
-            row = QHBoxLayout(); row.addWidget(QLabel("显示")); flags = {}
-            for key, caption in (("line", "线条类型"), ("color", "颜色"), ("symbol", "符号")):
-                box = QCheckBox(caption); box.setChecked(self.options["axis_flags"][i][key]); row.addWidget(box); flags[key] = box
-            row.addStretch(); rows.addLayout(row); self.axis_flag_boxes.append(flags); layout.addWidget(group)
-        row = QHBoxLayout(); row.addWidget(QLabel("X 名称")); self.x_label = QLineEdit(self.options["x_label"]); self.x_label.setMaxLength(40)
-        row.addWidget(self.x_label, 1); row.addWidget(QLabel(self.owner.visible_curves()[0].x_unit(self.owner.domain) if self.owner.visible_curves() else "")); layout.addLayout(row)
+            label=QLabel("Y单位:",group);label.setGeometry(412,20,40,17)
+            label=QLabel(curve.result_unit if curve else "",group);label.setGeometry(456,20,128,17);label.setToolTip(label.text())
+            label=QLabel("显示:",group);label.setGeometry(32,42,40,17);flags={}
+            for key,caption,left,width in (("line","线条类型",72,85),("color","颜色",172,60),("symbol","符号",272,60)):
+                box=QCheckBox(caption,group);box.setGeometry(left,42,width,17);box.setChecked(self.options["axis_flags"][i][key]);flags[key]=box
+            label=QLabel("X偏移:",group);label.setGeometry(408,42,44,17)
+            field=QLineEdit(format(self.options["axis_x_offsets"][i],".15g"),group);field.setGeometry(456,38,49,21)
+            field.setObjectName(f"Y{i+1}XOffsetEdit")
+            unit=curve.x_unit(domain) if curve is not None else ""
+            field.setToolTip(f"相邻曲线横向间距（{unit}）；本轴首条曲线不偏移")
+            self.axis_x_offsets.append(field)
+            label=QLabel(unit,group);label.setGeometry(516,42,70,17);label.setToolTip(unit)
+            self.axis_flag_boxes.append(flags)
+        group=QGroupBox("X",page);group.setObjectName("XGroup");group.setGeometry(16,300,601,45)
+        label=QLabel("名称:",group);label.setGeometry(32,20,40,17)
+        self.x_label=QLineEdit(self.options["x_label"],group);self.x_label.setMaxLength(40);self.x_label.setGeometry(72,16,289,21)
+        label=QLabel("X单位:",group);label.setGeometry(412,20,40,17)
+        curve=next((c for c in self.draft if c.overlay_enabled),None);unit=curve.x_unit(domain) if curve else ""
+        label=QLabel(unit,group);label.setGeometry(456,20,128,17);label.setToolTip(unit)
         self.tabs.addTab(page, "坐标轴")
 
     def build_title(self):
@@ -543,6 +620,7 @@ class OverlayOptionsDialog(QDialog):
     def update_page_options(self, settings, page):
         if page == 1:
             settings.update(x_label=self.x_label.text(), y_labels=[box.text() for box in self.y_labels], axis_flags=[{key: box.isChecked() for key, box in flags.items()} for flags in self.axis_flag_boxes])
+            settings["axis_x_offsets"]=[float(field.text()) for field in self.axis_x_offsets]
         elif page == 2:
             heading = self.export_heading.toPlainText()
             if len(heading.splitlines()) > 4 or any(len(line) > 76 for line in heading.splitlines()): raise ValueError("绘图标题最多四行，每行76个字符")
@@ -576,15 +654,18 @@ class OverlayOptionsDialog(QDialog):
                 curves = [c for c in self.draft if c.overlay_enabled and c.axis == axis]
                 if len(curves) > 10: raise ValueError(f"Y{axis+1} 超过 10 条曲线，请调整坐标轴。")
                 if len({c.result_unit for c in curves}) > 1: raise ValueError(f"Y{axis+1} 信号单位不一致，请分配不同坐标轴。")
+                if not np.isfinite((len(curves)-1)*options["axis_x_offsets"][axis]):raise ValueError("X偏移超出有限数值范围")
             selected = self.owner.selected()
             selected_uid = selected.uid if selected else None
+            options["overlay_members"]=[c.uid for c in self.draft if c.overlay_enabled]
             self.owner.curves = self.draft
             self.owner.plot_options[self.key] = options
             self.owner.sync_documents(); self.owner.rebuild_files()
             index = next((i for i, c in enumerate(self.owner.curves) if c.uid == selected_uid), 0)
             if self.owner.curves: self.owner.files.setCurrentItem(self.owner.files.topLevelItem(index))
-            doc = self.owner._document(self.key); doc.plot_signature = None
-            self.owner.touch(); self.owner.show_overlay(); self.owner.redraw()
+            members = [c for c in self.draft if c.overlay_enabled]
+            doc = self.owner._document(self.key); doc.curve_uids = [c.uid for c in members]; doc.plot_signature = None
+            self.owner.touch(); self.owner._show_document(self.key); self.owner.redraw()
             return True
         except ValueError as exc:
             self.error.setText(str(exc)); return False
@@ -613,6 +694,7 @@ class OverlayOptionsDialog(QDialog):
             self.populate()
         elif page == 1:
             self.x_label.clear()
+            for field in self.axis_x_offsets:field.setText("0")
             for box in self.y_labels: box.clear()
             for flags in self.axis_flag_boxes:
                 for box in flags.values(): box.setChecked(False)
@@ -632,6 +714,7 @@ class OverlayOptionsDialog(QDialog):
 
     def help(self):
         self.error.setText("每个 Y 轴最多 10 条兼容信号。确定应用全部页；取消放弃草稿。保存只存当前页默认设置；默认值只恢复当前页。")
+        self.error.setToolTip(self.error.text())
 
 
 class SignalAnalysisDialog(QDialog):

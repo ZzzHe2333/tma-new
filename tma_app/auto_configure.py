@@ -50,7 +50,8 @@ class AutoConfigureDialog(QDialog):
         super().__init__(owner)
         self.owner = owner
         base = default_plot_options(); base.update(owner.user_defaults("overlay")["options"])
-        self.options = validate_plot_options(owner.plot_options.get("__overlay__", base))
+        self.key = owner._overlay_key_for_edit() if hasattr(owner, "_overlay_key_for_edit") else "__overlay__"
+        self.options = validate_plot_options(owner.plot_options.get(self.key, base))
         self.sources = list({str(c.dataset.path): c.dataset for c in owner.curves}.values())
         self.setObjectName("AutoConfigureForm"); self.setWindowTitle("叠图自动配置")
         self.setFixedSize(631, 355); self.setModal(True)
@@ -115,13 +116,16 @@ class AutoConfigureDialog(QDialog):
             if not selected: raise ValueError("请选择要叠加的文件")
             draft = [replace(c, operations=list(c.operations), history=list(c.history)) for c in self.owner.curves]
             for curve in draft:
-                curve.activate_appearance("normal")
+                curve.activate_view(None)
                 normal = {key: getattr(curve, key) for key in APPEARANCE_FIELDS}
-                curve.activate_appearance("overlay")
+                from .overlay_views import DETAIL_FIELDS
+                details={key:getattr(curve,key) for key in DETAIL_FIELDS}
+                curve.activate_view(self.key)
                 for key, value in normal.items(): setattr(curve, key, value)
+                for key,value in details.items():setattr(curve,key,value)
             curves, used = [], set()
             for curve in draft:
-                identity = (str(curve.dataset.path), curve.y_index, curve.result_unit)
+                identity = (str(curve.dataset.path), curve.y_index, curve.result_unit, curve.uid if curve.derived is not None else None)
                 included = str(curve.dataset.path) in selected and config["signals"][curve.axis] and curve.visible and curve.normal_enabled and identity not in used
                 curve.overlay_enabled = included
                 if included: curves.append(curve); used.add(identity)
@@ -137,19 +141,20 @@ class AutoConfigureDialog(QDialog):
                     group = [c for c in curves if c.axis == axis]
                     if group:
                         step = axis_offset_step(self.owner, group, axis, options["overlay_auto"])
-                        for i, curve in enumerate(group): curve.overlay_offset = i*step
+                        for i, curve in enumerate(group): curve.overlay_offset = i*step/curve.y_unit_factor()
                         if not np.isfinite([c.offset for c in group]).all(): raise ValueError("自动偏移超出有限范围")
             if config["axis"]: options["axis_flags"] = optimize_axis_labels(curves)
             if config["legend"]: optimize_legend(curves, options)
             options.update(overlay_configure=config, export_title=config["heading"])
             options = validate_plot_options(fill_manual_limits(self.owner, options))
+            options["overlay_members"]=[c.uid for c in curves]
             selected_curve = self.owner.selected()
             uid = selected_curve.uid if selected_curve and any(c.uid == selected_curve.uid for c in curves) else curves[0].uid
             self.owner.cancel_measurement(redraw=False)
-            self.owner.curves = draft; self.owner.plot_options["__overlay__"] = options
+            self.owner.curves = draft; self.owner.plot_options[self.key] = options
             self.owner.sync_documents(); self.owner.rebuild_files()
-            doc = self.owner._document("__overlay__"); doc.plot_signature = None
-            self.owner.show_overlay()
+            doc = self.owner._document(self.key); doc.curve_uids = [c.uid for c in curves]; doc.plot_signature = None
+            self.owner._show_document(self.key)
             index = next(i for i, c in enumerate(draft) if c.uid == uid)
             self.owner.files.setCurrentItem(self.owner.files.topLevelItem(index))
             self.owner.touch(); self.owner.redraw()

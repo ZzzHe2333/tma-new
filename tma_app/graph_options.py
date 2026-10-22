@@ -71,9 +71,9 @@ class GraphOptionsDialog(QDialog):
     def __init__(self, owner, key=None):
         super().__init__(owner)
         self.owner = owner
-        self.document = owner.mdi.activeSubWindow()
+        self.document = owner.active_document()
         self.key = key or getattr(self.document, "key", None)
-        if not self.key or self.key == "__overlay__":
+        if not self.key or self.key == "__overlay__" or self.key.startswith("__overlay__:"):
             raise ValueError("曲线图选项需要活动的普通数据文档")
         if self.document is None or self.document.key != self.key:
             raise ValueError("活动文档与曲线图选项不匹配")

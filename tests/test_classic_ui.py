@@ -39,7 +39,8 @@ def test_source_menu_order_and_glyphs(ui):
     assert not ui.documents
     assert not ui.classic_actions["Open1"].icon().isNull()
     assert ui.classic_actions["Open1"].isEnabled()
-    assert not ui.classic_actions["GlassTransition1"].isEnabled()
+    assert ui.classic_actions["GlassTransition1"].isEnabled()
+    assert ui.classic_actions["SigHorizontal1"].isEnabled()
 
 
 def test_independent_documents_overlay_and_close(ui, tmp_path):
@@ -49,10 +50,15 @@ def test_independent_documents_overlay_and_close(ui, tmp_path):
     ui.show_overlay()
     assert len(ui.visible_curves()) == 2
     assert len(ui.mdi.subWindowList()) == 3
+    assert ui.mdi.activeSubWindow().key == "__overlay__"
     ui.show_normal()
     ui.close_active_document()
     assert len(ui.curves) == 1
     ui.show_overlay()
+    # 再次点击“叠图”应新开一张独立的叠图，而不是覆盖原叠图。
+    assert ui.mdi.activeSubWindow().key == "__overlay__:2"
+    assert "__overlay__" in ui.documents and "__overlay__:2" in ui.documents
+    assert len(ui.mdi.subWindowList()) == 3
     assert len(ui.visible_curves()) == 1
 
 

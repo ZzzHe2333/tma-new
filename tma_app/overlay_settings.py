@@ -111,7 +111,7 @@ def axis_offset_step(owner, curves, axis, settings):
         minor_gaps = minor_gaps[minor_gaps > 0]
         major = float(np.median(major_gaps)) if len(major_gaps) else (high-low)/5
         minor = float(np.median(minor_gaps)) if len(minor_ticks) and len(minor_gaps) else major/4
-        doc = owner.mdi.activeSubWindow() if hasattr(owner, "mdi") else None
+        doc = owner.active_document() if hasattr(owner,"active_document") else (owner.mdi.activeSubWindow() if hasattr(owner,"mdi") else None)
         setting = owner.plot_options.get(doc.key, {}).get("y_ticks", [None]*4)[axis] if doc is not None else None
         if setting is not None:
             major, minor = setting["label_interval"], setting["tick_interval"]

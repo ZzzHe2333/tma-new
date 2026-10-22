@@ -32,7 +32,9 @@ from . import __version__
 from .reader import read_dataset
 from .numerics import analyze, process_signal
 from .workspace import Curve, PALETTE, save_session, load_session
-from .measurement import MeasurementArtists, initial_indices, point_values
+from .measurement import MeasurementArtists,initial_indices,point_values,initial_y_point
+from .point_labels import CURVE_VALUE_KINDS
+from .peak_integration import KINDS as INTEGRATION_KINDS
 from .legacy_t1_t2_h import format_plot_temp_c
 from .graph_options import render_style
 
@@ -77,14 +79,16 @@ def button(text, callback, primary=False):
 
 
 class DataModel(QAbstractTableModel):
-    def __init__(self, curve=None, domain="temperature"):
+    def __init__(self, curve=None, domain="temperature",display_x_offset=0.):
         super().__init__()
         self.curve, self.domain = curve, domain
         self.rows = np.array([],dtype=int) if curve is None else curve.active_rows
+        self.source_data = None if curve is None else curve.logical_dataset
         self.display_xy = None
         if curve is not None:
             try:
                 self.display_xy = curve.xy(domain)
+                self.display_xy=(self.display_xy[0]+display_x_offset,self.display_xy[1])
             except ValueError:
                 pass
 
@@ -99,7 +103,7 @@ class DataModel(QAbstractTableModel):
             c = self.curve
             column = index.column()
             if column < len(c.dataset.signals):
-                val = c.dataset.values[self.rows[index.row()], column]
+                val = self.source_data.values[self.rows[index.row()], column]
             else:
                 if self.display_xy is None:
                     return "—"
@@ -110,7 +114,7 @@ class DataModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.DisplayRole:
             if orientation == Qt.Orientation.Vertical:
                 return str(int(self.rows[section]) + 1)
-            labels = [s.label for s in self.curve.dataset.signals] + ["显示 X", "显示 Y"]
+            labels = [s.label for s in self.source_data.signals] + ["显示 X", "显示 Y"]
             return labels[section]
 
 
@@ -429,8 +433,14 @@ class MainWindow(QMainWindow):
         for ds in datasets:
             yi = next((i for i, s in enumerate(ds.signals) if "dimension" in s.name.lower()), min(2, len(ds.signals) - 1))
             curve = Curve(ds, y_index=yi, color=PALETTE[len(self.curves) % len(PALETTE)])
+            from .dimension_units import dimension_index
+            if dimension_index(ds) is not None or ds.time_index is not None or ds.temperature_index is not None:
+                from .preferences import load_defaults
+                try:curve.unit_options=deepcopy(load_defaults('units')['options'].get('unit_defaults'))
+                except (ValueError,OSError) as exc:self.log.appendPlainText(f'单位默认设置未载入：{exc}')
             self.curves.append(curve)
             self.log.appendPlainText(f"导入 {ds.path.name} · {len(ds.values):,} 点 · SHA256 {ds.sha256}")
+            self.update_curve_mass(curve)
             for warning in ds.warnings:
                 self.log.appendPlainText(f"  提示: {warning}")
         if datasets:
@@ -443,16 +453,41 @@ class MainWindow(QMainWindow):
         if failures:
             self.warn("以下文件未能导入：\n" + "\n".join(failures))
 
+    def update_curve_mass(self, curve):
+        from .mass_lookup import lookup_record
+        result = lookup_record(curve.sample_name)
+        metadata = curve.dataset.metadata
+        for key in ("LookupMass", "LookupMassUnit", "LookupMassSource", "LookupMassSample"): metadata.pop(key, None)
+        if result.value is not None:
+            metadata.update(LookupMass=[str(result.value)], LookupMassUnit=[result.unit], LookupMassSource=[result.source], LookupMassSample=[curve.sample_name])
+            self.log.appendPlainText(f"  m = {result.value:g} {result.unit} · {curve.sample_name} · {result.source}")
+        else: self.log.appendPlainText(f"  m：{result.message}")
+        return result
+
+    def refresh_mass_lookup(self):
+        seen = set(); matched = 0
+        for curve in self.curves:
+            if id(curve.dataset) in seen: continue
+            seen.add(id(curve.dataset)); matched += self.update_curve_mass(curve).value is not None
+        if seen: self.touch(); self.rebuild_files()
+        self.statusBar().showMessage(f"m 数据源已更新：{matched}/{len(seen)} 个样品匹配成功")
+
     def rebuild_files(self):
         previous = self.selected()
         self._updating = True
         self.files.clear()
         for curve in self.curves:
-            item = QTreeWidgetItem([curve.dataset.path.name, f"{len(curve.dataset.values):,}"])
+            item = QTreeWidgetItem([curve.dataset.path.name, f"{curve.sample_count:,}"])
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(0, Qt.CheckState.Checked if curve.visible else Qt.CheckState.Unchecked)
             item.setForeground(0, QColor(curve.color))
-            item.setToolTip(0, str(curve.dataset.path) + "\n" + curve.dataset.name)
+            tooltip = str(curve.dataset.path) + "\n" + curve.sample_name
+            mass = next((str(v).strip() for v in curve.dataset.metadata.get("LookupMass", curve.dataset.metadata.get("Mass", [])) if str(v).strip()), None)
+            if mass:
+                unit = " ".join(curve.dataset.metadata.get("LookupMassUnit", []))
+                tooltip += f"\n质量 m = {mass} {unit}"
+                tooltip += "\n" + " ".join(curve.dataset.metadata.get("LookupMassSource", []))
+            item.setToolTip(0, tooltip)
             self.files.addTopLevelItem(item)
             if previous is not None and curve.uid == previous.uid:
                 self.files.setCurrentItem(item)
@@ -468,17 +503,21 @@ class MainWindow(QMainWindow):
         self._updating = True
         self.y_box.clear()
         if c:
-            self.y_box.addItems([s.label for s in c.dataset.signals])
+            self.y_box.addItems([s.label for s in c.logical_dataset.signals])
+            self.y_box.setEnabled(c.derived is None)
             self.y_box.setCurrentIndex(c.y_index)
             self.axis_box.setCurrentIndex(c.axis)
             self.width_box.setValue(c.width)
             self.style_box.setCurrentIndex(self.style_box.findData(c.style))
-            self.xshift_box.setValue(c.x_shift)
+            for field,factor in ((self.xshift_box,c.x_unit_factor(self.domain)),(self.offset_box,c.y_unit_factor())):
+                field.setDecimals(max(4,min(14,4+int(np.ceil(max(0.,-np.log10(factor)))))))
+            self.xshift_box.setValue(c.display_x_shift(self.domain))
             self.scale_box.setValue(c.scale)
-            self.offset_box.setValue(c.offset)
+            self.offset_box.setValue(c.display_y_offset())
             self.color_button.setStyleSheet(f"color: {c.color}; font-weight: 600;")
-            self.operation_label.setText("处理记录：" + (" → ".join(c.operations) or "原始信号"))
-            self.metadata.setPlainText(json.dumps({"来源": str(c.dataset.path), "SHA256": c.dataset.sha256, "警告": c.dataset.warnings, "参数": c.dataset.metadata}, ensure_ascii=False, indent=2))
+            self.operation_label.setText("处理记录：" + (" → ".join(c.operations) or (c.derived['label'] if c.derived is not None else "原始信号")))
+            from .file_information import snapshot
+            self.metadata.setPlainText(json.dumps({"文件信息":snapshot(c),"来源": str(c.dataset.path), "SHA256": c.dataset.sha256, "警告": c.dataset.warnings, "参数": c.dataset.metadata}, ensure_ascii=False, indent=2))
             try:
                 x, _ = c.xy(self.domain)
                 self.lo_box.setValue(float(np.min(x)))
@@ -487,7 +526,7 @@ class MainWindow(QMainWindow):
                 pass
         else:
             self.metadata.clear()
-        self.table.setModel(DataModel(c, self.domain))
+        self.table.setModel(DataModel(c,self.domain,self.display_x_offset(c)))
         self._updating = False
         self.redraw()
 
@@ -525,7 +564,8 @@ class MainWindow(QMainWindow):
         used = {curve.axis for curve in self.curves}
         axis = next((i for i in range(4) if i not in used), c.axis)
         curve = Curve(c.dataset, y_index=index, axis=axis, color=PALETTE[len(self.curves) % len(PALETTE)])
-        curve.data_indices=deepcopy(c.data_indices);curve.data_limit_spec=deepcopy(c.data_limit_spec);curve.reset_time=c.reset_time
+        curve.sample_size_mm=c.sample_size_mm;curve.file_info=deepcopy(c.file_info);curve.unit_options=deepcopy(c.unit_options)
+        curve.data_indices=deepcopy(c.data_indices if c.derived is None else c.derived['source_rows']);curve.data_limit_spec=deepcopy(c.data_limit_spec) if c.derived is None else None;curve.reset_time=c.reset_time
         curve.x_signal_index,curve.x_signal_type,curve.x_smooth_width=c.x_signal_index,c.x_signal_type,c.x_smooth_width
         self.curves.append(curve)
         self.touch()
@@ -536,15 +576,22 @@ class MainWindow(QMainWindow):
         c = self.selected()
         if not c or self._updating:
             return
-        c.axis, c.width, c.style = self.axis_box.currentIndex(), self.width_box.value(), self.style_box.currentData()
-        c.x_shift, c.scale, c.offset = self.xshift_box.value(), self.scale_box.value(), self.offset_box.value()
+        sender=self.sender()
+        widgets=(self.axis_box,self.width_box,self.style_box,self.xshift_box,self.scale_box,self.offset_box)
+        all_fields=sender not in widgets
+        if all_fields or sender is self.axis_box:c.axis=self.axis_box.currentIndex()
+        if all_fields or sender is self.width_box:c.width=self.width_box.value()
+        if all_fields or sender is self.style_box:c.style=self.style_box.currentData()
+        if all_fields or sender is self.xshift_box:c.x_shift=self.xshift_box.value()/c.x_unit_factor(self.domain)
+        if all_fields or sender is self.scale_box:c.scale=self.scale_box.value()
+        if all_fields or sender is self.offset_box:c.offset=self.offset_box.value()/c.y_unit_factor()
         self.touch()
-        self.table.setModel(DataModel(c, self.domain))
+        self.table.setModel(DataModel(c,self.domain,self.display_x_offset(c)))
         self.redraw()
 
     def y_changed(self, index):
         c = self.selected()
-        if c and not self._updating and index >= 0:
+        if c and c.derived is None and not self._updating and index >= 0:
             c.y_index = index
             c.working = None
             c.working_rows,c.smooth_source_rows=None,None
@@ -582,6 +629,9 @@ class MainWindow(QMainWindow):
 
     def visible_curves(self):
         return [c for c in self.curves if c.visible and (not self.single.isChecked() or c is self.selected())]
+
+    def display_x_offset(self,curve):
+        return 0.
 
     def redraw(self, *_):
         if not hasattr(self, "figure"):
@@ -634,7 +684,8 @@ class MainWindow(QMainWindow):
             label = c.legend_text or c.dataset.path.name
             style = render_style(c.style)
             gaps=np.flatnonzero(np.diff(c.active_rows)!=1)+1
-            px,py=np.insert(x,gaps,np.nan),np.insert(y,gaps,np.nan)
+            dx=self.display_x_offset(c)
+            px,py=np.insert(x+dx,gaps,np.nan),np.insert(y,gaps,np.nan)
             line, = axis.plot(px, py, color=c.color, lw=c.width, ls=style, marker=c.marker or ("." if c.style == "None" else ""), markevery=max(1, len(x)//60), ms=3, label=label if c.show_legend else "_nolegend_")
             line._tma_curve_uid = c.uid
             if c.show_legend:
@@ -650,26 +701,27 @@ class MainWindow(QMainWindow):
                             and r["transform"] == c.result_transform(self.domain)]
                 for result in matching[-6:]:
                     if "interactive" in result:
-                        editor = MeasurementArtists(axis, c, result, self.domain)
+                        editor = MeasurementArtists(axis,c,result,self.domain,display_x_offset=dx)
                         self._measurement_artists.append(editor)
                         self._result_annotations.append((result, editor.annotation))
+                        self._result_annotations.extend((result, text) for text in editor.details)
                         self._result_annotations.extend((result, text) for text in editor.temps)
                         continue
                     vals = result["values"]
                     options = result.get("annotation", {})
                     if result["kind"] == "note":
-                        annotation = axis.annotate(vals["text"], (vals["x"], vals["y"]), xytext=options.get("offset", (0, 0)), textcoords="offset points", fontsize=10, color=c.color)
+                        annotation = axis.annotate(vals["text"], (vals["x"]+dx, vals["y"]), xytext=options.get("offset", (0, 0)), textcoords="offset points", fontsize=10, color=c.color)
                         self._result_annotations.append((result, annotation))
                     if result["kind"] == "signal_max":
                         px, py = vals["max_x"], vals["max_y"]
-                        axis.plot([px], [py], "o", color=c.color, ms=4)
-                        text = f"{format_plot_temp_c(px)} °C" if self.domain == "temperature" else f"{px:.6g} {c.x_unit(self.domain)}"
-                        annotation = axis.annotate(text, (px, py), xytext=options.get("offset", (8, 16)), textcoords="offset points", fontsize=8, color=c.color,
+                        axis.plot([px+dx], [py], "o", color=c.color, ms=4)
+                        text = f"{format_plot_temp_c(px)} {c.x_unit(self.domain)}" if self.domain == "temperature" else f"{px:.6g} {c.x_unit(self.domain)}"
+                        annotation = axis.annotate(text, (px+dx, py), xytext=options.get("offset", (8, 16)), textcoords="offset points", fontsize=8, color=c.color,
                                                    arrowprops={"arrowstyle": "-", "color": c.color, "lw": .7})
                         self._result_annotations.append((result, annotation))
                     elif result["kind"] == "signal_change":
                         sx, sy, ex, ey = (vals[k] for k in ("start_x", "start_y", "stop_x", "stop_y"))
-                        axis.plot([sx, ex], [sy, ey], "o", color=c.color, ms=4)
+                        axis.plot([sx+dx, ex+dx], [sy, ey], "o", color=c.color, ms=4)
                         texts = []
                         if options.get("change", True):
                             change = vals["change"] if options.get("signed", True) else abs(vals["change"])
@@ -679,23 +731,26 @@ class MainWindow(QMainWindow):
                         if options.get("x_limits", True):
                             texts.append(f"X: {sx:.6g} → {ex:.6g}")
                         if texts:
-                            annotation = axis.annotate("\n".join(texts), (ex, ey), xytext=options.get("offset", (8, 16)), textcoords="offset points", fontsize=8, color=c.color,
+                            from .measurement import ResultAnnotation, split_result_lines
+                            annotation = ResultAnnotation("\n".join(texts), (ex+dx, ey), xytext=options.get("offset", (8, 16)), textcoords="offset points", fontsize=8, color=c.color,
                                                        arrowprops={"arrowstyle": "-", "color": c.color, "lw": .7})
+                            axis.add_artist(annotation)
                             self._result_annotations.append((result, annotation))
-                        axis.plot([sx, ex], [sy, sy], ":", color=c.color, lw=.6)
-                        axis.annotate("", (ex, ey), (ex, sy), arrowprops={"arrowstyle": "<->", "color": c.color, "lw": .7})
+                            self._result_annotations.extend((result, text) for text in split_result_lines(annotation, result, [], c.color))
+                        axis.plot([sx+dx, ex+dx], [sy, sy], ":", color=c.color, lw=.6)
+                        axis.annotate("", (ex+dx, ey), (ex+dx, sy), arrowprops={"arrowstyle": "<->", "color": c.color, "lw": .7})
                     for xkey, ykey, title in (("peak_x", "peak_y", "Max"), ("onset_x", "onset_y", "Onset")):
                         if xkey in vals:
-                            axis.plot([vals[xkey]], [vals[ykey]], "o", color=c.color, ms=4)
-                            axis.annotate(f"{title} {vals[xkey]:.3f}", (vals[xkey], vals[ykey]), xytext=(8, 14), textcoords="offset points", fontsize=8, color=c.color,
+                            axis.plot([vals[xkey]+dx], [vals[ykey]], "o", color=c.color, ms=4)
+                            axis.annotate(f"{title} {vals[xkey]:.3f}", (vals[xkey]+dx, vals[ykey]), xytext=(8, 14), textcoords="offset points", fontsize=8, color=c.color,
                                           arrowprops={"arrowstyle": "-", "color": c.color, "lw": .7})
                     if result["kind"] in ("slope", "cte"):
                         fitx = np.array([vals["x_start"], vals["x_end"]])
-                        axis.plot(fitx, vals["slope"] * fitx + vals["intercept"], "--", color=c.color, lw=1, alpha=.8)
+                        axis.plot(fitx+dx, vals["slope"] * fitx + vals["intercept"], "--", color=c.color, lw=1, alpha=.8)
                     elif result["kind"] == "onset":
                         for prefix in ("baseline", "tangent"):
                             fitx = np.array([min(vals[prefix + "_x_start"], vals["onset_x"]), max(vals[prefix + "_x_end"], vals["onset_x"])])
-                            axis.plot(fitx, vals[prefix + "_slope"] * fitx + vals[prefix + "_intercept"], ":", color=c.color, lw=1, alpha=.7)
+                            axis.plot(fitx+dx, vals[prefix + "_slope"] * fitx + vals[prefix + "_intercept"], ":", color=c.color, lw=1, alpha=.7)
         for idx, axis in self.axes.items():
             axis.set_ylabel(axis_labels.get(idx, "信号") if idx == 0 or idx in units else "")
             axis.tick_params(colors="#6b788c", labelsize=8)
@@ -736,8 +791,8 @@ class MainWindow(QMainWindow):
         c = self.selected()
         for curve, x, y in self._plot_artists:
             if curve is c:
-                i = int(np.argmin(np.abs(x - event.xdata)))
-                self.statusBar().showMessage(f"{c.dataset.path.name}  |  X {x[i]:.6g}  |  Y {y[i]:.6g}  |  采样点 {i + 1:,}")
+                i = int(np.argmin(np.abs(x-(event.xdata-self.display_x_offset(curve)))))
+                self.statusBar().showMessage(f"{c.dataset.path.name}  |  X {x[i]:.6g}  |  Y {y[i]:.6g}  |  采样点 {int(curve.active_rows[i])+1:,}")
                 break
 
     def layout_result_annotations(self):
@@ -765,6 +820,12 @@ class MainWindow(QMainWindow):
                 annotation.xyann = chosen or (12, 18)
             annotation.update_positions(renderer)
             occupied.append(Text.get_window_extent(annotation, renderer).expanded(1.04, 1.12))
+        for editor in self._measurement_artists:
+            offsets = editor.entry.get("annotation", {}).get("label_offsets", {})
+            for index, text in enumerate(editor.details, 1):
+                if f"info{index}" not in offsets:
+                    origin = editor.annotation.xyann
+                    text.xyann = (origin[0], origin[1]-18*index)
 
     def result_press(self, event):
         if event.button != 1 or self.range_enabled.isChecked() or self.toolbar.mode:
@@ -772,10 +833,12 @@ class MainWindow(QMainWindow):
         if event.x is None or event.y is None: return
         if getattr(event, "dblclick", False) and self._pending_measurement is not None:
             for editor in self._measurement_artists:
-                if editor.entry is self._pending_measurement and getattr(event, "inaxes", None) is editor.axis:
+                if editor.entry is self._pending_measurement and editor.axis.bbox.contains(event.x,event.y):
                     point = editor.entry["interactive"].get("active_point", 0)
-                    x = editor.axis.transData.inverted().transform((event.x, event.y))[0]
-                    editor.move(point, float(x))
+                    x,y=editor.axis.transData.inverted().transform((event.x,event.y))
+                    target=float(y) if editor.entry["kind"]=="curve_value_y" else float(x)-editor.display_x_offset
+                    try:editor.move(point,target)
+                    except ValueError as exc:self.statusBar().showMessage(str(exc),5000);return
                     point = (point+1) % len(editor.indices)
                     editor.entry["interactive"]["active_point"] = point
                     editor.update(active=point); self._update_measurement_controls(); self.canvas.draw_idle()
@@ -800,13 +863,24 @@ class MainWindow(QMainWindow):
         if pending is None or not any(editor.entry is pending for editor in self._measurement_artists): return
         if event.key in ("enter", "return"):
             self.confirm_measurement(); return
+        if str(event.key).lower() in ("tab","shift+tab","backtab"):
+            direction=-1 if str(event.key).lower()!="tab" else 1
+            point=(pending["interactive"].get("active_point",0)+direction)%len(pending["interactive"]["indices"])
+            pending["interactive"]["active_point"]=point
+            for editor in self._measurement_artists:
+                if editor.entry is pending:editor.update(active=point)
+            self.canvas.draw_idle()
+            return
         parts = str(event.key).lower().split("+")
-        if parts[-1] not in ("left", "right"): return
+        allowed=("left","right","up","down") if pending["kind"]=="curve_value_y" else ("left","right")
+        if parts[-1] not in allowed:return
         for editor in self._measurement_artists:
             if editor.entry is pending:
                 point = pending["interactive"].get("active_point", 0)
-                pixels = (10 if "ctrl" in parts or "control" in parts or "shift" in parts else 1) * (1 if parts[-1] == "right" else -1)
-                editor.nudge(point, pixels)
+                pixels = (10 if "ctrl" in parts or "control" in parts or "shift" in parts else 1) * (1 if parts[-1] in ("right","up") else -1)
+                try:editor.nudge(point, pixels)
+                except ValueError as exc:
+                    self.statusBar().showMessage(str(exc),5000);return
                 self._update_measurement_controls(); self.canvas.draw_idle()
                 return
 
@@ -814,10 +888,13 @@ class MainWindow(QMainWindow):
         if self._drag_measurement is not None:
             editor, point = self._drag_measurement
             if event.x is None or event.y is None: return
-            x = editor.axis.transData.inverted().transform((event.x, event.y))[0]
-            editor.move(point, float(x))
+            x,y=editor.axis.transData.inverted().transform((event.x,event.y))
+            target=float(y) if editor.entry["kind"]=="curve_value_y" else float(x)-editor.display_x_offset
+            try:editor.move(point,target)
+            except ValueError as exc:self.statusBar().showMessage(str(exc),5000);return
             values = editor.entry["values"]
-            self.statusBar().showMessage(f"点 {point+1}: X {editor.x[editor.indices[point]]:.6g}，Y {editor.y[editor.indices[point]]:.6g}" + (f"  |  H {values['change']:.6g}" if "change" in values else ""))
+            actual_x,actual_y=editor.coords[point]
+            self.statusBar().showMessage(f"点 {point+1}: X {actual_x:.6g}，Y {actual_y:.6g}" + (f"  |  H {values['change']:.6g}" if "change" in values else ""))
             self.refresh_results()
             self._update_measurement_controls()
             self.canvas.draw_idle()
@@ -857,10 +934,17 @@ class MainWindow(QMainWindow):
                 c.assert_contiguous_analysis(self.domain,lo,hi)
                 kind = self.analysis_box.currentData()
                 if kind == "cte":
-                    unit = c.dataset.signals[c.y_index].unit.replace("μ", "µ").strip()
-                    if self.domain != "temperature" or unit not in ("µm", "um") or any(o == "normalize" or o.startswith("derivative:") for o in c.operations):
-                        raise ValueError("CTE 需要温度 X 轴和未求导/归一化的 µm 尺寸信号")
-                result = analyze(x, y, kind, lo, hi, reference_length_mm=self.length_box.value() or None)
+                    unit = c.result_unit.replace("μ", "µ").strip()
+                    if self.domain != "temperature" or unit not in ("µm", "um","mm") or any(o == "normalize" or o.startswith("derivative:") for o in c.operations):
+                        raise ValueError("CTE 需要温度 X 轴和未求导/归一化的 µm/mm 尺寸信号")
+                    from .alpha import positive
+                    length=positive(self.length_box.value(),'试样原始长度(mm)')
+                    result=analyze(x,y,'slope',lo,hi)
+                    from .general_units import displayed_delta_per_c
+                    coefficient=result['slope']/length*(1e6 if unit=='mm' else 1000)*displayed_delta_per_c(c.x_unit(self.domain))
+                    if not np.isfinite(coefficient):raise ValueError('CTE结果超出有限范围')
+                    result.update(method='cte',reference_length_mm=length,cte_ppm_per_k=coefficient,algorithm=f'OLS slope [{unit}/{c.x_unit(self.domain)}] normalized by explicit length [mm] and Celsius temperature delta')
+                else:result = analyze(x, y, kind, lo, hi, reference_length_mm=self.length_box.value() or None)
                 entry = {"file": c.dataset.path.name, "sha256": c.dataset.sha256, "curve_id": c.uid, "kind": kind,
                          "domain": self.domain, "lo": lo, "hi": hi,
                          "signal": c.result_label, "axis": c.axis + 1, "operations": list(c.operations),
@@ -881,7 +965,7 @@ class MainWindow(QMainWindow):
         self.result_table.setRowCount(len(self.results))
         for row, entry in enumerate(self.results):
             values = "; ".join(f"{k}={v:.7g}" if isinstance(v, (float, int)) else f"{k}={v}" for k, v in entry["values"].items())
-            title = {"signal_max": "信号最大", "signal_change": "信号变化", "dimension_change": "尺寸变化", "height_change": "高度差", "note": "批注"}.get(entry["kind"], entry["kind"])
+            title = {"signal_max": "信号最大", "signal_change": "信号变化", "dimension_change": "尺寸变化", "height_change": "高度差", "note": "批注","curve_value":"曲线值于X轴","curve_value_y":"曲线值于Y轴","alpha_at_x":"Alpha于X","alpha_secant":"Alpha X1至X2","alpha_fit":"拟合Alpha X1至X2","step_transition":"步阶转变","glass_transition":"玻璃化转变","peak_max":"峰最大","onset_point":"始点","peak_linear":"线性峰值积分","peak_sigmoid":"水平S形峰值积分"}.get(entry["kind"], entry["kind"])
             cols = [entry["file"], title, f"{entry['lo']:.5g} → {entry['hi']:.5g}", values, entry["signal"] + " / " + " → ".join(entry["operations"])]
             for col, value in enumerate(cols):
                 item = QTableWidgetItem(value)
@@ -889,21 +973,33 @@ class MainWindow(QMainWindow):
                 self.result_table.setItem(row, col, item)
         self.result_table.scrollToBottom()
 
-    def start_point_measurement(self, kind):
+    def start_point_measurement(self, kind, analysis_config=None):
         visible = self.visible_curves()
         c = self.selected()
         if c not in visible: c = visible[0] if visible else None
         if c is None: return
         try:
-            if kind == "dimension_change" and c.dataset.signals[c.y_index].unit.replace("μ", "µ") not in ("µm", "um"):
+            if kind == "dimension_change" and (c.derived is not None or c.dataset.signals[c.y_index].unit.replace("μ", "µ") not in ("µm", "um")):
                 raise ValueError("尺寸变化需要选择 µm 尺寸信号")
             self.range_enabled.setChecked(False)
             if self.toolbar.mode:
                 if "pan" in str(self.toolbar.mode).lower(): self.toolbar.pan()
                 else: self.toolbar.zoom()
-            indices = initial_indices(c, self.domain, kind)
+            from .transitions import KINDS as TRANSITION_KINDS,validate as validate_transition
+            from .peak_onset import KINDS as PEAK_ONSET_KINDS,validate as validate_peak
+            transition_config=validate_transition(analysis_config) if kind in TRANSITION_KINDS else validate_peak(analysis_config) if kind in PEAK_ONSET_KINDS else None
+            if kind in INTEGRATION_KINDS:
+                from .peak_integration import validate as validate_integration
+                transition_config=dict(peak_onset=validate_peak(analysis_config['peak_onset']),integration=validate_integration(analysis_config['integration']))
+                if kind=='peak_sigmoid':
+                    from .sigmoidal import validate as validate_sigmoid
+                    transition_config['sigmoid']=validate_sigmoid(analysis_config.get('sigmoid'))
+            indices = initial_indices(c, self.domain, kind,transition_config)
             x, y = c.xy(self.domain)
-            values = point_values(x, y, kind, indices)
+            positions=None;initial_target=None
+            if kind=="curve_value_y":
+                position,initial_target=initial_y_point(y,c.active_rows);positions=[position];indices=[int(round(position))]
+            values = point_values(x,y,kind,indices,positions)
             coords = [float(x[i]) for i in indices]
             entry = {"file": c.dataset.path.name, "sha256": c.dataset.sha256, "curve_id": c.uid, "kind": kind,
                      "domain": self.domain, "lo": min(coords), "hi": max(coords), "signal": c.result_label,
@@ -911,6 +1007,46 @@ class MainWindow(QMainWindow):
                      "transform": c.result_transform(self.domain),
                      "values": values, "interactive": {"indices": list(indices), "initial_indices": list(indices), "confirmed": False},
                      "annotation": {"change": True, "signed": kind != "height_change", "x_limits": kind != "height_change"}}
+            if kind=='signal_change' and hasattr(self,'signal_change_settings'):entry['annotation']=self.signal_change_settings()
+            if kind=='slope':
+                from .slope import values as compute
+                try:entry['values'].update(compute(c,entry,indices))
+                except ValueError as exc:entry['values']['fit_error']=str(exc)
+            if kind in INTEGRATION_KINDS:
+                from .peak_integration import values as compute
+                from .point_labels import signal_snapshot
+                entry.update(transition_config,point_signal=signal_snapshot(c))
+                try:entry['values'].update(compute(c,entry,indices))
+                except ValueError as exc:entry['values']['fit_error']=str(exc)
+            if kind in PEAK_ONSET_KINDS:
+                from .peak_onset import values as compute
+                from .point_labels import signal_snapshot
+                entry['peak_onset']=transition_config;entry['point_signal']=signal_snapshot(c)
+                try:entry['values'].update(compute(c,entry,indices))
+                except ValueError as exc:entry['values']['fit_error']=str(exc)
+            if kind in TRANSITION_KINDS:
+                from .transitions import values as transition_values
+                entry['transition']=transition_config
+                try:entry['values'].update(transition_values(c,entry,indices))
+                except ValueError as exc:entry['values']['fit_error']=str(exc)
+            if kind in ("alpha_at_x","alpha_secant","alpha_fit"):
+                from .alpha import alpha_values,validate_config
+                entry["alpha"]=validate_config(analysis_config)
+                entry["values"].update(alpha_values(c,entry,indices if positions is None else positions))
+            if kind=="curve_value_y":entry["interactive"].update(positions=positions,initial_positions=list(positions),target_y=initial_target,initial_target_y=initial_target)
+            if kind in CURVE_VALUE_KINDS:
+                from .point_labels import default_options,validate_options,signal_snapshot
+                from .preferences import load_defaults
+                try:saved=load_defaults("analysis")["options"].get("point_label_options")
+                except (ValueError,OSError) as exc:
+                    saved=None;self.log.appendPlainText(f"标记点默认选项未载入：{exc}")
+                options=default_options() if saved is None else validate_options(saved)
+                if saved is None and self.domain!="temperature":options.update(temperature=False,**{("time" if self.domain=="time" else "signal"):True})
+                entry["point_signal"]=signal_snapshot(c)
+                if c.dataset.time_index is None:options["time"]=False
+                if c.dataset.temperature_index is None:options["temperature"]=False
+                if entry["point_signal"] is None:options["signal"]=False
+                entry["annotation"]["point_label"]=options
             self.cancel_measurement(redraw=False)
             self._pending_measurement = entry
             self.show_results.setChecked(True)
@@ -918,7 +1054,7 @@ class MainWindow(QMainWindow):
             for editor in self._measurement_artists:
                 if editor.entry is entry: editor.update(active=0)
             self.canvas.setFocus(Qt.FocusReason.OtherFocusReason)
-            self.statusBar().showMessage("左右拖动红色十字；右键确定、编辑界限或取消。")
+            self.statusBar().showMessage("上下拖动水平标记；右键确定、编辑Y或取消。" if kind=="curve_value_y" else "左右拖动红色十字；右键确定、编辑界限或取消。")
             return entry
         except ValueError as exc:
             self.warn(str(exc))
@@ -940,7 +1076,18 @@ class MainWindow(QMainWindow):
         if pending is not None:
             values = pending["values"]
             label = "选点："
-            if "change" in values:
+            if pending.get("purpose")=="data_limits":
+                label=f"数据界限：{values['start_x']:.6g} 至 {values['stop_x']:.6g}"
+            elif pending.get('purpose')=='delete_peak':label='删除峰：选择已有峰积分范围内的点'
+            elif pending["kind"] in ("alpha_at_x","alpha_secant","alpha_fit"):label=f"Alpha {values['alpha']:.6g} µm/m/°C"
+            elif pending['kind']=='slope':label=values.get('fit_error',f"斜率 {values.get('slope',0):.6g} {values.get('slope_unit','')}")
+            elif pending['kind'] in INTEGRATION_KINDS:label=values.get('fit_error',f"峰面积 {values.get('integral',0):.6g} {values.get('area_unit','')}")
+            elif pending['kind'] in ('peak_max','onset_point'):
+                label=values.get('fit_error','峰最大' if pending['kind']=='peak_max' else '始点')
+            elif pending['kind'] in ('step_transition','glass_transition'):
+                label=values.get('fit_error',f"转变：{values.get('onset_x',0):.6g} 至 {values.get('end_x',0):.6g}")
+            elif pending["kind"] in CURVE_VALUE_KINDS:label=f"选点：X {values['start_x']:.6g}，Y {values['start_y']:.6g}"
+            elif "change" in values:
                 prefix = dict(temperature="T", time="t", signal="X")[pending["domain"]]
                 label += f"{prefix}1 {values['start_x']:.2f}，{prefix}2 {values['stop_x']:.2f}，H {values['change']:.6g}"
             else: label += f"{dict(temperature='温度', time='时间', signal='X')[pending['domain']]} {values['max_x']:.2f}"
@@ -949,6 +1096,35 @@ class MainWindow(QMainWindow):
     def confirm_measurement(self):
         entry = self._pending_measurement
         if entry is None: return
+        if entry['kind']=='slope':
+            from .slope import values as compute
+            curve=next(c for c in self.curves if c.uid==entry['curve_id'])
+            try:
+                entry['values'].update(compute(curve,entry,entry['interactive'].get('positions',entry['interactive']['indices'])))
+                entry['values'].pop('fit_error',None)
+            except ValueError as exc:self.statusBar().showMessage(str(exc),8000);return
+        if entry['kind'] in INTEGRATION_KINDS:
+            from .peak_integration import values as compute
+            curve=next(c for c in self.curves if c.uid==entry['curve_id'])
+            try:
+                entry['values'].update(compute(curve,entry,entry['interactive'].get('positions',entry['interactive']['indices'])))
+                entry['values'].pop('fit_error',None)
+                entry['values'].pop('sigmoid_failure',None)
+            except ValueError as exc:self.statusBar().showMessage(str(exc),8000);return
+        if entry['kind'] in ('peak_max','onset_point'):
+            from .peak_onset import values as compute
+            curve=next(c for c in self.curves if c.uid==entry['curve_id'])
+            try:
+                entry['values'].update(compute(curve,entry,entry['interactive'].get('positions',entry['interactive']['indices'])))
+                entry['values'].pop('fit_error',None)
+            except ValueError as exc:self.statusBar().showMessage(str(exc),8000);return
+        if entry['kind'] in ('step_transition','glass_transition'):
+            from .transitions import values as transition_values
+            curve=next(c for c in self.curves if c.uid==entry['curve_id'])
+            try:
+                entry['values'].update(transition_values(curve,entry,entry['interactive'].get('positions',entry['interactive']['indices'])))
+                entry['values'].pop('fit_error',None)
+            except ValueError as exc:self.statusBar().showMessage(str(exc),8000);return
         entry["interactive"]["confirmed"] = True
         index = next((i for i, original in enumerate(self.results) if original is self._editing_measurement), None)
         if index is not None: self.results[index] = entry
@@ -989,10 +1165,11 @@ class MainWindow(QMainWindow):
             return
         try:
             c.xy(self.domain)
-            x = c.x_values(self.domain)
-            y = c.dataset.values[:, c.y_index] if c.working is None else c.working
+            x = c.x_values(self.domain,canonical=True)
+            y = c.base_y if c.working is None else c.working
+            if c.derived is not None and kind=='smooth':raise ValueError('积分曲线不能平滑')
             if kind in ("smooth","derivative") and np.any(np.diff(c.active_rows)!=1):raise ValueError("请先选择单一连续采集片段再处理信号")
-            reset_y=c.reset_time and c.y_index==c.dataset.time_index and c.result_unit==c.dataset.signals[c.y_index].unit
+            reset_y=c.derived is None and c.reset_time and c.y_index==c.dataset.time_index and not any(op=="normalize" or op.startswith("derivative:") for op in c.operations)
             input_y=y[c.active_rows]-(c.time_origin if reset_y else 0.)
             processed = process_signal(x, input_y, kind, parameter=self.smooth_window.value())
             if reset_y and kind=="smooth":processed+=c.time_origin
@@ -1001,7 +1178,9 @@ class MainWindow(QMainWindow):
             c.working_rows=deepcopy(c.data_indices);c.smooth_source_rows=None
             c.y_type = "custom"
             c.smooth_domain,c.smooth_width,c.smooth_reuse,c.smooth_source,c.smooth_base_ops,c.smooth_x_config=None,0.,False,None,[],None
-            c.operations.append(f"derivative:{c.x_label(self.domain)}" if kind == "derivative" else (f"smooth:{self.smooth_window.value()}" if kind == "smooth" else kind))
+            from .signal_processing import type_label
+            canonical_label=type_label(c.dataset,c.x_signal_index,c.x_signal_type)[0] if self.domain=="signal" else c.dataset.signals[c.dataset.time_index if self.domain=="time" else c.dataset.temperature_index].label
+            c.operations.append(f"derivative:{canonical_label}" if kind == "derivative" else (f"smooth:{self.smooth_window.value()}" if kind == "smooth" else kind))
             self.touch()
             self.selection_changed()
         except Exception as exc:
@@ -1105,19 +1284,24 @@ class MainWindow(QMainWindow):
                     ".svg": {"Creator": "Power By ZzzHe"},
                     ".pdf": {"Author": "Power By ZzzHe", "Creator": "Power By ZzzHe"}}
         options = {"metadata": metadata[suffix]} if suffix in metadata else {}
-        self.figure.savefig(path, dpi=300, facecolor="white", **options)
+        # Expand the full page instead of using a tight crop, so headers and
+        # annotations keep their positions with an extra white border outside.
+        self.figure.savefig(path, dpi=300, facecolor="white",
+                            bbox_inches=self.figure.bbox_inches.padded(0.25), **options)
 
     def write_data(self, path, curve):
         self.protect_output(path, str(path) + ".meta.json")
         x, y = curve.xy(self.domain)
+        display_offset=self.display_x_offset(curve);x=x+display_offset
         with open(path, "w", newline="", encoding="utf-8-sig") as handle:
             writer = csv.writer(handle)
-            writer.writerow([s.label for s in curve.dataset.signals] + [f"display_x:{self.domain}", f"display_y:{curve.result_label}"])
-            writer.writerows(np.column_stack((curve.dataset.values[curve.active_rows], x, y)).tolist())
+            writer.writerow([s.label for s in curve.logical_dataset.signals] + [f"display_x:{self.domain}", f"display_y:{curve.result_label}"])
+            writer.writerows(np.column_stack((curve.logical_dataset.values[curve.active_rows], x, y)).tolist())
         sidecar = Path(str(path) + ".meta.json")
-        sidecar.write_text(json.dumps({"source": str(curve.dataset.path), "sha256": curve.dataset.sha256, "metadata": curve.dataset.metadata,
+        from .file_information import snapshot
+        sidecar.write_text(json.dumps({"file_information":snapshot(curve),"source": str(curve.dataset.path), "sha256": curve.dataset.sha256, "metadata": curve.dataset.metadata,
                                       "warnings": curve.dataset.warnings, "operations": curve.operations, "domain": self.domain,
-                                      "transform": curve.result_transform(self.domain)}, ensure_ascii=False, indent=2), encoding="utf-8")
+                                      "transform": curve.result_transform(self.domain),"derived":curve.derived,"presentation":{"x_offset":display_offset}}, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def export_data(self):
         c = self.selected()
@@ -1133,7 +1317,7 @@ class MainWindow(QMainWindow):
 
     def write_results(self, path):
         self.protect_output(path)
-        keys = ["file", "sha256", "curve_id", "kind", "domain", "lo", "hi", "signal", "axis", "operations", "transform", "reference_length_mm", "values", "interactive", "annotation"]
+        keys = ["file", "sha256", "curve_id", "analysis_id", "kind", "domain", "lo", "hi", "signal", "axis", "operations", "transform", "reference_length_mm", "transition", "peak_onset", "integration", "sigmoid", "auto_limits", "values", "interactive", "annotation"]
         with open(path, "w", encoding="utf-8-sig", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=keys)
             writer.writeheader()
@@ -1151,14 +1335,15 @@ class MainWindow(QMainWindow):
     def write_report(self, path):
         self.protect_output(path)
         import base64
+        from .file_information import snapshot
         from html import escape
         from io import BytesIO
         buffer = BytesIO()
         self.figure.savefig(buffer, format="png", dpi=160, facecolor="white")
         image = base64.b64encode(buffer.getvalue()).decode("ascii")
         payload = escape(json.dumps(self.results, ensure_ascii=False, indent=2))
-        sources = "".join(f"<h3>{escape(c.dataset.path.name)}</h3><pre>{escape(json.dumps({'sha256':c.dataset.sha256,'metadata':c.dataset.metadata,'warnings':c.dataset.warnings}, ensure_ascii=False,indent=2))}</pre>" for c in self.curves)
-        Path(path).write_text(f'<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>TMA Studio 报告</title><style>body{{max-width:1100px;margin:40px auto;font:14px sans-serif;color:#25334a}}img{{width:100%}}pre{{white-space:pre-wrap;background:#f4f6fa;padding:18px}}h1{{color:#2469d9}}@media print{{pre{{break-inside:avoid}}}}</style><h1>TMA Studio · 分析报告</h1><p>版本 {__version__} · 分析方法为独立实现。积分为直线基线面积；Onset 为区间基线与局部切线交点。</p><img src="data:image/png;base64,{image}"><h2>分析结果与参数</h2><pre>{payload}</pre><h2>原始数据与实验方法</h2>{sources}</html>', encoding="utf-8")
+        sources = "".join(f"<h3>{escape(c.dataset.path.name)} · {escape(c.result_label)}</h3><pre>{escape(json.dumps({'sha256':c.dataset.sha256,'metadata':c.dataset.metadata,'file_information':snapshot(c),'warnings':c.dataset.warnings,'derived':c.derived}, ensure_ascii=False,indent=2))}</pre>" for c in self.curves)
+        Path(path).write_text(f'<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>TMA Studio 报告</title><style>body{{max-width:1100px;margin:40px auto;font:14px sans-serif;color:#25334a}}img{{width:100%}}pre{{white-space:pre-wrap;background:#f4f6fa;padding:18px}}h1{{color:#2469d9}}@media print{{pre{{break-inside:avoid}}}}</style><h1>TMA Studio · 分析报告</h1><p>版本 {__version__} · 分析方法为独立实现。原生峰积分对记录时间积分；旧通用积分使用当前X。基线、始点方法和未验证项见各结果参数。</p><img src="data:image/png;base64,{image}"><h2>分析结果与参数</h2><pre>{payload}</pre><h2>原始数据与实验方法</h2>{sources}</html>', encoding="utf-8")
 
     def export_report(self):
         path, _ = QFileDialog.getSaveFileName(self, "导出可打印报告", "TMA-report.html", "HTML (*.html)")
@@ -1170,7 +1355,7 @@ class MainWindow(QMainWindow):
                 self.warn(str(exc))
 
     def about(self):
-        QMessageBox.information(self, "关于 TMA Studio", f"TMA Studio {__version__}\nPython + PySide6 (Qt) + Matplotlib\n\n独立实现的热分析工作台。支持已验证的 TA TMA 二进制与 StartOfData 文本。\n保留原始采集顺序；区间拟合/求导不自动排序升降温分支。\n\n斜率：最小二乘直线拟合。\n积分：端点直线基线的梯形面积，不直接作为焓。\nCTE：斜率(µm/°C) / 长度(mm) × 1000 ppm/K。\nOnset：区间前段基线与最大绝对斜率附近切线交点，需人工核对。\n\n尚未实现原 UA 的专用 DSC/TGA/DMA 分析、旧会话/宏兼容。")
+        QMessageBox.information(self, "关于 TMA Studio", f"TMA Studio {__version__}\nPython + PySide6 (Qt) + Matplotlib\n\n独立实现的热分析工作台。支持已验证的 TA TMA 二进制与 StartOfData 文本。\n保留原始采集顺序；区间拟合/求导不自动排序升降温分支。\n\n斜率：最小二乘直线拟合。\n积分：支持直线／水平S形基线；原生峰积分使用记录时间，不直接作为焓。\nCTE：斜率(µm/°C) / 长度(mm) × 1000 ppm/K。\nOnset：区间前段基线与最大绝对斜率附近切线交点，需人工核对。\n\n尚未实现原 UA 的专用 DSC/TGA/DMA 分析、旧会话/宏兼容。")
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -1219,6 +1404,20 @@ def main():
             inputs = [Path(arg) for arg in sys.argv[3:]]
             session_check = len(inputs) == 1 and inputs[0].suffix.casefold() == ".tmas"
             checked_dialogs = []
+            def capture_verify_state():
+                return dict(curve_objects=list(window.curves),curves={c.uid:dict(vars(c)) for c in window.curves},plots=deepcopy(window.plot_options),results=list(window.results),
+                    undo=dict(window._limits_undo),selected=window.selected().uid if window.selected() else None,document=window.active_document(),domain=window.domain)
+            def restore_verify_state(state):
+                window.cancel_measurement(redraw=False)
+                window.curves[:]=state['curve_objects']
+                for curve in window.curves:
+                    original=state['curves'][curve.uid];vars(curve).clear();vars(curve).update(original)
+                window.plot_options.clear();window.plot_options.update(state['plots']);window.results[:]=state['results'];window._limits_undo=state['undo']
+                window.domain=state['domain'];window.domain_box.blockSignals(True)
+                window.domain_box.setCurrentIndex({'temperature':0,'time':1,'signal':2}[state['domain']]);window.domain_box.blockSignals(False)
+                window._show_document(state['document'].key);window.rebuild_files()
+                if state['selected'] is not None:window.files.setCurrentItem(window.files.topLevelItem(next(i for i,c in enumerate(window.curves) if c.uid==state['selected'])))
+                window.refresh_results();window.redraw();window.canvas.draw()
             if session_check:
                 window.restore_session(inputs[0])
                 if hasattr(window, "show_overlay_options"):
@@ -1270,7 +1469,342 @@ def main():
                         label=kind+"_limits" if kind else "data_limits"
                         dialog.grab().save(str(output.with_suffix("."+label+".png")))
                         dialog.reject();checked_dialogs.append(label)
-                    window.show_overlay()
+                    # Exercise actual cursor data selection in the frozen app,
+                    # then undo it before running the archived-result checks.
+                    curve=window.current_data_curve();cursor_uid=curve.uid
+                    original_rows=curve.active_rows.copy();original_results=deepcopy(window.results)
+                    cursor_count=len(original_rows)
+                    pending=window.graphic_range()
+                    if pending is None:raise ValueError("打包程序未启动光标数据界限")
+                    first,last=cursor_count//4,3*cursor_count//4
+                    pending["interactive"]["indices"]=[first,last];window.redraw()
+                    application.processEvents();window.canvas.draw()
+                    window.grab().save(str(output.with_suffix(".graphic_limits.png")))
+                    window.create_measurement_menu().actions()[0].trigger()
+                    curve=window.selected()
+                    if (window._pending_measurement is not None or curve.uid!=cursor_uid
+                            or not np.array_equal(curve.active_rows,original_rows[first:last+1])
+                            or window.results!=original_results):raise ValueError("打包程序光标数据界限未正确确定")
+                    window.undo()
+                    if not np.array_equal(window.selected().active_rows,original_rows):raise ValueError("打包程序光标界限撤销失败")
+                    checked_dialogs.append("graphic_data_limits_and_undo")
+                    from .overlay_views import snapshot
+                    source_key=next(key for key in window.documents if window._is_overlay(key))
+                    source_document=window._show_document(source_key)
+                    baseline=[snapshot(c) for c in window._document_curves(source_document)]
+                    source_uids=list(source_document.curve_uids or [])
+                    window.update_overlay_copy_menu()
+                    copy_menu=window.classic_actions["Copy4"].menu()
+                    copy_action=next(a for a in copy_menu.actions() if a.isVisible() and a.data()==source_key)
+                    copy_action.trigger();copied=window.active_document()
+                    if copied is None or copied.key==source_key or copied.curve_uids!=source_uids:raise ValueError("打包程序叠图复制失败")
+                    visible=window.visible_curves()
+                    if visible:
+                        visible[0].color="#ff00ff";visible[0].overlay_offset+=3;visible[0].visible=False
+                    window.redraw();application.processEvents()
+                    window.grab().save(str(output.with_suffix(".overlay_copy.png")))
+                    window._show_document(source_key)
+                    if [snapshot(c) for c in window._document_curves(source_document)]!=baseline:raise ValueError("打包程序叠图副本串改源窗口")
+                    copied.close()
+                    if copied.key in window.documents or copied.key in window.plot_options:raise ValueError("打包程序关闭叠图副本失败")
+                    checked_dialogs.append("independent_overlay_copy_menu_and_close")
+                    saved_offsets=list(window.plot_options[source_key]["axis_x_offsets"])
+                    saved_results=deepcopy(window.results)
+                    dialog=window.show_overlay_options();dialog.tabs.setCurrentIndex(1)
+                    dialog.axis_x_offsets[0].setText(str(saved_offsets[0]+1.25))
+                    application.processEvents();dialog.grab().save(str(output.with_suffix(".axis_x_offsets.png")))
+                    dialog.accept()
+                    if dialog.result()!=QDialog.DialogCode.Accepted:raise ValueError("打包程序X偏移未应用："+dialog.error.text())
+                    for item in window.visible_curves():
+                        line=next(line for line in window.axes[item.axis].lines if getattr(line,"_tma_curve_uid",None)==item.uid)
+                        finite=np.asarray(line.get_xdata())[np.isfinite(line.get_xdata())]
+                        if not np.allclose(finite,item.xy(window.domain)[0]+window.display_x_offset(item)):raise ValueError("打包程序X偏移绘图不一致")
+                    if window.results!=saved_results:raise ValueError("打包程序显示X偏移改变了分析数值")
+                    window.plot_options[source_key]["axis_x_offsets"]=saved_offsets
+                    window.selection_changed();window.redraw()
+                    checked_dialogs.append("overlay_axis_x_offsets")
+                    window._show_document(source_key)
+                    target=window.current_data_curve()
+                    window.files.setCurrentItem(window.files.topLevelItem(next(i for i,c in enumerate(window.curves) if c.uid==target.uid)))
+                    before_count=len(window.results);before_uid=target.uid
+                    window.classic_actions["CurveValueAtX1"].trigger()
+                    value_entry=window._pending_measurement
+                    if value_entry is None or value_entry["kind"]!="curve_value":raise ValueError("打包程序曲线值菜单未启动选点")
+                    window.create_measurement_menu().actions()[0].trigger()
+                    label=window.dialogs["label_point"];application.processEvents()
+                    label.grab().save(str(output.with_suffix(".label_point.png")))
+                    if len(window.results)!=before_count or label.boxes["multiplex"].isEnabled():raise ValueError("打包程序曲线值确认阶段或通道状态不正确")
+                    label.boxes["arrow"].setChecked(False);label.boxes["cross"].setChecked(True)
+                    label.boxes["border"].setChecked(True);label.boxes["transparent"].setChecked(False);label.accept()
+                    if (window._pending_measurement is not None or len(window.results)!=before_count+1
+                            or window.selected().uid!=before_uid):raise ValueError("打包程序曲线值未正确记录或改变了文件选择")
+                    value_artist=next(item for item in window._measurement_artists if item.entry is value_entry)
+                    if ("Y =" not in value_artist.annotation.get_text() or value_artist.annotation.arrow_patch.get_visible()
+                            or value_artist.annotation.get_bbox_patch() is None):raise ValueError("打包程序标记点外观未应用")
+                    window.results[:]=[entry for entry in window.results if entry is not value_entry]
+                    window.refresh_results();window.redraw();checked_dialogs.append("curve_value_label_point")
+                    window.classic_actions['CurveValueAtY1'].trigger()
+                    y_entry=window._pending_measurement
+                    if y_entry is None or y_entry['kind']!='curve_value_y':raise ValueError('Y curve-value menu did not start its cursor')
+                    horizontal=next(e for e in window._measurement_artists if e.entry is y_entry)
+                    if not horizontal.hline.get_visible() or horizontal.vline.get_visible():raise ValueError('Y cursor is not horizontal')
+                    manual=window.edit_measurement_limits();application.processEvents()
+                    if not manual.fields[0].isReadOnly() or manual.y_fields[0].isReadOnly():raise ValueError('Y cursor manual coordinate editability is reversed')
+                    manual.accept()
+                    if manual.result()!=QDialog.DialogCode.Accepted:raise ValueError('Y cursor manual coordinates failed')
+                    window.confirm_measurement();window.dialogs['label_point'].accept()
+                    if window._pending_measurement is not None or window.selected().uid!=before_uid:raise ValueError('Y cursor confirmation changed the file')
+                    window.results[:]=[entry for entry in window.results if entry is not y_entry]
+                    window.refresh_results();window.redraw();checked_dialogs.append('curve_value_at_y')
+                    # Native Alpha routes use a known QA size, never infer it from a curve.
+                    from .alpha_dialogs import SampleSizeDialog
+                    alpha_before=capture_verify_state()
+                    window.domain_box.setCurrentIndex(0)
+                    from .alpha import check_curve
+                    alpha_target=None
+                    for candidate in window.visible_curves():
+                        try:check_curve(candidate,window.domain)
+                        except ValueError:continue
+                        alpha_target=candidate;break
+                    if alpha_target is None:raise ValueError('No visible dimension curve is eligible for Alpha verification')
+                    window.files.setCurrentItem(window.files.topLevelItem(next(i for i,c in enumerate(window.curves) if c.uid==alpha_target.uid)))
+                    size=SampleSizeDialog(window,alpha_target,'alpha_fit');size.show();application.processEvents()
+                    size.grab().save(str(output.with_suffix('.sample_size.png')))
+                    size.field.setText('2.5');size.accept()
+                    if window._pending_measurement is None or window._pending_measurement['kind']!='alpha_fit':raise ValueError('Sample size entry did not start Alpha')
+                    window.cancel_measurement();checked_dialogs.append('alpha_sample_size')
+                    options=window.show_analysis_options();application.processEvents()
+                    options.grab().save(str(output.with_suffix('.analysis_options.png')))
+                    if options.controls['CorrectedSizeBox'].isEnabled():raise ValueError('Unsupported corrected-size analysis option is active')
+                    options.width_field.setText('4.5');options.accept();checked_dialogs.append('alpha_analysis_options')
+                    alpha_entries=[]
+                    for name,kind in (('AlphaAtX1','alpha_at_x'),('AlphaX1ToX21','alpha_secant'),('AlphaFitX1ToX21','alpha_fit')):
+                        window.classic_actions[name].trigger();pending=window._pending_measurement
+                        if pending is None or pending['kind']!=kind:raise ValueError('Alpha menu route did not start the expected analysis')
+                        manual=window.edit_measurement_limits();application.processEvents()
+                        if not manual.y_fields[0].isReadOnly():raise ValueError('Alpha manual Y must follow the curve')
+                        manual.accept()
+                        if manual.result()!=QDialog.DialogCode.Accepted:raise ValueError('Alpha manual limits failed')
+                        window.create_measurement_menu().actions()[0].trigger()
+                        if window._pending_measurement is not None or window.selected().uid!=alpha_target.uid:raise ValueError('Alpha confirmation changed its file or remained pending')
+                        if not np.isfinite(pending['values']['alpha']):raise ValueError('Alpha did not produce a finite coefficient')
+                        alpha_entries.append(pending)
+                    restore_verify_state(alpha_before);checked_dialogs.append('alpha_three_menu_analyses')
+                    info_target=window.current_data_curve();info_doc=window.active_document()
+                    info_before=capture_verify_state();info_results=list(window.results)
+                    info_ids={c.uid for c in window.curves if c.dataset.path==info_target.dataset.path}
+                    window.classic_actions['FileInformation1'].trigger();info=window.dialogs['file_information'];application.processEvents()
+                    info.grab().save(str(output.with_suffix('.file_information.png')))
+                    info.fields['Sample'].setText('Windows file information QA');info.accept()
+                    if (info.result()!=QDialog.DialogCode.Accepted or info_target.sample_name!='Windows file information QA'
+                            or window.active_document() is not info_doc or len(window.results)!=len(info_results)):raise ValueError('File information text edit lost its file or analyses')
+                    from .file_information import effective_size
+                    info_new_size=3.25 if effective_size(info_target)==2.75 else 2.75
+                    info=window.show_file_information();info.size_field.setText(str(info_new_size));info.accept()
+                    if (info.result()!=QDialog.DialogCode.Accepted or info_target.sample_size_mm!=info_new_size or info_target.working is not None
+                            or any(r.get('curve_id') in info_ids for r in window.results)):raise ValueError('File information numeric edit did not reread and clear its analyses')
+                    restore_verify_state(info_before);checked_dialogs.append('native_file_information_edit_and_reload')
+                    units_before=capture_verify_state()
+                    buffers={c.uid:None if c.working is None else c.working.copy() for c in window.curves}
+                    window.classic_actions['Units1'].trigger();units=window.dialogs['units'];application.processEvents()
+                    units.grab().save(str(output.with_suffix('.units.png')))
+                    if not units.controls['TemperatureCombo'].isEnabled():raise ValueError('Supported temperature-unit control is disabled')
+                    if units.controls['FrequencyCombo'].isEnabled():raise ValueError('Unsupported frequency-unit control is enabled')
+                    target_unit='µm' if units.dimension.currentData()=='mm' else 'mm'
+                    units.dimension.setCurrentIndex(units.dimension.findData(target_unit));units.offset.setCurrentIndex(0);units.accept()
+                    if units.result()!=QDialog.DialogCode.Accepted:raise ValueError('Native TMA units selection did not apply')
+                    for curve in window.curves:
+                        before=buffers[curve.uid]
+                        if (before is None and curve.working is not None) or (before is not None and not np.array_equal(before,curve.working)):raise ValueError('Unit conversion modified canonical working data')
+                    window.canvas.draw();window.grab().save(str(output.with_suffix('.units_applied.png')))
+                    restore_verify_state(units_before);checked_dialogs.append('native_tma_units_and_buffer_preservation')
+                    general_before=capture_verify_state()
+                    overlays=[d for key,d in window.documents.items() if window._is_overlay(key)]
+                    general_doc=max(overlays,key=lambda d:len(window._document_curves(d))) if overlays else window.active_document()
+                    window._show_document(general_doc.key)
+                    units=window.show_units();application.processEvents()
+                    units.general['time'].setCurrentIndex(units.general['time'].findData('sec'))
+                    units.general['temperature'].setCurrentIndex(units.general['temperature'].findData('°F'))
+                    units.grab().save(str(output.with_suffix('.general_units.png')));units.accept()
+                    if units.result()!=QDialog.DialogCode.Accepted:raise ValueError('Native general-unit conversion failed: '+units.error.text())
+                    for curve in window._document_curves(general_doc):
+                        if curve.overlay_enabled if window._is_overlay(general_doc.key) else curve.normal_enabled:
+                            if curve.x_unit('time')!='sec' or curve.x_unit('temperature')!='°F':raise ValueError('General unit labels were not propagated')
+                    for curve in window.curves:
+                        before=buffers[curve.uid]
+                        if (before is None and curve.working is not None) or (before is not None and not np.array_equal(before,curve.working)):raise ValueError('General conversion modified canonical working data')
+                    window.canvas.draw();window.grab().save(str(output.with_suffix('.general_units_applied.png')))
+                    restore_verify_state(general_before);checked_dialogs.append('native_time_temperature_units')
+                    transition_before=capture_verify_state()
+                    from .transitions import defaults as transition_defaults,values as transition_values
+                    transition_target=None
+                    for candidate in window.curves:
+                        if not candidate.normal_enabled or candidate.y_type!='normal':continue
+                        window._show_document(str(candidate.dataset.path))
+                        window.files.setCurrentItem(window.files.topLevelItem(window.curves.index(candidate)))
+                        config=transition_defaults();config['midpoint']='half_width'
+                        positions=initial_indices(candidate,window.domain,'glass_transition',config)
+                        try:expected=transition_values(candidate,dict(kind='glass_transition',domain=window.domain,transition=config),positions)
+                        except ValueError:continue
+                        transition_target=candidate;break
+                    if transition_target is None:raise ValueError('No valid source curve for native transition gate')
+                    options=window.show_analysis_options();options.tabs.setCurrentIndex(0)
+                    options.controls['ManualStepBox'].setChecked(False);options.midpoint.setCurrentIndex(options.midpoint.findData('half_width'))
+                    options.grab().save(str(output.with_suffix('.step_options.png')));options.accept()
+                    if options.result()!=QDialog.DialogCode.Accepted:raise ValueError('Native Step/Change page did not apply')
+                    checked_dialogs.append('native_step_change_options')
+                    window.classic_actions['GlassTransition1'].trigger();automatic=window._pending_measurement
+                    if automatic is None or 'fit_error' in automatic['values']:raise ValueError('Automatic glass transition did not fit')
+                    window.create_measurement_menu().actions()[0].trigger()
+                    if window._pending_measurement is not None:raise ValueError('Automatic glass transition did not confirm')
+                    window.canvas.draw();window.grab().save(str(output.with_suffix('.glass_auto.png')))
+                    checked_dialogs.append('native_glass_auto_three_tangents')
+                    options=window.show_analysis_options();options.controls['ManualStepBox'].setChecked(True);options.accept()
+                    window.classic_actions['StepTransition2'].trigger();manual_entry=window._pending_measurement
+                    manual=window.edit_measurement_limits();tx=transition_target.xy(window.domain)[0]
+                    if len(manual.fields)!=6 or not all(field.isReadOnly() for field in manual.y_fields):raise ValueError('Six-point manual limits were not available')
+                    for field,position in zip(manual.fields,[fit[key] for fit in automatic['values']['fits'] for key in ('position_start','position_stop')]):
+                        field.setText(format(float(np.interp(position,np.arange(len(tx)),tx)),'.17g'))
+                    manual.grab().save(str(output.with_suffix('.six_limits.png')));manual.accept()
+                    if manual.result()!=QDialog.DialogCode.Accepted:raise ValueError('Six-point manual limits failed: '+manual.error.text())
+                    window.create_measurement_menu().actions()[-1].trigger()
+                    if manual_entry['interactive']['active_point']!=5:raise ValueError('Sixth marker was not selectable')
+                    window.create_measurement_menu().actions()[0].trigger()
+                    if window._pending_measurement is not None or not np.isclose(manual_entry['values']['onset_x'],automatic['values']['onset_x']):raise ValueError('Manual tangent result did not confirm or match its intervals')
+                    window.canvas.draw();window.grab().save(str(output.with_suffix('.step_manual.png')))
+                    checked_dialogs.append('native_step_six_marker_manual')
+                    restore_verify_state(transition_before)
+                    peak_before=capture_verify_state()
+                    window._show_document(str(transition_target.dataset.path))
+                    window.files.setCurrentItem(window.files.topLevelItem(window.curves.index(transition_target)))
+                    options=window.show_analysis_options();options.tabs.setCurrentIndex(1)
+                    options.controls['ManualOnsetBox'].setChecked(False);options.controls['InflectionBox'].setChecked(True)
+                    options.grab().save(str(output.with_suffix('.peak_options.png')));options.accept()
+                    if options.result()!=QDialog.DialogCode.Accepted:raise ValueError('Native Peak/Onset page did not apply')
+                    checked_dialogs.append('native_peak_onset_options')
+                    window.classic_actions['PeakMax1'].trigger();peak=window._pending_measurement
+                    if peak is None or 'fit_error' in peak['values']:raise ValueError('Baseline-relative peak did not fit')
+                    auto_limits=window.show_auto_limits();application.processEvents()
+                    auto_limits.auto_set();auto_limits.grab().save(str(output.with_suffix('.peak_auto_limits.png')));auto_limits.accept()
+                    if auto_limits.result()!=QDialog.DialogCode.Accepted:raise ValueError('Peak automatic limits failed: '+auto_limits.error.text())
+                    window.create_measurement_menu().actions()[0].trigger()
+                    if window._pending_measurement is not None or window.selected().uid!=transition_target.uid:raise ValueError('Peak confirmation changed its file')
+                    checked_dialogs.extend(['native_peak_auto_limits','native_baseline_peak_maximum'])
+                    window.classic_actions['OnsetPoint1'].trigger();onset=window._pending_measurement
+                    if onset is None or 'fit_error' in onset['values']:raise ValueError('Automatic onset did not fit')
+                    window.create_measurement_menu().actions()[0].trigger()
+                    if window._pending_measurement is not None:raise ValueError('Automatic onset did not confirm')
+                    checked_dialogs.append('native_two_marker_onset')
+                    options=window.show_analysis_options();options.controls['ManualOnsetBox'].setChecked(True);options.accept()
+                    window.classic_actions['OnsetPoint1'].trigger();manual_onset=window._pending_measurement
+                    manual=window.edit_measurement_limits()
+                    if len(manual.fields)!=4 or not all(field.isReadOnly() for field in manual.y_fields):raise ValueError('Four-point manual onset limits were not available')
+                    for field,position in zip(manual.fields,[fit[key] for fit in automatic['values']['fits'][:2] for key in ('position_start','position_stop')]):
+                        field.setText(format(float(np.interp(position,np.arange(len(tx)),tx)),'.17g'))
+                    manual.grab().save(str(output.with_suffix('.four_onset_limits.png')));manual.accept()
+                    if manual.result()!=QDialog.DialogCode.Accepted:raise ValueError('Four-point onset limits failed: '+manual.error.text())
+                    window.create_measurement_menu().actions()[0].trigger()
+                    if window._pending_measurement is not None or not np.isclose(manual_onset['values']['onset_x'],automatic['values']['onset_x']):raise ValueError('Manual onset disagreed with its two fitted intervals')
+                    checked_dialogs.append('native_four_marker_manual_onset')
+                    signal_change=window.start_point_measurement('signal_change')
+                    auto_limits=window.show_auto_limits();auto_limits.defaults();application.processEvents()
+                    auto_limits.grab().save(str(output.with_suffix('.signal_fraction_limits.png')));auto_limits.accept()
+                    if auto_limits.result()!=QDialog.DialogCode.Accepted:raise ValueError('Signal derivative-fraction limits failed: '+auto_limits.error.text())
+                    window.cancel_measurement();checked_dialogs.append('native_signal_derivative_fraction_limits')
+                    restore_verify_state(peak_before)
+                    integration_before=capture_verify_state()
+                    window._show_document(str(transition_target.dataset.path))
+                    window.files.setCurrentItem(window.files.topLevelItem(window.curves.index(transition_target)))
+                    options=window.show_analysis_options();options.tabs.setCurrentIndex(1)
+                    options.controls['ManualOnsetBox'].setChecked(False);options.controls['AreaBox'].setChecked(True);options.accept()
+                    window.classic_actions['Linear1'].trigger();linear=window._pending_measurement
+                    if linear is None or linear['kind']!='peak_linear' or 'fit_error' in linear['values']:raise ValueError('Native linear peak did not start')
+                    from scipy.integrate import trapezoid
+                    lx,ly=transition_target.xy(window.domain);lt=transition_target.x_values('time');first,last=linear['interactive']['indices']
+                    reference=ly[first]+(ly[last]-ly[first])*(lx[first:last+1]-lx[first])/(lx[last]-lx[first])
+                    expected_area=float(trapezoid(ly[first:last+1]-reference,lt[first:last+1]))
+                    if not np.isclose(linear['values']['integral'],expected_area):raise ValueError('Native peak area did not use recorded time')
+                    auto_limits=window.show_auto_limits();auto_limits.auto_set();auto_limits.accept()
+                    if auto_limits.result()!=QDialog.DialogCode.Accepted:raise ValueError('Linear peak automatic bounds failed')
+                    checked_dialogs.append('native_linear_peak_auto_limits')
+                    window.create_measurement_menu().actions()[0].trigger()
+                    if window._pending_measurement is not None or window.selected().uid!=transition_target.uid:raise ValueError('Linear peak confirmation changed file')
+                    window.canvas.draw();window.grab().save(str(output.with_suffix('.linear_peak.png')))
+                    checked_dialogs.append('native_linear_peak_time_integration')
+                    options=window.show_analysis_options();options.controls['ManualOnsetBox'].setChecked(True);options.accept()
+                    window.classic_actions['Linear1'].trigger();linear_manual=window._pending_measurement;manual=window.edit_measurement_limits()
+                    if len(manual.fields)!=4 or not all(field.isReadOnly() for field in manual.y_fields):raise ValueError('Linear peak manual tangent markers were missing')
+                    for field,position in zip(manual.fields,[first,last,automatic['values']['fits'][1]['position_start'],automatic['values']['fits'][1]['position_stop']]):
+                        field.setText(format(float(np.interp(position,np.arange(len(lx)),lx)),'.17g'))
+                    manual.grab().save(str(output.with_suffix('.linear_manual_limits.png')));manual.accept()
+                    if manual.result()!=QDialog.DialogCode.Accepted:raise ValueError('Linear peak manual tangent failed: '+manual.error.text())
+                    window.create_measurement_menu().actions()[0].trigger()
+                    if window._pending_measurement is not None or not np.isclose(linear_manual['values']['integral'],expected_area):raise ValueError('Manual onset changed integration baseline area')
+                    checked_dialogs.append('native_four_marker_peak_onset')
+                    restore_verify_state(integration_before)
+                    sigmoid_before=capture_verify_state()
+                    window._show_document(str(transition_target.dataset.path))
+                    window.files.setCurrentItem(window.files.topLevelItem(window.curves.index(transition_target)))
+                    options=window.show_analysis_options();options.tabs.setCurrentIndex(4)
+                    options.controls['SigItterationsBox'].setChecked(True);options.controls['ManualOnsetBox'].setChecked(False)
+                    options.grab().save(str(output.with_suffix('.sigmoid_options.png')));options.accept()
+                    if not window.sigmoid_iterations():raise ValueError('Sigmoid iteration option did not apply')
+                    checked_dialogs.append('native_sigmoid_iteration_options')
+                    window.classic_actions['SigHorizontal1'].trigger();sigmoid=window._pending_measurement
+                    if sigmoid is None or sigmoid['kind']!='peak_sigmoid' or 'fit_error' in sigmoid['values']:raise ValueError('Horizontal sigmoid did not converge')
+                    from .sigmoidal import validate_snapshot
+                    validate_snapshot(sigmoid['values']['sigmoid_profile'],len(transition_target.active_rows))
+                    auto_limits=window.show_auto_limits();auto_limits.auto_set();auto_limits.accept()
+                    if auto_limits.result()!=QDialog.DialogCode.Accepted:raise ValueError('Sigmoid automatic bounds failed: '+auto_limits.error.text())
+                    window.create_measurement_menu().actions()[0].trigger()
+                    if window._pending_measurement is not None or window.selected().uid!=transition_target.uid:raise ValueError('Sigmoid confirmation changed source')
+                    artist=next(a for a in window._measurement_artists if a.entry is sigmoid)
+                    if not artist.iteration_lines or not any(len(line.get_xdata()) for line in artist.iteration_lines):raise ValueError('Sigmoid iteration baselines were not drawn')
+                    window.canvas.draw();window.grab().save(str(output.with_suffix('.sigmoid_peak.png')))
+                    checked_dialogs.append('native_horizontal_sigmoid_peak')
+                    options=window.show_analysis_options();options.controls['ManualOnsetBox'].setChecked(True);options.accept()
+                    window.classic_actions['SigHorizontal1'].trigger();manual_sigmoid=window._pending_measurement;manual=window.edit_measurement_limits()
+                    final_fit=sigmoid['values']['onset_fit']
+                    if final_fit is None:raise ValueError('Sigmoid source has no usable onset tangent')
+                    for field,position in zip(manual.fields,[0,len(lx)-1,final_fit['position_start'],final_fit['position_stop']]):field.setText(format(float(np.interp(position,np.arange(len(lx)),lx)),'.17g'))
+                    manual.grab().save(str(output.with_suffix('.sigmoid_manual_limits.png')));manual.accept()
+                    if manual.result()!=QDialog.DialogCode.Accepted:raise ValueError('Sigmoid manual tangent failed: '+manual.error.text())
+                    window.create_measurement_menu().actions()[0].trigger()
+                    if window._pending_measurement is not None:raise ValueError('Sigmoid manual confirmation failed')
+                    mv=manual_sigmoid['values'];mf=mv['onset_fit']
+                    if not np.isclose(mv['onset_y'],mf['slope']*mv['onset_x']+mf['intercept']):raise ValueError('Sigmoid onset is off its selected tangent')
+                    checked_dialogs.append('native_sigmoid_manual_onset')
+                    restore_verify_state(sigmoid_before)
+                    # Explicit synthetic diagnostic, separate from restored
+                    # experimental files; exercise the failed native preview.
+                    import tempfile
+                    from . import preferences as qa_preferences
+                    from .reader import Dataset,Signal
+                    qa_preferences_path=qa_preferences.preferences_path
+                    with tempfile.TemporaryDirectory(prefix='tma-sigmoid-native-qa-') as qa_private:
+                        qa_preferences.preferences_path=lambda:Path(qa_private)/'preferences.json'
+                        qa_window=None
+                        try:
+                            qa_window=type(window)();qa_window.resize(1000,700);qa_window.show()
+                            qa_window.warn=lambda message:(_ for _ in ()).throw(ValueError(message))
+                            qt=np.linspace(0,1,101);qy=2+100*qt+np.maximum(0,1-abs((qt-.2)/.1))
+                            qa_data=Dataset(Path(qa_private)/'synthetic-nonconvergent.001',[Signal('Time','min'),Signal('Temperature','°C'),Signal('Dimension Change','µm')],
+                                np.column_stack((qt,100+100*qt,qy)),{'Sample':['QA synthetic nonconvergent signal']},[],'synthetic-known-nonconvergent')
+                            qa_window.finish_import([qa_data],[])
+                            qa_options=qa_window.show_analysis_options();qa_options.controls['SigItterationsBox'].setChecked(True);qa_options.accept()
+                            failed=qa_window.start_peak_integration('peak_sigmoid');qa_window.confirm_measurement()
+                            if qa_window._pending_measurement is not failed or qa_window.results or '10次' not in failed['values'].get('fit_error',''):raise ValueError('Nonconvergent sigmoid was incorrectly confirmed')
+                            qa_artist=next(a for a in qa_window._measurement_artists if a.entry is failed)
+                            if sum(bool(len(line.get_xdata())) for line in qa_artist.iteration_lines)!=10 or not len(qa_artist.integration_lines[0].get_xdata()):raise ValueError('Failed sigmoid did not display its intermediate baselines')
+                            qa_window.canvas.draw();qa_window.grab().save(str(output.with_suffix('.nonconvergent_sigmoid.png')))
+                        finally:
+                            if qa_window is not None:qa_window.cancel_measurement();qa_window.dirty=False;qa_window.close()
+                            qa_preferences.preferences_path=qa_preferences_path
+                    checked_dialogs.append('native_nonconvergent_sigmoid_preview')
+                    from .running_integral_qa import verify_routes
+                    from .dimension_units import dimension_index
+                    running_datasets=list({str(c.dataset.path):c.dataset for c in window.curves if c.derived is None and dimension_index(c.dataset)==c.y_index}.values())
+                    if running_datasets:checked_dialogs.extend(verify_routes(running_datasets,application,output))
             else:
                 window.import_files(inputs, synchronous=True)
             application.processEvents()
@@ -1281,6 +1815,7 @@ def main():
                 if curve is not None:
                     doc = window.documents[str(curve.dataset.path)]
                     window.mdi.setActiveSubWindow(doc); window.document_activated(doc); window.canvas.draw()
+            post_routes_state=capture_verify_state() if session_check and hasattr(window,'documents') else None
             interactive_drag_checked = False
             if session_check and window._measurement_artists:
                 from matplotlib.backend_bases import MouseEvent
@@ -1290,13 +1825,17 @@ def main():
                 editor = next(item for item in window._measurement_artists if item.entry is window._pending_measurement)
                 original = list(editor.indices)
                 sample = original[0]
-                px, py = editor.axis.transData.transform(editor.coords[0])
+                px, py = editor.axis.transData.transform(editor.display_coords[0])
                 window.canvas.callbacks.process("button_press_event", MouseEvent("button_press_event", window.canvas, px, py, button=1))
                 if window._drag_measurement is None: raise ValueError("打包程序无法选中分析控制点")
                 target = min(len(editor.x)-1, sample+10)
-                tx, ty = editor.axis.transData.transform((editor.x[target], editor.y[target]))
+                tx, ty = editor.axis.transData.transform((editor.x[target]+editor.display_x_offset, editor.y[target]))
                 motion = MouseEvent("motion_notify_event", window.canvas, tx, ty, button=1)
-                snapped = nearest_sample(editor.x, editor.axis.transData.inverted().transform((motion.x, motion.y))[0], sample)
+                if editor.entry['kind']=='curve_value_y':
+                    from .measurement import position_at_y
+                    target_y=float(np.clip(editor.axis.transData.inverted().transform((motion.x,motion.y))[1],editor.y.min(),editor.y.max()))
+                    snapped=int(round(position_at_y(editor.y,target_y,editor.curve.active_rows)))
+                else:snapped = nearest_sample(editor.x,editor.axis.transData.inverted().transform((motion.x,motion.y))[0]-editor.display_x_offset,sample)
                 window.canvas.callbacks.process("motion_notify_event", motion)
                 window.canvas.callbacks.process("button_release_event", MouseEvent("button_release_event", window.canvas, tx, ty, button=1))
                 if editor.indices[0] != snapped: raise ValueError("打包程序控制点未吸附到曲线")
@@ -1314,9 +1853,14 @@ def main():
                     raise ValueError("打包程序选点右键菜单不完整")
                 dialog = window.edit_measurement_limits(); application.processEvents()
                 dialog.grab().save(str(output.with_suffix(".cursor_limits.png")))
-                manual_height = float(window._pending_measurement["values"]["start_y"]) + 1
+                original_height=float(window._pending_measurement["values"]["start_y"])
+                if window._pending_measurement['kind']=='curve_value_y':
+                    current=next(e for e in window._measurement_artists if e.entry is window._pending_measurement)
+                    manual_height=float(.5*np.min(current.y)+.5*np.max(current.y))
+                else:manual_height = original_height+1
                 dialog.y_fields[0].setText(format(manual_height, ".15g")); dialog.accept()
-                if not np.isclose(window._pending_measurement["values"]["start_y"], manual_height):
+                expected_height=original_height if window._pending_measurement["kind"] in ('curve_value','alpha_at_x','alpha_secant','alpha_fit','step_transition','glass_transition','peak_max','onset_point','peak_linear','peak_sigmoid','slope') else manual_height
+                if not np.isclose(window._pending_measurement["values"]["start_y"],expected_height):
                     raise ValueError("打包程序手动 Y 界限未应用")
                 checked_dialogs.append("cursor_limits")
                 menu.actions()[3].trigger()
@@ -1329,10 +1873,12 @@ def main():
                 index = next(i for i, result in enumerate(window.results) if result is original)
                 window.edit_measurement(original)
                 editor = next(item for item in window._measurement_artists if item.entry is window._pending_measurement)
+                window.activate_measurement_point(0)
                 before = editor.coords[0][0]
                 window.canvas.callbacks.process("key_press_event", KeyEvent("key_press_event", window.canvas, key="ctrl+right"))
                 if editor.coords[0][0] == before: raise ValueError("打包程序方向键未移动控制点")
                 window.canvas.callbacks.process("key_press_event", KeyEvent("key_press_event", window.canvas, key="enter"))
+                if window._pending_measurement is not None and window._pending_measurement["kind"] in CURVE_VALUE_KINDS:window.dialogs["label_point"].accept()
                 if window._pending_measurement is not None: raise ValueError("打包程序 Enter 未确定选点")
                 window.results[index] = original
                 window.refresh_results(); window.redraw(); window.canvas.draw()
@@ -1344,7 +1890,7 @@ def main():
                 other = next((c for c in window.curves if c.dataset.path != curve.dataset.path), None)
                 if other is not None:
                     from matplotlib.backend_bases import KeyEvent
-                    active = window.mdi.activeSubWindow()
+                    active = window.active_document()
                     window.edit_measurement(original)
                     pending = window._pending_measurement
                     doc = window.documents[str(other.dataset.path)]
@@ -1357,7 +1903,8 @@ def main():
                     window.cancel_measurement(); window.canvas.draw()
                     cross_document_cursor_checked = True
             temperature_label_drag_checked = False
-            editor = next((item for item in window._measurement_artists if item.temps and item.temps[0].get_visible()), None)
+            # Coincident overlay labels belong to the last drawn curve on top.
+            editor = next((item for item in reversed(window._measurement_artists) if item.temps and item.temps[0].get_visible()), None)
             if session_check and editor is not None:
                 before = deepcopy(editor.entry.get("annotation", {}))
                 window.canvas.draw()
@@ -1366,15 +1913,30 @@ def main():
                 for kind, x, y in (("button_press_event", px, py), ("motion_notify_event", px+25, py+15), ("button_release_event", px+25, py+15)):
                     window.canvas.callbacks.process(kind, MouseEvent(kind, window.canvas, x, y, button=1))
                 if editor.entry.get("annotation", {}).get("label_offsets", {}).get("t1") == before.get("label_offsets", {}).get("t1"):
+                    window.grab().save(str(output.with_suffix('.label_drag_failure.png')))
+                    diagnostics=dict(file=editor.entry.get('file'),kind=editor.entry['kind'],pixel=[px,py],before=before,after=editor.entry.get('annotation'),
+                        pending=window._pending_measurement,document=window.active_document().key,
+                        labels=[dict(kind=a.entry['kind'],file=a.entry.get('file'),annotation=a.entry.get('annotation'),texts=[t.get_text() for t in a.temps if t.get_visible()]) for a in window._measurement_artists])
+                    output.with_suffix('.label_drag_failure.json').write_text(json.dumps(diagnostics,ensure_ascii=False,indent=2),encoding='utf-8')
                     raise ValueError("打包程序无法单独拖动已确定的温度标签")
                 editor.entry["annotation"] = before
                 window.redraw(); window.canvas.draw()
                 temperature_label_drag_checked = True
+            curve_value_label_drag_checked=False
+            editor=next((item for item in window._measurement_artists if item.entry["kind"] in CURVE_VALUE_KINDS and item.annotation.get_text()),None)
+            if session_check and editor is not None:
+                before=deepcopy(editor.entry.get("annotation",{}));values=deepcopy(editor.entry["values"])
+                window.canvas.draw();bounds=Text.get_window_extent(editor.annotation,window.canvas.get_renderer())
+                px,py=(bounds.x0+bounds.x1)/2,(bounds.y0+bounds.y1)/2
+                for kind,x,y in (("button_press_event",px,py),("motion_notify_event",px+22,py+17),("button_release_event",px+22,py+17)):
+                    window.canvas.callbacks.process(kind,MouseEvent(kind,window.canvas,x,y,button=1))
+                if editor.entry.get("annotation",{}).get("offset")==before.get("offset") or editor.entry["values"]!=values:raise ValueError("打包程序曲线值标签拖动失败或改变了数值")
+                editor.entry["annotation"]=before;window.redraw();window.canvas.draw();curve_value_label_drag_checked=True
             legend_drag_checked = False
             legend = window.axes[0].get_legend() if 0 in window.axes else None
             if session_check and legend is not None and legend.get_visible():
                 from matplotlib.backend_bases import MouseEvent
-                active = window.mdi.activeSubWindow()
+                active = window.active_document()
                 options = window.plot_options[active.key]
                 before = deepcopy(options["legend_anchor"])
                 window.canvas.draw()
@@ -1385,14 +1947,27 @@ def main():
                 if options["legend_anchor"] == before: raise ValueError("打包程序图例拖动未保存位置")
                 options["legend_anchor"] = before
                 window.redraw(); window.canvas.draw(); legend_drag_checked = True
+            if post_routes_state is not None:
+                restore_verify_state(post_routes_state)
+                from .running_integral import validate_links
+                validate_links(window.curves,window.results)
+            classic_tick_fonts={}
+            if hasattr(window,'documents'):
+                from matplotlib.font_manager import findfont
+                for index,axis in window.axes.items():
+                    files=sorted({findfont(label.get_fontproperties()) for label in axis.get_xticklabels()+axis.get_yticklabels() if label.get_visible()})
+                    if not all(Path(font).name.casefold()=='times.ttf' for font in files):raise ValueError(f'Classic Y{index+1} tick font fallback')
+                    classic_tick_fonts[str(index)]=files
             window.grab().save(str(output.with_suffix(".png")))
             output.write_text(json.dumps({"status": "passed", "version": __version__, "files": len(window.curves),
-                                          "points": [len(c.dataset.values) for c in window.curves],
+                                          "points": [c.sample_count for c in window.curves],
                                           "session_restored": session_check, "results": len(window.results),
+                                          "classic_tick_fonts":classic_tick_fonts,
                                           "dialogs_checked": checked_dialogs,
                                           "interactive_measurements": len(window._measurement_artists),
                                           "interactive_drag_checked": interactive_drag_checked,
                                           "temperature_label_drag_checked": temperature_label_drag_checked,
+                                          "curve_value_label_drag_checked":curve_value_label_drag_checked,
                                           "cursor_menu_checked": cursor_menu_checked,
                                           "keyboard_cursor_checked": keyboard_cursor_checked,
                                           "cross_document_cursor_checked": cross_document_cursor_checked,
@@ -1402,7 +1977,8 @@ def main():
             window.close()
             return
         except Exception as exc:
-            output.write_text(json.dumps({"status": "failed", "error": str(exc)}), encoding="utf-8")
+            import traceback
+            output.write_text(json.dumps({"status": "failed", "error": str(exc),"error_type":type(exc).__name__,"traceback":traceback.format_exc()}), encoding="utf-8")
             raise
     paths = [arg for arg in sys.argv[1:] if Path(arg).is_file()]
     if paths:

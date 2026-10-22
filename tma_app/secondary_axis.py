@@ -15,9 +15,9 @@ def corresponding_values(x, y, targets,rows=None):
     return output
 
 
-def add_secondary_axis(base, curve, domain, fonts, scale):
+def add_secondary_axis(base,curve,domain,fonts,scale,display_x_offset=0.):
     other = "time" if domain == "temperature" else "temperature"
-    try: x, y = curve.x_values(domain)+curve.x_shift, curve.x_values(other)
+    try: x, y = curve.x_values(domain)+curve.display_x_shift(domain)+display_x_offset, curve.x_values(other)
     except ValueError: return None
     axis = base.twiny(); axis.set_xlim(base.get_xlim())
     def update(_=None):

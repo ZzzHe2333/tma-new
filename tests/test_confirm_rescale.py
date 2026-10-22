@@ -49,7 +49,7 @@ def test_confirmation_is_in_exclusive_context_menu_without_status_buttons(ui):
     ui.start_point_measurement("dimension_change")
     QApplication.processEvents()
     menu = ui.create_plot_context_menu()
-    assert [a.text() for a in menu.actions() if not a.isSeparator()] == ["确定", "编辑…", "自动界限", "取消", "点 1", "点 2"]
+    assert [a.text() for a in menu.actions() if not a.isSeparator()] == ["确定", "编辑…", "自动界限", "取消", "恢复初始界限", "点 1", "点 2"]
     assert ui.statusBar().height() == 19
     menu.actions()[0].trigger()
     QApplication.processEvents()

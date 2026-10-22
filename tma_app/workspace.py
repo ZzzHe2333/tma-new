@@ -21,12 +21,14 @@ PALETTE = ["#2974e5", "#e17b32", "#159d87", "#995bd5", "#d6537a", "#8b9b36", "#3
 CURVE_FIELDS = ("y_index", "axis", "color", "visible", "width", "style", "x_shift", "scale", "offset", "operations",
                 "marker", "legend_text", "show_legend", "overlay_enabled", "uid", "appearance_mode", "normal_appearance", "overlay_appearance",
                 "display_filename", "show_legend_text", "normal_enabled", "y_type", "smooth_width", "x_signal_index", "x_signal_type", "x_smooth_width",
-                "data_indices", "data_limit_spec", "reset_time", "smooth_domain", "smooth_reuse", "smooth_base_ops","smooth_x_config","working_rows","smooth_source_rows")
+                "data_indices", "data_limit_spec", "reset_time", "smooth_domain", "smooth_reuse", "smooth_base_ops","smooth_x_config","working_rows","smooth_source_rows",
+                "overlay_views","active_overlay_key","normal_view_details","sample_size_mm","file_info","unit_options","derived")
 CURVE_OPTION_DEFAULTS = {"marker": "", "legend_text": "", "show_legend": True, "overlay_enabled": True,
                          "appearance_mode": "normal", "normal_appearance": None, "overlay_appearance": None,
                          "display_filename": None, "show_legend_text": True, "normal_enabled": True,
                          "y_type": "normal", "smooth_width": 0., "x_signal_index": None, "x_signal_type": "normal", "x_smooth_width": 0.,
-                         "data_indices":None,"data_limit_spec":None,"reset_time":False,"smooth_domain":None,"smooth_reuse":False,"smooth_base_ops":[],"smooth_x_config":None,"working_rows":None,"smooth_source_rows":None}
+                         "data_indices":None,"data_limit_spec":None,"reset_time":False,"smooth_domain":None,"smooth_reuse":False,"smooth_base_ops":[],"smooth_x_config":None,"working_rows":None,"smooth_source_rows":None,
+                         "overlay_views":{},"active_overlay_key":None,"normal_view_details":None,"sample_size_mm":None,"file_info":{},"unit_options":None,"derived":None}
 APPEARANCE_FIELDS = ("style", "color", "marker", "width", "offset")
 
 
@@ -67,6 +69,7 @@ def _limits(value, label):
 
 def default_plot_options():
     """Return independent defaults for one document, suitable for JSON storage."""
+    from .point_labels import default_options
     return {"title": "", "x_label": "", "y_labels": ["", "", "", ""],
             "legend": None, "legend_location": "best", "grid_x": False, "grid_y": False,
             "grid_minor": False, "auto_x": True, "auto_y": [True, True, True, True],
@@ -80,7 +83,7 @@ def default_plot_options():
             "overlay_auto": default_auto_styles(), "overlay_configure": default_auto_configure(),
             "axis_flags": [{"line": False, "color": False, "symbol": False} for _ in range(4)],
             "export_title": "", "export_align": "left", "window_name": "",
-            "legend_anchor": None, "x_domain": None, "secondary_x": False, "signal_defaults": None,"smoothing_rules":[]}
+            "legend_anchor": None, "x_domain": None, "secondary_x": False, "signal_defaults": None,"smoothing_rules":[],"overlay_members":None,"axis_x_offsets":[0.]*4,"point_label_options":default_options(),"alpha_smoothing_width":None,"unit_defaults":None,"transition_options":None,"signal_change_options":None,"peak_onset_options":None,"integration_options":None,"sigmoid_iterations":None,"auto_limits_rules":[]}
 
 
 def _ticks(value, label):
@@ -117,6 +120,9 @@ def validate_plot_options(options):
         elif key=="smoothing_rules":
             from .data_limits import validate_rules
             result[key]=validate_rules(value)
+        elif key=="overlay_members":
+            if value is not None and (not isinstance(value,list) or len(value)>10000 or any(not isinstance(uid,str) or not re.fullmatch(r"[0-9a-f]{32}",uid) for uid in value) or len(set(value))!=len(value)):raise ValueError("叠图成员列表无效")
+            result[key]=deepcopy(value)
         elif key in ("title", "x_label", "export_title"):
             result[key] = _text(value, key)
         elif key == "window_name": result[key] = _text(value, key, maximum=80)
@@ -149,6 +155,32 @@ def validate_plot_options(options):
             if not isinstance(value, (list, tuple)) or len(value) != 4 or any(not isinstance(v, dict) or set(v) != {"line", "color", "symbol"} for v in value):
                 raise ValueError("坐标轴样式标识无效")
             result[key] = [{name: _boolean(item, name) for name, item in flags.items()} for flags in value]
+        elif key=="axis_x_offsets":
+            if not isinstance(value,(list,tuple)) or len(value)!=4:raise ValueError("X偏移必须包含四个坐标轴数值")
+            result[key]=[_number(item,"X偏移") for item in value]
+        elif key=="unit_defaults":
+            from .dimension_units import validate as validate_units
+            result[key]=None if value is None else validate_units(value)
+        elif key=='peak_onset_options':
+            from .peak_onset import validate
+            result[key]=None if value is None else validate(value)
+        elif key=='sigmoid_iterations':
+            result[key]=None if value is None else _boolean(value,'S形基线迭代显示')
+        elif key=='integration_options':
+            from .peak_integration import validate
+            result[key]=None if value is None else validate(value)
+        elif key=='auto_limits_rules':
+            from .auto_limits import validate_rules
+            result[key]=validate_rules(value)
+        elif key in ('transition_options','signal_change_options'):
+            from .transitions import validate,validate_signal
+            result[key]=None if value is None else (validate(value) if key=='transition_options' else validate_signal(value))
+        elif key=="alpha_smoothing_width":
+            from .alpha import positive
+            result[key]=None if value is None else positive(value,"单点Alpha窗口")
+        elif key=="point_label_options":
+            from .point_labels import validate_options
+            result[key]=validate_options(value)
         elif key in ("grid_x", "grid_y", "grid_minor", "auto_x", "legend_border", "legend_color", "legend_text", "legend_line", "legend_file", "legend_symbol"):
             result[key] = _boolean(value, key)
         elif key in ("graph_axis_visible", "graph_show_symbols"):
@@ -204,6 +236,14 @@ def _plot_options_mapping(options):
 
 
 def _validate_curve_state(state, signal_count, sample_count=None):
+    derived=state.get('derived')
+    if derived is not None:
+        if not isinstance(derived,dict) or not isinstance(derived.get('positions'),list) or len(derived['positions'])<2:raise ValueError('派生积分描述无效')
+        sample_count=len(derived['positions'])
+    from .overlay_views import validate_views,validate_details,overlay_key
+    validate_views(state["overlay_views"])
+    if state["active_overlay_key"] is not None and not overlay_key(state["active_overlay_key"]):raise ValueError("当前叠图窗口键无效")
+    if state["normal_view_details"] is not None:validate_details(state["normal_view_details"])
     if not isinstance(state["uid"], str) or not re.fullmatch(r"[0-9a-f]{32}", state["uid"]):
         raise ValueError("会话曲线标识无效")
     if (type(state["y_index"]) is not int or type(state["axis"]) is not int
@@ -221,7 +261,7 @@ def _validate_curve_state(state, signal_count, sample_count=None):
         _boolean(state[key], key)
     for row_key in ("data_indices","working_rows","smooth_source_rows"):
         rows=state[row_key]
-        if rows is not None and (not isinstance(rows,list) or len(rows)<2 or any(type(v) is not int or v<0 or (sample_count is not None and v>=sample_count) for v in rows) or any(b<=a for a,b in zip(rows,rows[1:]))):raise ValueError("采集数据行范围无效")
+        if rows is not None and (not isinstance(rows,list) or (len(rows)<2 and not (derived is not None and row_key=='data_indices' and rows==[])) or any(type(v) is not int or v<0 or (sample_count is not None and v>=sample_count) for v in rows) or any(b<=a for a,b in zip(rows,rows[1:]))):raise ValueError("采集数据行范围无效")
     if state["smooth_domain"] not in (None,"temperature","time","signal"):raise ValueError("平滑自变量无效")
     config=state["smooth_x_config"]
     if config is not None:
@@ -231,13 +271,26 @@ def _validate_curve_state(state, signal_count, sample_count=None):
     if not isinstance(state["smooth_base_ops"],list) or len(state["smooth_base_ops"])>10000:raise ValueError("平滑来源记录无效")
     for value in state["smooth_base_ops"]:_text(value,"平滑来源记录")
     spec=state["data_limit_spec"]
-    if spec is not None:
+    if isinstance(spec,dict) and spec.get("kind")=="cursor":
+        from .data_limits import cursor_spec_rows
+        rows=cursor_spec_rows(spec,sample_count)
+        expected=None if len(rows)==sample_count else rows
+        if state["data_indices"]!=expected or state["reset_time"]!=spec["reset_time"]:raise ValueError("光标界限与数据采集范围不一致")
+    elif spec is not None:
         if not isinstance(spec,dict) or set(spec)!={"kind","start","stop","delay","all_cycles","reset_time"} or spec["kind"] not in ("time","temperature","cycle"):raise ValueError("数据界限设置无效")
         for key in ("start","stop","delay"):_number(spec[key],key)
         if spec["delay"]<0:raise ValueError("延迟时间不能为负数")
         for key in ("all_cycles","reset_time"):_boolean(spec[key],key)
     from .signal_processing import KINDS
     if state["y_type"] not in KINDS+("custom",) or state["x_signal_type"] not in KINDS: raise ValueError("信号类型无效")
+    if derived is not None and state['y_type'] not in ('normal','custom'):raise ValueError('派生积分信号类型无效')
+    from .file_information import validate_text_overrides
+    validate_text_overrides(state["file_info"])
+    from .dimension_units import validate as validate_units
+    validate_units(state["unit_options"])
+    if state["sample_size_mm"] is not None:
+        from .file_information import nonnegative_size
+        nonnegative_size(state["sample_size_mm"])
     for key in ("smooth_width", "x_smooth_width"):
         if _number(state[key], key) < 0: raise ValueError("平滑宽度不能为负数")
     if state["x_signal_index"] is not None and (type(state["x_signal_index"]) is not int or not 0 <= state["x_signal_index"] < signal_count): raise ValueError("X信号索引无效")
@@ -302,6 +355,13 @@ class Curve:
     smooth_x_config: dict | None = None
     working_rows: list | None = None
     smooth_source_rows: list | None = None
+    overlay_views: dict = field(default_factory=dict)
+    active_overlay_key: str | None = None
+    normal_view_details: dict | None = None
+    sample_size_mm: float | None = None
+    file_info: dict = field(default_factory=dict)
+    unit_options: dict | None = None
+    derived: dict | None = None
     _x_cache: tuple | None = field(default=None, init=False, repr=False)
     history: list[tuple] = field(default_factory=list, repr=False)
 
@@ -310,98 +370,167 @@ class Curve:
         if self.display_filename is None: self.display_filename = self.dataset.path.name
 
     @property
+    def sample_name(self):
+        from .file_information import text_value
+        return text_value(self,"Sample") if "Sample" in self.file_info else self.dataset.name
+
+    @property
     def signal_label(self):
+        if self.derived is not None:return f"{self.derived['label']} ({self.derived['creation_unit']})"
         return self.dataset.signals[self.y_index].label
 
     @property
     def result_label(self):
-        label = self.signal_label
+        from .dimension_units import channel_label
+        if self.derived is not None:
+            from .running_integral import quantity as derived_quantity
+            label=f"{self.derived['label']} ({derived_quantity(self)['unit']})"
+        else:label=self.signal_label if "normalize" in self.operations else channel_label(self,self.y_index)[0]
         for operation in self.operations:
             if operation.startswith("derivative:"):
-                label = f"d({label}) / d({operation.split(':', 1)[1]})"
+                from .dimension_units import variable_spec
+                variable=operation.split(':',1)[1]
+                shown=variable if "normalize" in self.operations else variable_spec(self,variable)['label']
+                label = f"d({label}) / d({shown})"
             elif operation == "normalize":
                 label = f"Relative [{label}] (%)"
         return label
 
     @property
     def plot_label(self):
-        if self.y_type in ("normal", "custom"): return self.result_label
-        variable = self.dataset.time_index if self.y_type.endswith("time") else self.dataset.temperature_index
-        unit = self.dataset.signals[self.y_index].unit
-        denominator = self.dataset.signals[variable].unit if variable is not None else "?"
-        order = 2 if self.y_type.startswith("d2_") else 1
-        return f"{'二阶' if order == 2 else '一阶'}导数 {self.dataset.signals[self.y_index].name} ({unit}/{denominator}{'²' if order == 2 else ''})"
+        if self.y_type in ("normal","custom"):return self.result_label
+        from .dimension_units import affine
+        variable=self.dataset.time_index if self.y_type.endswith('time') else self.dataset.temperature_index
+        unit=affine(self,self.y_index)['unit'];denominator=affine(self,variable)['unit'] if variable is not None else '?'
+        order=2 if self.y_type.startswith('d2_') else 1
+        if self.y_type=='d_temperature' and unit in ('µm/m','ppm'):return f'Alpha ({unit}/{denominator})'
+        return f"{'二阶' if order==2 else '一阶'}导数 {self.dataset.signals[self.y_index].name} ({unit}/{denominator}{'²' if order==2 else ''})"
 
     @property
     def result_unit(self):
-        unit = self.dataset.signals[self.y_index].unit.strip().replace("μ", "µ")
-        if unit == "um": unit = "µm"
-        for operation in self.operations:
-            if operation.startswith("derivative:"):
-                variable = operation.split(":", 1)[1]
-                denominator = next((s.unit for s in self.dataset.signals if s.label == variable),
-                                   "°C" if variable.startswith("Temperature") else ("min" if variable.startswith("Time") else variable))
-                if self.x_signal_index is not None and variable == self.x_label("signal"): denominator = self.x_unit("signal")
-                unit = f"({unit})/({denominator})"
-            elif operation == "normalize": unit = "%"
-        # Empty units do not establish compatibility for unrelated signals.
-        return unit or self.result_label
+        from .dimension_units import quantity
+        return quantity(self)['unit'] or self.result_label
+
+    def y_unit_factor(self):
+        from .dimension_units import quantity
+        return quantity(self)['factor']
+
+    def x_unit_factor(self,domain):
+        if self.derived is not None:
+            from .running_integral import source_reference
+            return source_reference(self).x_unit_factor(domain)
+        from .dimension_units import affine,typed_affine
+        if domain=='signal' and self.x_signal_index is not None:return typed_affine(self,self.x_signal_index,self.x_signal_type)['factor']
+        index=self.dataset.time_index if domain=='time' else self.dataset.temperature_index
+        return affine(self,index)['factor'] if index is not None else 1.
+
+    def display_y_offset(self,value=None):return (self.offset if value is None else value)*self.y_unit_factor()
+    def display_x_shift(self,domain):return self.x_shift*self.x_unit_factor(domain)
 
     def xy(self, domain="temperature"):
         if self.working is not None and self.working_rows is not None and not np.isin(self.active_rows,self.working_rows).all():raise ValueError("此自定义处理未覆盖所选数据；请先恢复原始曲线再扩大范围")
-        x = self.x_values(domain) + self.x_shift
-        y = self.dataset.values[:, self.y_index] if self.working is None else self.working
+        x = self.x_values(domain) + self.display_x_shift(domain)
+        y = self.base_y if self.working is None else self.working
         y=y[self.active_rows].astype(float)
         time_index=self.dataset.time_index
-        if self.reset_time and self.y_index==time_index and self.result_unit==self.dataset.signals[time_index].unit:y-=self.time_origin
-        return x, y * self.scale + self.offset
+        if self.derived is None and self.reset_time and self.y_index==time_index and not any(op=="normalize" or op.startswith("derivative:") for op in self.operations):y-=self.time_origin
+        from .dimension_units import quantity,convert
+        spec=quantity(self)
+        return x,convert(y,spec)*self.scale+self.offset*spec["factor"]
 
     @property
-    def active_rows(self):return np.arange(len(self.dataset.values)) if self.data_indices is None else np.asarray(self.data_indices,dtype=int)
+    def active_rows(self):return np.arange(self.sample_count) if self.data_indices is None else np.asarray(self.data_indices,dtype=int)
+
+    @property
+    def sample_count(self):return len(self.dataset.values) if self.derived is None else len(self.derived['positions'])
+
+    @property
+    def base_y(self):return self.dataset.values[:,self.y_index] if self.derived is None else np.asarray(self.derived['base_values'],dtype=float)
+
+    @property
+    def logical_dataset(self):
+        if self.derived is None:return self.dataset
+        from .running_integral import logical_dataset
+        return logical_dataset(self)
 
     @property
     def time_origin(self):
         index=self.dataset.time_index
         if index is None:raise ValueError("文件没有时间信号")
+        if self.derived is not None:
+            if self.data_indices is None or not len(self.active_rows):return self.derived['time_origin']
+            return float(self.logical_dataset.values[self.active_rows[0],index])
         return float(self.dataset.values[self.active_rows[0],index])
 
-    def x_values(self, domain="temperature", *, full=False):
+    def x_values(self, domain="temperature", *, full=False, canonical=False):
+        if self.derived is not None:
+            from .running_integral import x_values
+            return x_values(self,domain,full=full,canonical=canonical)
         rows=np.arange(len(self.dataset.values)) if full else self.active_rows
         if domain == "signal":
             from .signal_processing import typed_signal
+            from .dimension_units import typed_width_factor
             from .data_limits import segments
             from dataclasses import replace
-            key = (id(self.dataset.values), self.x_signal_index, self.x_signal_type, self.x_smooth_width,tuple(rows))
+            width=self.x_smooth_width/typed_width_factor(self,self.x_signal_type)
+            key = (id(self.dataset.values), self.x_signal_index, self.x_signal_type, width,tuple(rows))
             if self._x_cache is None or self._x_cache[0] != key:
                 output=np.empty(len(rows))
                 for section in segments(rows):
-                    output[section]=typed_signal(replace(self.dataset,values=self.dataset.values[rows[section]]),self.x_signal_index,self.x_signal_type,self.x_smooth_width)
+                    output[section]=typed_signal(replace(self.dataset,values=self.dataset.values[rows[section]]),self.x_signal_index,self.x_signal_type,width)
                 self._x_cache = (key,output)
             output=self._x_cache[1].copy()
             if not full and self.reset_time and self.x_signal_index==self.dataset.time_index and self.x_signal_type=="normal":output-=self.time_origin
+            if not canonical:
+                from .dimension_units import typed_affine,convert
+                spec=typed_affine(self,self.x_signal_index,self.x_signal_type)
+                output=convert(output,spec)
             return output
         idx = self.dataset.temperature_index if domain == "temperature" else self.dataset.time_index
         if idx is None or idx < 0:
             raise ValueError(f"{self.dataset.path.name} 没有{domain}信号")
         output=self.dataset.values[rows, idx].astype(float)
         if not full and domain=="time" and self.reset_time:output-=self.time_origin
+        if not canonical:
+            from .dimension_units import affine,convert
+            output=convert(output,affine(self,idx))
         return output
 
     def x_label(self, domain):
-        from .signal_processing import type_label
-        if domain == "signal": return type_label(self.dataset, self.x_signal_index, self.x_signal_type)[0]
+        if self.derived is not None:
+            from .running_integral import source_reference
+            return source_reference(self).x_label(domain)
+        from .dimension_units import channel_label
+        if domain == "signal":
+            from .dimension_units import channel_label
+            return channel_label(self,self.x_signal_index,self.x_signal_type)[0]
         idx = self.dataset.temperature_index if domain == "temperature" else self.dataset.time_index
-        return self.dataset.signals[idx].label if idx is not None else domain
+        return channel_label(self,idx)[0] if idx is not None else domain
 
     def x_unit(self, domain):
-        from .signal_processing import type_label
-        if domain == "signal": return type_label(self.dataset, self.x_signal_index, self.x_signal_type)[1]
+        if self.derived is not None:
+            from .running_integral import source_reference
+            return source_reference(self).x_unit(domain)
+        from .dimension_units import channel_label
+        if domain == "signal":
+            from .dimension_units import channel_label
+            return channel_label(self,self.x_signal_index,self.x_signal_type)[1]
         idx = self.dataset.temperature_index if domain == "temperature" else self.dataset.time_index
-        return self.dataset.signals[idx].unit if idx is not None else ""
+        return channel_label(self,idx)[1] if idx is not None else ""
 
     def result_transform(self, domain):
         result = {"x_shift": self.x_shift, "scale": self.scale, "offset": self.offset}
+        if self.derived is not None:result['derived_parent']=self.derived['parent_id']
         if domain == "signal": result["x_signal"] = {"index": self.x_signal_index, "type": self.x_signal_type, "width": self.x_smooth_width}
+        if self.unit_options is not None:
+            from .dimension_units import dimension_index,affine
+            from .file_information import effective_size
+            result['units']=dict(self.unit_options)
+            index=dimension_index(self.dataset)
+            if index is not None:
+                from .running_integral import source_reference
+                spec=affine(source_reference(self) if self.derived is not None else self,index)
+                result['units_reference']={'original_size_mm':effective_size(self),'reference_mm':spec['reference_mm'],'at25_um':spec['reference_25'],'effective_unit':spec['unit']}
         if self.data_indices is not None:result["data_indices"]=list(self.data_indices)
         if self.reset_time:result.update(reset_time=True,time_origin=self.time_origin)
         return result
@@ -417,18 +546,27 @@ class Curve:
             if position!=left and left+1<len(rows) and rows[left+1]!=rows[left]+1:raise ValueError("不能在被排除的数据间隙内插值")
 
     def checkpoint(self):
+        self.save_overlay_view()
         self.history.append((None if self.working is None else self.working.copy(), list(self.operations), self.x_shift, self.scale,
                              self.overlay_offset if self.appearance_mode == "overlay" else self.offset, self.appearance_mode, self.y_type, self.smooth_width,
-                             {key:deepcopy(getattr(self,key)) for key in ("data_indices","data_limit_spec","reset_time","smooth_domain","smooth_reuse","smooth_base_ops","smooth_source","smooth_x_config","working_rows","smooth_source_rows")}))
+                             dict({key:deepcopy(getattr(self,key)) for key in ("data_indices","data_limit_spec","reset_time","smooth_domain","smooth_reuse","smooth_base_ops","smooth_source","smooth_x_config","working_rows","smooth_source_rows")},
+                                  _offset_view_key=self.active_overlay_key if self.appearance_mode=="overlay" else None)))
 
     def undo(self):
         if self.history:
             state = self.history.pop()
             if len(state)>8:
-                for key,value in state[8].items():setattr(self,key,value)
+                for key,value in state[8].items():
+                    if key!="_offset_view_key":setattr(self,key,value)
             if len(state) >= 8: self.y_type, self.smooth_width = state[6:8]
             self.working, self.operations, self.x_shift, self.scale, offset = state[:5]
             mode = state[5] if len(state) > 5 else self.appearance_mode
+            offset_key=state[8].get("_offset_view_key") if len(state)>8 else None
+            if mode=="overlay" and offset_key is not None and (self.appearance_mode!="overlay" or self.active_overlay_key!=offset_key):
+                if offset_key in self.overlay_views:
+                    appearance=dict(self.overlay_views[offset_key],offset=offset)
+                    self.overlay_views=dict(self.overlay_views,**{offset_key:appearance})
+                return
             if mode == self.appearance_mode:
                 if mode == "overlay": self.overlay_offset = offset if len(state) > 5 else offset-(self.normal_appearance or {}).get("offset", 0.)
                 else: self.offset = offset
@@ -450,6 +588,29 @@ class Curve:
         for key, value in target.items(): setattr(self, key, value)
         self.appearance_mode = mode
 
+    def save_overlay_view(self):
+        if self.appearance_mode=="overlay" and self.active_overlay_key is not None:
+            from .overlay_views import snapshot
+            self.overlay_views=dict(self.overlay_views,**{self.active_overlay_key:snapshot(self)})
+
+    def activate_view(self,key=None):
+        """Switch presentation state while retaining shared signal processing."""
+        from .overlay_views import DETAIL_FIELDS,restore,overlay_key
+        if key is not None and not overlay_key(key):raise ValueError("叠图窗口键无效")
+        if key==self.active_overlay_key and self.appearance_mode==("overlay" if key else "normal"):return
+        if self.appearance_mode=="normal":
+            self.normal_view_details={name:deepcopy(getattr(self,name)) for name in DETAIL_FIELDS}
+        else:
+            self.save_overlay_view();self.activate_appearance("normal")
+            if self.normal_view_details is not None:
+                for name,value in self.normal_view_details.items():setattr(self,name,deepcopy(value))
+        self.active_overlay_key=None
+        if key is None:return
+        if self.normal_view_details is None:self.normal_view_details={name:deepcopy(getattr(self,name)) for name in DETAIL_FIELDS}
+        self.activate_appearance("overlay")
+        if key in self.overlay_views:restore(self,self.overlay_views[key])
+        self.active_overlay_key=key
+
     @property
     def overlay_offset(self):
         if self.appearance_mode == "overlay": return self.offset - (self.normal_appearance or {}).get("offset", 0.)
@@ -468,6 +629,8 @@ def save_session(path, curves, domain, results, plot_options=None):
     path = Path(path)
     if domain not in ("temperature", "time", "signal"):
         raise ValueError("会话 X 轴无效")
+    from .running_integral import validate_links
+    validate_links(curves,results)
     document = {"format": "tma-studio", "version": 1, "domain": domain, "results": results, "curves": [],
                 "plot_options": _plot_options_mapping(plot_options)}
     handle, temporary = tempfile.mkstemp(prefix=".tma-", suffix=".tmp", dir=path.parent)
@@ -475,16 +638,21 @@ def save_session(path, curves, domain, results, plot_options=None):
     try:
         with zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED) as archive:
             for i, curve in enumerate(curves):
+                curve.save_overlay_view()
                 ds = curve.dataset
                 entry = {"path": str(ds.path), "metadata": ds.metadata, "warnings": ds.warnings,
                          "sha256": ds.sha256, "signals": [{"name": s.name, "unit": s.unit} for s in ds.signals]}
                 state = {key: getattr(curve, key) for key in CURVE_FIELDS}
+                if curve.derived is not None:
+                    from .running_integral import validate as validate_derived
+                    validate_derived(curve.derived,ds)
+                    if curve.y_index!=curve.derived['source_y_index']:raise ValueError('派生积分信号索引不符')
                 _validate_curve_state(state, len(ds.signals),len(ds.values))
                 for key in CURVE_FIELDS:
                     entry[key] = getattr(curve, key)
                 for key, array in (("data", ds.values), ("working", curve.working),("smooth_source",curve.smooth_source)):
                     if array is not None:
-                        if key!="data" and (not isinstance(array,np.ndarray) or array.dtype.kind not in "fiu" or array.shape!=(len(ds.values),) or not np.isfinite(array).all()):raise ValueError("处理信号或平滑来源无效")
+                        if key!="data" and (not isinstance(array,np.ndarray) or array.dtype.kind not in "fiu" or array.shape!=(curve.sample_count,) or not np.isfinite(array).all()):raise ValueError("处理信号或平滑来源无效")
                         buffer = BytesIO()
                         np.save(buffer, array, allow_pickle=False)
                         archive.writestr(f"{i}-{key}.npy", buffer.getvalue())
@@ -527,15 +695,19 @@ def load_session(path, include_plot_options=False):
             if "show_legend_text" not in entry and state["legend_text"] == "": state["legend_text"] = ds.path.name
             _validate_curve_state(state, len(signals),len(values))
             curve = Curve(ds, **state)
+            if curve.derived is not None:
+                from .running_integral import validate as validate_derived
+                validate_derived(curve.derived,ds)
+                if curve.y_index!=curve.derived['source_y_index']:raise ValueError('派生积分信号索引不符')
             _boolean(entry["has_working"], "has_working")
             if entry["has_working"]:
                 curve.working = np.load(BytesIO(archive.read(f"{i}-working.npy")), allow_pickle=False)
-                if curve.working.dtype.kind not in "fiu" or curve.working.shape != (len(values),) or not np.isfinite(curve.working).all():
+                if curve.working.dtype.kind not in "fiu" or curve.working.shape != (curve.sample_count,) or not np.isfinite(curve.working).all():
                     raise ValueError("会话处理后信号无效")
             _boolean(entry.get("has_smooth_source",False),"has_smooth_source")
             if entry.get("has_smooth_source",False):
                 curve.smooth_source=np.load(BytesIO(archive.read(f"{i}-smooth_source.npy")),allow_pickle=False)
-                if curve.smooth_source.dtype.kind not in "fiu" or curve.smooth_source.shape!=(len(values),) or not np.isfinite(curve.smooth_source).all():raise ValueError("会话平滑来源无效")
+                if curve.smooth_source.dtype.kind not in "fiu" or curve.smooth_source.shape!=(curve.sample_count,) or not np.isfinite(curve.smooth_source).all():raise ValueError("会话平滑来源无效")
             if curve.reset_time:curve.time_origin
             curves.append(curve)
         results = doc.get("results", [])
@@ -551,7 +723,39 @@ def load_session(path, include_plot_options=False):
                 raise ValueError("会话交互分析无效")
             _boolean(state.get("confirmed", True), "confirmed")
             state.setdefault("confirmed", True)
+            if result['kind'] in ('peak_linear','peak_sigmoid'):
+                from .peak_integration import validate as validate_integration
+                from .peak_onset import validate as validate_peak
+                validate_integration(result.get('integration'));config=validate_peak(result.get('peak_onset'))
+                if result['kind']=='peak_sigmoid':
+                    from .sigmoidal import validate as validate_sigmoid,validate_snapshot
+                    validate_sigmoid(result.get('sigmoid'));validate_snapshot(result['values'].get('sigmoid_profile'),len(curve.dataset.values))
+                    area=_number(result['values'].get('integral'),'S形积分面积')
+                    if not np.isclose(area,result['values']['sigmoid_profile']['cumulative'][-1],rtol=1e-12,atol=0):raise ValueError('S形积分面积与快照不符')
+                if len(state.get('indices',[]))!=(4 if config['onset']['manual'] else 2):raise ValueError('峰积分控制点数量无效')
+                from .point_labels import validate_signal
+                validate_signal(result.get('point_signal'),curve.dataset)
+            if result['kind'] in ('peak_max','onset_point'):
+                from .peak_onset import validate
+                config=validate(result.get('peak_onset'))
+                if len(state.get('indices',[]))!=(4 if result['kind']=='onset_point' and config['onset']['manual'] else 2):raise ValueError('峰／始点控制点数量无效')
+                from .point_labels import validate_signal
+                validate_signal(result.get('point_signal'),curve.dataset)
+            if 'auto_limits' in result:
+                from .auto_limits import validate_rule
+                validate_rule(result['auto_limits'])
+            if result['kind'] in ('step_transition','glass_transition'):
+                from .transitions import validate
+                validate(result.get('transition'))
+                if len(state.get('indices',[]))!=(6 if result['transition']['manual'] else 2):raise ValueError('转变控制点数量无效')
+            if result["kind"] in ("alpha_at_x","alpha_secant","alpha_fit"):
+                from .alpha import validate_config
+                validate_config(result.get("alpha"))
+                if result["domain"]!="temperature":raise ValueError("Alpha结果必须使用温度X轴")
             annotation = result.get("annotation", {})
+            if result["kind"] in ("curve_value","curve_value_y"):
+                from .point_labels import validate_options,validate_signal
+                validate_options(annotation.get("point_label"));validate_signal(result.get("point_signal"),curve.dataset)
             if "hidden" in annotation: _boolean(annotation["hidden"], "hidden")
             style = annotation.get("text_style", {})
             if not isinstance(style, dict): raise ValueError("标注文字格式无效")
@@ -559,10 +763,19 @@ def load_session(path, include_plot_options=False):
                 if key in style: _boolean(style[key], key)
             if "size" in style and not 6 <= _number(style["size"], "字号") <= 72:
                 raise ValueError("字号必须为6至72")
+            label_styles = annotation.get("label_styles", {})
+            if not isinstance(label_styles, dict): raise ValueError("独立文字格式无效")
+            for label_key, label_style in label_styles.items():
+                if label_key not in ("result", "t1", "t2", "t3", "t4", "t5", "t6", "onset") + tuple(f"info{i}" for i in range(1, 100)) or not isinstance(label_style, dict) or set(label_style) - {"bold", "italic", "size", "hidden"}:
+                    raise ValueError("独立文字格式无效")
+                for flag in ("bold", "italic", "hidden"):
+                    if flag in label_style: _boolean(label_style[flag], flag)
+                if "size" in label_style and not 6 <= _number(label_style["size"], "字号") <= 72:
+                    raise ValueError("字号必须为6至72")
             offsets = annotation.get("label_offsets", {})
             if not isinstance(offsets, dict): raise ValueError("温度标签位置无效")
             for key, value in offsets.items():
-                if key not in ("t1", "t2") or not isinstance(value, (list, tuple)) or len(value) != 2:
+                if key not in (("t1","t2","t3","t4","onset") if result["kind"] in ("peak_linear","peak_sigmoid") else ("t1","t2","t3","t4","t5","t6") if result["kind"] in ("step_transition","glass_transition","onset_point") else ("t1","t2")) + tuple(f"info{i}" for i in range(1, 100)) or not isinstance(value, (list, tuple)) or len(value) != 2:
                     raise ValueError("温度标签位置无效")
                 for coordinate in value: _number(coordinate, "标签位置")
             from dataclasses import replace
@@ -570,19 +783,59 @@ def load_session(path, include_plot_options=False):
             # Archived values belong to their recorded processing state. The
             # current working buffer may cover another window; validate cursor
             # structure against immutable raw rows without replacing results.
-            archived=replace(curve,data_indices=transform.get("data_indices"),reset_time=transform.get("reset_time",False),working=None,working_rows=None)
+            archived=replace(curve,unit_options=transform.get("units"),data_indices=transform.get("data_indices"),data_limit_spec=None,reset_time=transform.get("reset_time",False),working=None,working_rows=None)
+            reference=transform.get('units_reference')
+            if reference is not None:
+                if not isinstance(reference,dict) or set(reference)!={'original_size_mm','reference_mm','at25_um','effective_unit'}:raise ValueError('分析单位参考无效')
+                from .file_information import nonnegative_size
+                for key in ('original_size_mm','reference_mm'):
+                    if reference[key] is not None:nonnegative_size(reference[key])
+                if reference['at25_um'] is not None:_number(reference['at25_um'],'25°C参考')
+                if reference['effective_unit'] not in ('µm','mm','%','µm/m','ppm'):raise ValueError('分析尺寸单位无效')
+                archived.sample_size_mm=reference['original_size_mm']
             xconfig=transform.get("x_signal")
             if xconfig is not None:
                 if not isinstance(xconfig,dict) or set(xconfig)!={"index","type","width"}:raise ValueError("分析X信号设置无效")
                 archived.x_signal_index,archived.x_signal_type,archived.x_smooth_width=xconfig["index"],xconfig["type"],xconfig["width"]
             _validate_curve_state({key:getattr(archived,key) for key in CURVE_FIELDS},len(archived.dataset.signals),len(archived.dataset.values))
             archived.validate_positions(state.get("positions",state["indices"]))
+            if result['kind']=='slope':
+                from .slope import validate_snapshot
+                positions=state.get('positions',state['indices'])
+                validate_snapshot(result['values'],len(archived.active_rows),positions)
+                lo,hi=sorted(positions)
+                if np.any(np.diff(archived.active_rows[int(np.floor(lo)):int(np.ceil(hi))+1])!=1):raise ValueError('斜率快照不能跨被排除的采集片段')
+            if result["kind"]=="peak_sigmoid":
+                from .sigmoidal import validate_snapshot
+                validate_snapshot(result["values"]["sigmoid_profile"],len(archived.active_rows))
+                selected=state.get('positions',state['indices']);profile=result['values']['sigmoid_profile']
+                if not np.allclose([profile['positions'][0],profile['positions'][-1]],sorted(selected[:2]),rtol=0,atol=1e-12):raise ValueError('S形积分快照与控制点界限不符')
             x, y = archived.xy(result["domain"])
             point_values(x, y, result["kind"], state.get("indices", []), state.get("positions"), state.get("manual_y"))
-            point_values(x, y, result["kind"], state.get("initial_indices", []))
+            initial_positions=state.get("initial_positions")
+            if initial_positions is not None:archived.validate_positions(initial_positions)
+            point_values(x, y, result["kind"], state.get("initial_indices", []),initial_positions)
+            if result["kind"]=="curve_value_y":
+                if initial_positions is None:raise ValueError("Y标记缺少初始交点")
+                target=_number(state.get("target_y"),"Y标记")
+                initial_target=_number(state.get("initial_target_y"),"初始Y标记")
+                # Validate intersections only against the matching processing state.
+                # Archived measurements must retain their recorded values after later processing.
+                if (curve.result_transform(result["domain"])==transform and curve.operations==result["operations"]
+                        and curve.result_label==result["signal"]):
+                    from .measurement import position_at_y
+                    current_y=curve.xy(result["domain"])[1]
+                    for selected,level in ((state.get("positions",state["indices"])[0],target),(initial_positions[0],initial_target)):
+                        if not np.isclose(selected,position_at_y(current_y,level,curve.active_rows),rtol=0,atol=1e-10):raise ValueError("Y标记必须使用采集顺序中的第一个交点")
             if "active_point" in state and (type(state["active_point"]) is not int or not 0 <= state["active_point"] < len(state["indices"])):
                 raise ValueError("活动控制点无效")
         plot_options = _plot_options_mapping(doc.get("plot_options", {}))
+        from .running_integral import validate_links
+        validate_links(curves,results)
+        from .overlay_views import overlay_key
+        known_uids={c.uid for c in curves}
+        for key,options in plot_options.items():
+            if overlay_key(key) and options["overlay_members"] is not None and any(uid not in known_uids for uid in options["overlay_members"]):raise ValueError("叠图包含不存在的曲线")
         if include_plot_options:
             return curves, doc["domain"], results, plot_options
         return curves, doc["domain"], results

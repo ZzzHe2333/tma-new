@@ -217,3 +217,19 @@ def test_archived_native_derivative_result_survives_a_new_data_window(ui,tmp_pat
     path=tmp_path/"derivative-window.tmas";save_session(path,ui.curves,ui.domain,ui.results,ui.plot_options)
     ui.close_all_documents();ui.restore_session(path)
     assert ui.results[0]==result
+
+
+def test_temporarily_inactive_mdi_keeps_third_document_and_its_confirmation(ui,tmp_path,monkeypatch):
+    imported(ui,tmp_path,3);ui.show_normal();document=ui.active_document();uid=ui.selected().uid
+    actual=ui.mdi
+    class InactiveMdi:
+        def activeSubWindow(self):return None
+        def __getattr__(self,name):return getattr(actual,name)
+    monkeypatch.setattr(ui,"mdi",InactiveMdi())
+    assert ui.active_document() is document
+    options=ui.show_curve_options();assert options is not None;options.reject()
+    smooth(ui,2)
+    entry=ui.start_point_measurement("signal_max");ui.create_measurement_menu().actions()[0].trigger()
+    assert entry in ui.results and entry["curve_id"]==uid and ui.selected().uid==uid
+    assert ui.active_document() is document
+    ui.close_all_documents();assert ui.active_document() is None

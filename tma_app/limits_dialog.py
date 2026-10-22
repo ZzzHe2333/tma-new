@@ -13,7 +13,19 @@ class LimitBoundsDialog(QDialog):
         value=curve.data_limit_spec if curve.data_limit_spec and curve.data_limit_spec["kind"]==kind else dict(start=0.,stop=0.,delay=0.,all_cycles=False,reset_time=False)
         if kind=="cycle" and not (curve.data_limit_spec and curve.data_limit_spec["kind"]==kind):
             index=cycle_index(curve.dataset)
-            if index is not None:value=dict(value,start=float(curve.dataset.values[:,index].min()),stop=float(curve.dataset.values[:,index].max()))
+            if index is not None:value=dict(value,start=float(curve.logical_dataset.values[:,index].min()),stop=float(curve.logical_dataset.values[:,index].max()))
+        from .dimension_units import affine
+        self.specs={}
+        for domain,index in (('time',curve.dataset.time_index),('temperature',curve.dataset.temperature_index)):
+            if index is not None:self.specs[domain]=affine(curve,index)
+        value=dict(value)
+        if kind in self.specs:
+            spec=self.specs[kind]
+            full_temperature=kind=='temperature' and value['start']==value['stop']==0
+            if not full_temperature:
+                for key in ('start','stop'):
+                    if kind!='time' or value[key]!=0:value[key]=value[key]*spec['factor']+spec['offset']
+        if 'time' in self.specs:value['delay']*=self.specs['time']['factor']
         self.fields={}
         if kind=="cycle":
             label=QLabel("循环",self);label.setGeometry(36,20,40,20)
@@ -23,7 +35,7 @@ class LimitBoundsDialog(QDialog):
         else:
             x=104 if kind=="temperature" else 96
             variable=curve.dataset.time_index if kind=="time" else curve.dataset.temperature_index
-            units=curve.dataset.signals[variable].unit if variable is not None else ""
+            units=self.specs[kind]["unit"] if kind in self.specs else ""
             for key,text,y in (("start","起点:",16),("stop","止点:",48)):
                 label=QLabel(text,self);label.setGeometry(x-45,y+4,45,20)
                 edit=QLineEdit(format(value[key],".15g"),self);edit.setGeometry(x,y,85,23);self.fields[key]=edit
@@ -32,7 +44,7 @@ class LimitBoundsDialog(QDialog):
         if kind=="temperature":
             label=QLabel("延迟时间:",self);label.setGeometry(40,84,64,20)
             edit=QLineEdit(format(value["delay"],".15g"),self);edit.setGeometry(104,80,85,23);self.fields["delay"]=edit
-            unit=curve.dataset.signals[curve.dataset.time_index].unit if curve.dataset.time_index is not None else ""
+            unit=self.specs["time"]["unit"] if "time" in self.specs else ""
             label=QLabel(unit,self);label.setGeometry(200,84,65,20)
             self.all_cycles=QCheckBox("包含延迟后的全部循环",self);self.all_cycles.setGeometry(24,114,242,20);self.all_cycles.setChecked(value["all_cycles"])
         self.reset=QCheckBox("时间归零",self);self.reset.setGeometry(36 if kind=="cycle" else 24,{"cycle":50,"time":82,"temperature":142}[kind],220,20)
@@ -45,9 +57,18 @@ class LimitBoundsDialog(QDialog):
     def accept(self):
         try:
             values={key:float(field.text()) for key,field in self.fields.items()}
+            if self.kind in self.specs:
+                conversion=self.specs[self.kind]
+                if not (self.kind=='temperature' and values['start']==values['stop']==0):
+                    for key in ('start','stop'):
+                        if self.kind!='time' or values[key]!=0:
+                            from .general_units import source_bound
+                            index=self.curve.dataset.time_index if self.kind=='time' else self.curve.dataset.temperature_index
+                            values[key]=source_bound(values[key],conversion,self.curve.logical_dataset.values[:,index])
+            if 'delay' in values and 'time' in self.specs:values['delay']/=self.specs['time']['factor']
             spec={"kind":self.kind,"start":values["start"],"stop":values["stop"],"delay":values.get("delay",0.),
                   "all_cycles":bool(self.all_cycles and self.all_cycles.isChecked()),"reset_time":self.reset.isChecked()}
-            self.owner.apply_data_limits(self.curve.dataset,spec)
+            self.owner.apply_data_limits(self.curve.dataset,spec,curve_uid=self.curve.uid)
             super().accept()
         except (ValueError,OverflowError) as exc:self.error.setText(str(exc));self.error.setToolTip(str(exc))
 
@@ -61,6 +82,7 @@ class DataLimitsDialog(QDialog):
         self.setObjectName("DataLimitsForm");self.setWindowTitle("数据界限 — "+curve.dataset.path.name);self.setFixedSize(282,186);self.setModal(True)
         group=QGroupBox(self);group.setGeometry(12,8,257,109);self.choices=QButtonGroup(self)
         selected=curve.data_limit_spec["kind"] if curve.data_limit_spec else "full"
+        if selected=="cursor":selected="full"
         for i,(text,kind,enabled) in enumerate((("全范围","full",True),("时间界限","time",curve.dataset.time_index is not None),("温度界限","temperature",curve.dataset.temperature_index is not None),("循环界限","cycle",cycle_index(curve.dataset) is not None))):
             button=QRadioButton(text,group);button.setGeometry(14,7+24*i,230,21);button.setProperty("kind",kind);button.setEnabled(enabled)
             button.setChecked(kind==selected);self.choices.addButton(button)
@@ -73,7 +95,7 @@ class DataLimitsDialog(QDialog):
     def accept(self):
         kind=self.choices.checkedButton().property("kind")
         if kind=="full":
-            try:self.owner.apply_data_limits(self.curve.dataset,None);super().accept()
+            try:self.owner.apply_data_limits(self.curve.dataset,None,curve_uid=self.curve.uid);super().accept()
             except ValueError as exc:self.error.setText(str(exc));self.error.setToolTip(str(exc))
         else:
             self.child=LimitBoundsDialog(self.owner,self.curve,kind)

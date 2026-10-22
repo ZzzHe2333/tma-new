@@ -308,6 +308,7 @@ def test_add_curves_selects_named_signal_and_rejects_incompatible_axis(ui, tmp_p
 
 def test_auto_overlay_assigns_units_and_colors_then_allows_manual_axis_move(ui, tmp_path):
     imported(ui, tmp_path)
+    ui.show_normal()  # Auto Configure consumes the ordinary-graph signal axes.
     ui.curves[1].y_index = 1
     ui.curves[1].axis = 1
     auto = ui.auto_configure_overlay()

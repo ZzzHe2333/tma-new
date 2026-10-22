@@ -21,8 +21,39 @@ def cycle_index(dataset):
     return next((i for i,s in enumerate(dataset.signals) if s.name.casefold() in ("cycle","cycle number","cycle index")),None)
 
 
+def cursor_spec_rows(spec,sample_count):
+    """Portable acquired-row bounds; never reinterpret repeated X as a range."""
+    if not isinstance(spec,dict) or set(spec)!={"kind","rows","reset_time"} or spec["kind"]!="cursor":raise ValueError("光标数据界限字段无效")
+    rows=spec["rows"]
+    if (not isinstance(rows,list) or len(rows)<2 or len(rows)>sample_count
+            or any(type(row) is not int or not 0<=row<sample_count for row in rows)
+            or any(a>=b for a,b in zip(rows,rows[1:]))):raise ValueError("光标界限内至少需要2个按采集顺序排列的数据点")
+    if type(spec["reset_time"]) is not bool:raise ValueError("时间归零设置无效")
+    return list(rows)
+
+
+def cursor_spec(curve,positions):
+    """Retain only acquired samples inside the two handles, including endpoints.
+
+    Fractional handles describe boundaries, not new samples. Prior exclusions
+    survive, and reversed handles refer to the same acquired interval.
+    """
+    if not isinstance(positions,(list,tuple)) or len(positions)!=2:raise ValueError("光标数据界限需要2个点")
+    positions=[finite(value,"光标位置") for value in positions]
+    rows=curve.active_rows
+    if min(positions)<0 or max(positions)>len(rows)-1:raise ValueError("光标位置超出当前数据范围")
+    first=math.ceil(min(positions)-1e-10);last=math.floor(max(positions)+1e-10)
+    spec={"kind":"cursor","rows":rows[first:last+1].tolist(),"reset_time":bool(curve.reset_time)}
+    cursor_spec_rows(spec,curve.sample_count)
+    return spec
+
+
 def select_rows(dataset,spec):
     if spec is None:return None
+    if isinstance(spec,dict) and spec.get("kind")=="cursor":
+        rows=cursor_spec_rows(spec,len(dataset.values))
+        if spec["reset_time"] and dataset.time_index is None:raise ValueError("时间归零需要时间信号")
+        return None if len(rows)==len(dataset.values) else rows
     if not isinstance(spec,dict) or set(spec)!={"kind","start","stop","delay","all_cycles","reset_time"}:raise ValueError("数据界限字段无效")
     kind=spec["kind"]
     if kind not in ("time","temperature","cycle"):raise ValueError("数据界限类型无效")
@@ -78,7 +109,7 @@ def smoothed_state(curve,domain,width,*,capture_custom=False,use_saved_x=True):
     """Compute a complete proposal before changing any live curve."""
     width=finite(width,"平滑宽度")
     if width<0:raise ValueError("平滑宽度不能为负数")
-    if any("integral" in op.casefold() for op in curve.operations):raise ValueError("积分曲线不能平滑")
+    if curve.derived is not None or any("integral" in op.casefold() for op in curve.operations):raise ValueError("积分曲线不能平滑")
     rows=curve.active_rows
     kind=curve.y_type
     variable=("time" if kind.endswith("time") else "temperature") if kind not in ("normal","custom") else domain
@@ -88,8 +119,9 @@ def smoothed_state(curve,domain,width,*,capture_custom=False,use_saved_x=True):
     if variable=="signal":
         config=curve.smooth_x_config if use_saved_x and curve.smooth_x_config is not None else {"index":curve.x_signal_index,"type":curve.x_signal_type,"width":curve.x_smooth_width}
         independent=replace(curve,x_signal_index=config["index"],x_signal_type=config["type"],x_smooth_width=config["width"])
-    x=independent.x_values(variable)
-    source=curve.dataset.values[:,curve.y_index].astype(float)
+    x=independent.x_values(variable,canonical=True)
+    fit_width=width/independent.x_unit_factor(variable)
+    source=curve.base_y.astype(float)
     base_ops=[]
     custom_source=None
     source_rows=None
@@ -103,7 +135,7 @@ def smoothed_state(curve,domain,width,*,capture_custom=False,use_saved_x=True):
     output=source.copy()
     order=2 if kind.startswith("d2_") else (1 if kind not in ("normal","custom") else 0)
     for section in segments(rows):
-        ids=rows[section];output[ids]=local_fit(x[section],source[ids],width,order)
+        ids=rows[section];output[ids]=local_fit(x[section],source[ids],fit_width,order)
     if kind not in ("normal","custom"):
         index=curve.dataset.time_index if variable=="time" else curve.dataset.temperature_index
         operations=[f"derivative:{curve.dataset.signals[index].label}"]*order+[f"ls_window:{width}"]
@@ -114,14 +146,25 @@ def smoothed_state(curve,domain,width,*,capture_custom=False,use_saved_x=True):
                 working_rows=deepcopy(curve.data_indices) if output is not None else None,smooth_source_rows=deepcopy(source_rows))
 
 
-def limits_proposal(curves,dataset,spec,domain):
-    rows=select_rows(dataset,spec);draft=[]
+def limits_proposal(curves,dataset,spec,domain,*,curve_uid=None):
+    target=next((c for c in curves if c.uid==curve_uid),None)
+    derived_only=target is not None and target.derived is not None
+    rows=select_rows(target.logical_dataset if derived_only else dataset,spec);draft=[]
     for curve in curves:
-        if curve.dataset.path!=dataset.path:draft.append(curve);continue
+        if curve.dataset.path!=dataset.path or derived_only and curve.uid!=curve_uid:draft.append(curve);continue
         candidate=replace(curve,operations=list(curve.operations),history=list(curve.history))
         candidate.checkpoint()
         candidate.data_indices=deepcopy(rows);candidate.data_limit_spec=deepcopy(spec)
         candidate.reset_time=bool(spec and spec["reset_time"])
+        if candidate.derived is not None:
+            if not derived_only:
+                context=np.asarray(candidate.derived['source_rows']);p=np.asarray(candidate.derived['positions'])
+                allowed=np.arange(len(dataset.values)) if rows is None else np.asarray(rows)
+                mask=np.isin(context[np.floor(p).astype(int)],allowed)&np.isin(context[np.ceil(p).astype(int)],allowed)
+                selected=np.flatnonzero(mask).tolist()
+                candidate.data_indices=None if len(selected)==candidate.sample_count else (selected if len(selected)>=2 else [])
+                candidate.data_limit_spec=None
+            candidate.xy(domain);draft.append(candidate);continue
         active=candidate.normal_enabled or candidate.overlay_enabled
         if active:candidate.x_values(domain)
         if active and (candidate.y_type!="custom" or candidate.smooth_source is not None):

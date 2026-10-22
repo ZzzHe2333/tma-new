@@ -55,7 +55,7 @@ def test_selecting_points_uses_dedicated_menu_without_normal_plot_commands(ui):
     ui.start_point_measurement("dimension_change")
     menu = ui.create_plot_context_menu()
     labels = [a.text() for a in menu.actions() if not a.isSeparator()]
-    assert labels == ["确定", "编辑…", "自动界限", "取消", "点 1", "点 2"]
+    assert labels == ["确定", "编辑…", "自动界限", "取消", "恢复初始界限", "点 1", "点 2"]
     assert menu.objectName() == "CursorPopupMenu"
     assert not set(labels).intersection({"打开", "保存分析", "打印", "尺寸变化", "信号最大", "分析选项"})
     menu_action(menu, "点 2").trigger()
@@ -160,7 +160,7 @@ def test_cancel_manual_limits_and_automatic_limits_preserve_expected_draft(ui):
     dialog.fields[1].setText("106.4")
     dialog.accept()
     assert "positions" in entry["interactive"]
-    menu_action(ui.create_plot_context_menu(), "自动界限").trigger()
+    menu_action(ui.create_plot_context_menu(), "恢复初始界限").trigger()
     assert "positions" not in entry["interactive"]
     assert entry["interactive"]["indices"] == initial["interactive"]["indices"]
     assert entry["values"] == initial["values"]

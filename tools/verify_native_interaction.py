@@ -33,7 +33,7 @@ def main():
     window.grab().save(str(out / "select-points.png"))
     menu = window.create_plot_context_menu()
     labels = [a.text() for a in menu.actions() if not a.isSeparator()]
-    assert labels == ["确定", "编辑…", "自动界限", "取消", "点 1", "点 2"]
+    assert labels == ["确定", "编辑…", "自动界限", "取消", "恢复初始界限", "点 1", "点 2"]
     menu.popup(window.canvas.mapToGlobal(QPoint(950, 470))); app.processEvents()
     menu.grab().save(str(out / "cursor-menu.png")); menu.hide()
     dialog = window.edit_measurement_limits(); app.processEvents()

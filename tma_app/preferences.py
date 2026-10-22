@@ -30,6 +30,7 @@ from .workspace import default_plot_options, validate_plot_options
 FORMAT = "tma-studio-preferences"
 VERSION = 1
 PAGE_FIELDS = {
+    "units":{"tma":frozenset(("unit_defaults",))},
     "graph": {"graph": frozenset(("graph_axis_visible", "graph_grid_types", "graph_symbol_spacing", "graph_show_symbols", "graph_symbol_differentiate")),
               "signals": frozenset(("signal_defaults",))},
     "overlay": {
@@ -41,9 +42,10 @@ PAGE_FIELDS = {
         "auto": frozenset(("auto_x", "auto_y", "overlay_auto")),
         "configure": frozenset(("overlay_configure",)),
     },
+    "analysis":{"peak":frozenset(("peak_onset_options","integration_options")),"auto_limits":frozenset(("auto_limits_rules",)),"step":frozenset(("transition_options","signal_change_options")),"point_label":frozenset(("point_label_options",)),"other":frozenset(("alpha_smoothing_width","sigmoid_iterations"))},
 }
-# Opaque future option values: reserve the names without inventing nested schema.
-RESERVED_FIELDS = frozenset(("axis_x_offsets",))
+# All currently supported page fields use the canonical workspace validators.
+RESERVED_FIELDS = frozenset()
 STYLES = frozenset(("-", "--", "-.", ":", "None", "long_dash", "broken_dash", "broken_double_dash"))
 MARKERS = frozenset(("", "o", "s", "^", "v", "+", "x", ".", "D"))
 _LOCK = threading.RLock()
@@ -122,7 +124,7 @@ def _appearance(value, scope, *, strict=False):
     else:
         try:
             result = {key: getattr(value, key) for key in fields}
-            if scope == "overlay" and hasattr(value, "overlay_offset"): result["offset"] = value.overlay_offset
+            if scope == "overlay" and hasattr(value, "overlay_offset"): result["offset"] = value.display_y_offset(value.overlay_offset)
         except AttributeError as exc:
             raise ValueError("曲线默认外观缺少字段") from exc
     if not isinstance(result["style"], str) or result["style"] not in STYLES:

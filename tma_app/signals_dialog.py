@@ -32,7 +32,8 @@ def build_proposal(curves, dataset, template):
     domain = template["x"]["domain"]
     if domain not in ("temperature", "time", "signal"): raise ValueError("X信号无效")
     draft = [replace(c, operations=list(c.operations), history=list(c.history)) for c in curves]
-    source = [c for c in draft if c.dataset.path == dataset.path]
+    computed = [c for c in draft if c.dataset.path == dataset.path and c.derived is not None and c.normal_enabled]
+    source = [c for c in draft if c.dataset.path == dataset.path and c.derived is None]
     originals = [c for c in source if c.normal_enabled]
     for curve in source: curve.activate_appearance("normal"); curve.normal_enabled = False
     def index(label):
@@ -43,10 +44,14 @@ def build_proposal(curves, dataset, template):
     xkind, xwidth = template["x"]["type"], template["x"]["width"]
     if xkind not in SUPPORTED: raise ValueError("所选X类型的数学定义尚未确认")
     if domain == "signal" and xindex is None: raise ValueError("请选择X信号")
-    for curve in source: curve.x_signal_index, curve.x_signal_type, curve.x_smooth_width = xindex, xkind, xwidth
+    for curve in source+[c for c in draft if c.dataset.path==dataset.path and c.derived is not None]: curve.x_signal_index, curve.x_signal_type, curve.x_smooth_width = xindex, xkind, xwidth
     reference = source[0] if source else Curve(dataset)
     x = reference.x_values(domain)
     for axis, item in enumerate(template["y"]):
+        reserved=[c for c in computed if c.axis==axis]
+        if reserved:
+            if item['signal'] not in (None,reserved[0].signal_label):raise ValueError(f'Y{axis+1}已有派生积分，请先删除积分曲线再选择其它信号')
+            continue
         if item["signal"] is None: continue
         yi, kind, width = index(item["signal"]), item["type"], item["width"]
         candidate = next((c for c in source if c.axis == axis and c.y_index == yi and c.y_type == kind and c.smooth_width == width), None)
@@ -76,6 +81,7 @@ class SignalsDialog(QDialog):
         self.setObjectName("SignalsForm"); self.setWindowTitle("信号 — "+self.dataset.path.name)
         self.setFixedSize(630,403); self.setModal(True)
         self.signals=[]; self.types=[]
+        current=owner.current_data_curve();time_unit=current.x_unit("time") if self.dataset.time_index is not None else "";temp_unit=current.x_unit("temperature") if self.dataset.temperature_index is not None else ""
         for axis in range(4):
             group=QGroupBox(f"Y{axis+1}",self);group.setGeometry(12,12+56*axis,605,49)
             label=QLabel("信号:",group);label.setGeometry(40,20,40,17)
@@ -84,17 +90,22 @@ class SignalsDialog(QDialog):
             for sig in self.dataset.signals:signal.addItem(sig.label,sig.label)
             kind=self.type_combo(group,custom=self.template["y"][axis]["type"]=="custom");kind.setGeometry(456,16,141,23)
             self.signals.append(signal);self.types.append(kind)
+            computed=next((c for c in owner.curves if c.dataset.path==self.dataset.path and c.normal_enabled and c.derived is not None and c.axis==axis),None)
+            if computed is not None:
+                signal.addItem(computed.signal_label,computed.signal_label)
+                signal.setEnabled(False);kind.setEnabled(False)
+                group.setToolTip('此轴显示派生积分；在曲线上删除积分后可重新分配原始信号。')
         group=QGroupBox("X",self);group.setGeometry(12,234,605,100)
         self.x_modes=QButtonGroup(self)
-        for i,(text,mode) in enumerate((("时间 (min)","time"),("温度 (°C)","temperature"),("信号:","signal"))):
+        for i,(text,mode) in enumerate(((f"时间 ({time_unit})","time"),(f"温度 ({temp_unit})","temperature"),("信号:","signal"))):
             box=QRadioButton(text,group);box.setGeometry(12,20+25*i,120,20);box.setProperty("mode",mode);self.x_modes.addButton(box)
             box.setEnabled(mode=="signal" or (self.dataset.time_index if mode=="time" else self.dataset.temperature_index) is not None)
         self.x_signal=QComboBox(group);self.x_signal.setGeometry(84,68,301,23)
         for signal in self.dataset.signals:self.x_signal.addItem(signal.label,signal.label)
         self.x_type=self.type_combo(group);self.x_type.setGeometry(460,68,137,23)
         label=QLabel("类型:",group);label.setGeometry(420,72,40,17)
-        self.show_temperature=QCheckBox("显示温度 (°C)",group);self.show_temperature.setGeometry(228,20,180,20)
-        self.show_time=QCheckBox("显示时间 (min)",group);self.show_time.setGeometry(228,44,180,20)
+        self.show_temperature=QCheckBox(f"显示温度 ({temp_unit})",group);self.show_temperature.setGeometry(228,20,180,20)
+        self.show_time=QCheckBox(f"显示时间 ({time_unit})",group);self.show_time.setGeometry(228,44,180,20)
         self.x_modes.buttonClicked.connect(self.update_x)
         self.error=QLabel(self);self.error.setGeometry(12,336,605,20);self.error.setStyleSheet("color: #a00000")
         for text,x,callback in (("确定",184,self.accept),("保存",272,self.save),("默认值",360,self.defaults),("取消",448,self.reject),("帮助",536,self.help)):

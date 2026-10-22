@@ -1,0 +1,441 @@
+{
+  "size": 3992,
+  "consumed": 3992,
+  "sha256": "11d89fa8a470c655f705d893b7f078543dfd0e2587ce004fe6a431b915da6246",
+  "tree": {
+    "class": "TAutoStepForm",
+    "name": "AutoStepForm",
+    "offset": 4,
+    "prefix_flags": 0,
+    "child_position": null,
+    "props": {
+      "Tag": 51000,
+      "Left": 496,
+      "Top": 391,
+      "BorderStyle": "#bsDialog",
+      "ClientHeight": 177,
+      "ClientWidth": 338,
+      "Color": "#clBtnFace",
+      "Font.Charset": "#DEFAULT_CHARSET",
+      "Font.Color": "#clWindowText",
+      "Font.Height": -11,
+      "Font.Name": "MS Sans Serif",
+      "Font.Style": [],
+      "OldCreateOrder": true,
+      "Position": "#poScreenCenter",
+      "OnActivate": "#FormActivate",
+      "OnClose": "#FormClose",
+      "OnCreate": "#FormCreate",
+      "OnDestroy": "#FormDestroy",
+      "OnPaint": "#FormPaint",
+      "PixelsPerInch": 96,
+      "TextHeight": 13
+    },
+    "children": [
+      {
+        "class": "TElGroupBox",
+        "name": "Point1Group",
+        "offset": 410,
+        "prefix_flags": 0,
+        "child_position": null,
+        "props": {
+          "Left": 12,
+          "Top": 8,
+          "Width": 221,
+          "Height": 73,
+          "AutoDisableChildren": false,
+          "BorderSides": [
+            "ebsLeft",
+            "ebsRight",
+            "ebsTop",
+            "ebsBottom"
+          ],
+          "Caption": "Start:",
+          "Flat": false,
+          "FlatAlways": false,
+          "ShowFocus": false,
+          "TabOrder": 0
+        },
+        "children": [
+          {
+            "class": "TElRadioButton",
+            "name": "Cursor1Button",
+            "offset": 591,
+            "prefix_flags": 0,
+            "child_position": null,
+            "props": {
+              "Tag": 51001,
+              "Left": 16,
+              "Top": 20,
+              "Width": 112,
+              "Height": 17,
+              "Cursor": "#crDefault",
+              "Caption": "Use cursor position",
+              "TabOrder": 0,
+              "OnClick": "#Cursor1ButtonClick",
+              "DoubleBuffered": false
+            },
+            "children": []
+          },
+          {
+            "class": "TElRadioButton",
+            "name": "Offset1Button",
+            "offset": 763,
+            "prefix_flags": 0,
+            "child_position": null,
+            "props": {
+              "Tag": 51002,
+              "Left": 16,
+              "Top": 44,
+              "Width": 97,
+              "Height": 17,
+              "Cursor": "#crDefault",
+              "Caption": "Inflection offset:",
+              "TabOrder": 1,
+              "OnClick": "#Offset1ButtonClick",
+              "DoubleBuffered": false
+            },
+            "children": []
+          },
+          {
+            "class": "TElEdit",
+            "name": "Offset1Edit",
+            "offset": 934,
+            "prefix_flags": 0,
+            "child_position": null,
+            "props": {
+              "Tag": 51003,
+              "Left": 148,
+              "Top": 42,
+              "Width": 61,
+              "Height": 21,
+              "Cursor": "#crIBeam",
+              "BorderSides": [
+                "ebsLeft",
+                "ebsRight",
+                "ebsTop",
+                "ebsBottom"
+              ],
+              "RightMargin": 1,
+              "TopMargin": 2,
+              "BorderStyle": "#bsSingle",
+              "AutoSelect": true,
+              "LineBorderActiveColor": "#clBlack",
+              "LineBorderInactiveColor": "#clBlack",
+              "MaxUndoLevel": 0,
+              "Ctl3D": true,
+              "ParentCtl3D": false,
+              "TabOrder": 2,
+              "OnExit": "#Offset1EditExit",
+              "OnKeyPress": "#Offset1EditKeyPress",
+              "OnContextPopup": "#Offset1EditContextPopup"
+            },
+            "children": []
+          }
+        ]
+      },
+      {
+        "class": "TElPopupButton",
+        "name": "OK",
+        "offset": 1327,
+        "prefix_flags": 0,
+        "child_position": null,
+        "props": {
+          "Tag": 51007,
+          "Left": 246,
+          "Top": 13,
+          "Width": 81,
+          "Height": 25,
+          "Cursor": "#crDefault",
+          "DrawDefaultFrame": false,
+          "Default": true,
+          "ModalResult": 1,
+          "LinkStyle": [
+            "fsUnderline"
+          ],
+          "NumGlyphs": 1,
+          "OldStyled": true,
+          "Caption": "OK",
+          "TabOrder": 2,
+          "OnClick": "#OKClick",
+          "DockOrientation": "#doNoOrient",
+          "DoubleBuffered": false
+        },
+        "children": []
+      },
+      {
+        "class": "TElPopupButton",
+        "name": "Save",
+        "offset": 1577,
+        "prefix_flags": 0,
+        "child_position": null,
+        "props": {
+          "Tag": 51008,
+          "Left": 246,
+          "Top": 45,
+          "Width": 81,
+          "Height": 25,
+          "Cursor": "#crDefault",
+          "DrawDefaultFrame": false,
+          "LinkStyle": [
+            "fsUnderline"
+          ],
+          "NumGlyphs": 1,
+          "OldStyled": true,
+          "Caption": "Save",
+          "TabOrder": 3,
+          "OnClick": "#SaveClick",
+          "DockOrientation": "#doNoOrient",
+          "DoubleBuffered": false
+        },
+        "children": []
+      },
+      {
+        "class": "TElPopupButton",
+        "name": "AutoSet",
+        "offset": 1810,
+        "prefix_flags": 0,
+        "child_position": null,
+        "props": {
+          "Tag": 51009,
+          "Left": 246,
+          "Top": 77,
+          "Width": 81,
+          "Height": 25,
+          "Cursor": "#crDefault",
+          "DrawDefaultFrame": false,
+          "LinkStyle": [
+            "fsUnderline"
+          ],
+          "NumGlyphs": 1,
+          "OldStyled": true,
+          "Caption": "Auto Set",
+          "TabOrder": 4,
+          "OnClick": "#AutoSetClick",
+          "DockOrientation": "#doNoOrient",
+          "DoubleBuffered": false
+        },
+        "children": []
+      },
+      {
+        "class": "TElPopupButton",
+        "name": "Cancel",
+        "offset": 2053,
+        "prefix_flags": 0,
+        "child_position": null,
+        "props": {
+          "Tag": 51010,
+          "Left": 246,
+          "Top": 109,
+          "Width": 81,
+          "Height": 25,
+          "Cursor": "#crDefault",
+          "DrawDefaultFrame": false,
+          "Cancel": true,
+          "ModalResult": 2,
+          "LinkStyle": [
+            "fsUnderline"
+          ],
+          "NumGlyphs": 1,
+          "OldStyled": true,
+          "Caption": "Cancel",
+          "TabOrder": 5,
+          "DockOrientation": "#doNoOrient",
+          "DoubleBuffered": false
+        },
+        "children": []
+      },
+      {
+        "class": "TElPopupButton",
+        "name": "Help",
+        "offset": 2293,
+        "prefix_flags": 0,
+        "child_position": null,
+        "props": {
+          "Tag": 51011,
+          "Left": 246,
+          "Top": 141,
+          "Width": 81,
+          "Height": 25,
+          "Cursor": "#crDefault",
+          "DrawDefaultFrame": false,
+          "LinkStyle": [
+            "fsUnderline"
+          ],
+          "NumGlyphs": 1,
+          "OldStyled": true,
+          "Caption": "Help",
+          "TabOrder": 6,
+          "OnClick": "#HelpClick",
+          "DockOrientation": "#doNoOrient",
+          "DoubleBuffered": false
+        },
+        "children": []
+      },
+      {
+        "class": "TElGroupBox",
+        "name": "Point2Group",
+        "offset": 2527,
+        "prefix_flags": 0,
+        "child_position": null,
+        "props": {
+          "Left": 12,
+          "Top": 92,
+          "Width": 221,
+          "Height": 73,
+          "AutoDisableChildren": false,
+          "BorderSides": [
+            "ebsLeft",
+            "ebsRight",
+            "ebsTop",
+            "ebsBottom"
+          ],
+          "Caption": "Stop:",
+          "Flat": false,
+          "FlatAlways": false,
+          "ShowFocus": false,
+          "TabOrder": 1
+        },
+        "children": [
+          {
+            "class": "TElRadioButton",
+            "name": "Cursor2Button",
+            "offset": 2707,
+            "prefix_flags": 0,
+            "child_position": null,
+            "props": {
+              "Tag": 51004,
+              "Left": 16,
+              "Top": 20,
+              "Width": 112,
+              "Height": 17,
+              "Cursor": "#crDefault",
+              "Caption": "Use cursor position",
+              "TabOrder": 0,
+              "OnClick": "#Cursor2ButtonClick",
+              "DoubleBuffered": false
+            },
+            "children": []
+          },
+          {
+            "class": "TElRadioButton",
+            "name": "Offset2Button",
+            "offset": 2879,
+            "prefix_flags": 0,
+            "child_position": null,
+            "props": {
+              "Tag": 51005,
+              "Left": 16,
+              "Top": 44,
+              "Width": 97,
+              "Height": 17,
+              "Cursor": "#crDefault",
+              "Caption": "Inflection offset:",
+              "TabOrder": 1,
+              "OnClick": "#Offset2ButtonClick",
+              "DoubleBuffered": false
+            },
+            "children": []
+          },
+          {
+            "class": "TElEdit",
+            "name": "Offset2Edit",
+            "offset": 3050,
+            "prefix_flags": 0,
+            "child_position": null,
+            "props": {
+              "Tag": 51006,
+              "Left": 148,
+              "Top": 42,
+              "Width": 61,
+              "Height": 21,
+              "Cursor": "#crIBeam",
+              "BorderSides": [
+                "ebsLeft",
+                "ebsRight",
+                "ebsTop",
+                "ebsBottom"
+              ],
+              "RightMargin": 1,
+              "TopMargin": 2,
+              "BorderStyle": "#bsSingle",
+              "AutoSelect": true,
+              "LineBorderActiveColor": "#clBlack",
+              "LineBorderInactiveColor": "#clBlack",
+              "MaxUndoLevel": 0,
+              "Ctl3D": true,
+              "ParentCtl3D": false,
+              "TabOrder": 2,
+              "OnExit": "#Offset2EditExit",
+              "OnKeyPress": "#Offset2EditKeyPress",
+              "OnContextPopup": "#Offset2EditContextPopup"
+            },
+            "children": []
+          }
+        ]
+      },
+      {
+        "class": "TElFormCaption",
+        "name": "FormCaption",
+        "offset": 3443,
+        "prefix_flags": 0,
+        "child_position": null,
+        "props": {
+          "Active": false,
+          "Buttons": [],
+          "SystemFont": false,
+          "Font.Charset": "#DEFAULT_CHARSET",
+          "Font.Color": "#clWindowText",
+          "Font.Height": -11,
+          "Font.Name": "MS Sans Serif",
+          "Font.Style": [],
+          "Texts": [
+            {
+              "Font.Charset": "#DEFAULT_CHARSET",
+              "Font.Color": "#clWindowText",
+              "Font.Height": -11,
+              "Font.Name": "MS Sans Serif",
+              "Font.Style": [],
+              "Layout": "#blGlyphLeft",
+              "Align": "#taLeftJustify"
+            }
+          ],
+          "Left": 144,
+          "Top": 72
+        },
+        "children": []
+      },
+      {
+        "class": "TElHook",
+        "name": "FormHook",
+        "offset": 3781,
+        "prefix_flags": 0,
+        "child_position": null,
+        "props": {
+          "Active": true,
+          "DesignActive": false,
+          "Control": "#Owner",
+          "OnAfterProcess": "#FormHookAfterProcess",
+          "Left": 204,
+          "Top": 72
+        },
+        "children": []
+      },
+      {
+        "class": "TElHTMLHint",
+        "name": "HTMLHint",
+        "offset": 3888,
+        "prefix_flags": 0,
+        "child_position": null,
+        "props": {
+          "Enabled": true,
+          "FontName": "Microsoft Sans Serif",
+          "FontCharset": "#ANSI_CHARSET",
+          "Left": 172,
+          "Top": 8
+        },
+        "children": []
+      }
+    ]
+  }
+}

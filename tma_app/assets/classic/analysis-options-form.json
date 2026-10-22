@@ -1,0 +1,2583 @@
+{
+  "evidence": "Static Delphi DFM only. Handler names do not prove implementation; runtime labels/state may be changed.",
+  "consumed": 25334,
+  "size": 25334,
+  "complete": true,
+  "tree": {
+    "class": "TAnalysisOptionsForm",
+    "name": "AnalysisOptionsForm",
+    "offset": 4,
+    "prefix_flags": 0,
+    "child_position": null,
+    "props": {
+      "Tag": 33000,
+      "Left": 488,
+      "Top": 365,
+      "BorderStyle": "#bsDialog",
+      "ClientHeight": 337,
+      "ClientWidth": 494,
+      "Color": "#clBtnFace",
+      "Font.Charset": "#DEFAULT_CHARSET",
+      "Font.Color": "#clWindowText",
+      "Font.Height": -11,
+      "Font.Name": "MS Sans Serif",
+      "Font.Style": [],
+      "OldCreateOrder": true,
+      "Position": "#poScreenCenter",
+      "OnActivate": "#FormActivate",
+      "OnClose": "#FormClose",
+      "OnCreate": "#FormCreate",
+      "OnDestroy": "#FormDestroy",
+      "OnPaint": "#FormPaint",
+      "PixelsPerInch": 96,
+      "TextHeight": 13
+    },
+    "children": [
+      {
+        "class": "TElPageControl",
+        "name": "PageControl",
+        "offset": 424,
+        "prefix_flags": 0,
+        "child_position": null,
+        "props": {
+          "Left": 1,
+          "Top": 0,
+          "Width": 492,
+          "Height": 297,
+          "HotTrack": false,
+          "OnChanging": "#PageControlChanging",
+          "OnChange": "#PageControlChange",
+          "TabIndex": 2,
+          "HotTrackFont.Charset": "#DEFAULT_CHARSET",
+          "HotTrackFont.Color": "#clBlue",
+          "HotTrackFont.Height": -11,
+          "HotTrackFont.Name": "MS Sans Serif",
+          "HotTrackFont.Style": [],
+          "ActivePage": "#AreaSheet",
+          "ShowTabHints": false,
+          "ActiveTabFont.Charset": "#DEFAULT_CHARSET",
+          "ActiveTabFont.Color": "#clWindowText",
+          "ActiveTabFont.Height": -11,
+          "ActiveTabFont.Name": "MS Sans Serif",
+          "ActiveTabFont.Style": [],
+          "ParentColor": false,
+          "TabOrder": 0,
+          "OnMouseMove": "#PageControlMouseMove",
+          "DockOrientation": "#doNoOrient"
+        },
+        "children": [
+          {
+            "class": "TElTabSheet",
+            "name": "StepSheet",
+            "offset": 980,
+            "prefix_flags": 0,
+            "child_position": null,
+            "props": {
+              "Tag": 33100,
+              "Width": 488,
+              "Height": 274,
+              "PageControl": "#PageControl",
+              "Caption": "Step",
+              "Visible": false
+            },
+            "children": [
+              {
+                "class": "TElLabel",
+                "name": "StepMidpointLabel",
+                "offset": 1079,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Left": 84,
+                  "Top": 44,
+                  "Width": 79,
+                  "Height": 13,
+                  "Caption": "Step midpoint at:",
+                  "Alignment": "#taRightJustify"
+                },
+                "children": []
+              },
+              {
+                "class": "TElLabel",
+                "name": "StepChangeLabel",
+                "offset": 1191,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Left": 56,
+                  "Top": 80,
+                  "Width": 108,
+                  "Height": 13,
+                  "Caption": "Step change between:",
+                  "Alignment": "#taRightJustify"
+                },
+                "children": []
+              },
+              {
+                "class": "TElLabel",
+                "name": "AndLabel",
+                "offset": 1304,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Left": 296,
+                  "Top": 80,
+                  "Width": 45,
+                  "Height": 13,
+                  "Caption": "and",
+                  "Alignment": "#taCenter",
+                  "AutoSize": false
+                },
+                "children": []
+              },
+              {
+                "class": "TElComboBox",
+                "name": "MidpointCombo",
+                "offset": 1398,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Tag": 33102,
+                  "Left": 172,
+                  "Top": 40,
+                  "Width": 293,
+                  "Height": 21,
+                  "Cursor": "#crIBeam",
+                  "ButtonArrowColor": "#clBlack",
+                  "Items.Strings": [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                    "6"
+                  ],
+                  "Style": "#csDropDownList",
+                  "ItemHeight": 13,
+                  "VertScrollBarStyles.ActiveFlat": false,
+                  "VertScrollBarStyles.ButtonSize": 16,
+                  "VertScrollBarStyles.Width": 16,
+                  "VertScrollBarStyles.OwnerDraw": false,
+                  "HorzScrollBarStyles.ActiveFlat": false,
+                  "HorzScrollBarStyles.ButtonSize": 16,
+                  "HorzScrollBarStyles.Width": 16,
+                  "HorzScrollBarStyles.OwnerDraw": false,
+                  "AutoHistory": false,
+                  "AutoHistoryDirection": "#ahdFirst",
+                  "AutoHistoryLimit": 25,
+                  "TopMargin": 2,
+                  "RightMargin": 1,
+                  "ReadOnly": true,
+                  "BorderSides": [
+                    "ebsLeft",
+                    "ebsRight",
+                    "ebsTop",
+                    "ebsBottom"
+                  ],
+                  "OnMouseEnter": "#MidpointComboMouseEnter",
+                  "OnChange": "#MidpointComboChange",
+                  "LineBorderActiveColor": "#clBlack",
+                  "LineBorderInactiveColor": "#clBlack",
+                  "ButtonShortcut": 0,
+                  "ButtonWidth": 15,
+                  "AltButtonNumGlyphs": 1,
+                  "AltButtonPopupPlace": "#ppDown",
+                  "AltButtonShortcut": 0,
+                  "AltButtonWidth": 16,
+                  "BorderStyle": "#bsSingle",
+                  "TabOrder": 1,
+                  "ParentColor": false,
+                  "DockOrientation": "#doNoOrient",
+                  "DoubleBuffered": false
+                },
+                "children": []
+              },
+              {
+                "class": "TElComboBox",
+                "name": "StartCombo",
+                "offset": 2312,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Tag": 33103,
+                  "Left": 172,
+                  "Top": 76,
+                  "Width": 121,
+                  "Height": 21,
+                  "Cursor": "#crIBeam",
+                  "ButtonArrowColor": "#clBlack",
+                  "Items.Strings": [
+                    "1",
+                    "2",
+                    "3"
+                  ],
+                  "Style": "#csDropDownList",
+                  "ItemHeight": 13,
+                  "VertScrollBarStyles.ActiveFlat": false,
+                  "VertScrollBarStyles.ButtonSize": 16,
+                  "VertScrollBarStyles.Width": 16,
+                  "VertScrollBarStyles.OwnerDraw": false,
+                  "HorzScrollBarStyles.ActiveFlat": false,
+                  "HorzScrollBarStyles.ButtonSize": 16,
+                  "HorzScrollBarStyles.Width": 16,
+                  "HorzScrollBarStyles.OwnerDraw": false,
+                  "AutoHistory": false,
+                  "AutoHistoryDirection": "#ahdFirst",
+                  "AutoHistoryLimit": 25,
+                  "TopMargin": 2,
+                  "RightMargin": 1,
+                  "ReadOnly": true,
+                  "BorderSides": [
+                    "ebsLeft",
+                    "ebsRight",
+                    "ebsTop",
+                    "ebsBottom"
+                  ],
+                  "OnMouseEnter": "#StartComboMouseEnter",
+                  "OnChange": "#StartComboChange",
+                  "LineBorderActiveColor": "#clBlack",
+                  "LineBorderInactiveColor": "#clBlack",
+                  "ButtonShortcut": 0,
+                  "ButtonWidth": 15,
+                  "AltButtonNumGlyphs": 1,
+                  "AltButtonPopupPlace": "#ppDown",
+                  "AltButtonShortcut": 0,
+                  "AltButtonWidth": 16,
+                  "BorderStyle": "#bsSingle",
+                  "TabOrder": 2,
+                  "ParentColor": false,
+                  "DockOrientation": "#doNoOrient",
+                  "DoubleBuffered": false
+                },
+                "children": []
+              },
+              {
+                "class": "TElComboBox",
+                "name": "StopCombo",
+                "offset": 3207,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Tag": 33104,
+                  "Left": 344,
+                  "Top": 76,
+                  "Width": 121,
+                  "Height": 21,
+                  "Cursor": "#crIBeam",
+                  "ButtonArrowColor": "#clBlack",
+                  "Items.Strings": [
+                    "1",
+                    "2",
+                    "3"
+                  ],
+                  "Style": "#csDropDownList",
+                  "ItemHeight": 13,
+                  "VertScrollBarStyles.ActiveFlat": false,
+                  "VertScrollBarStyles.ButtonSize": 16,
+                  "VertScrollBarStyles.Width": 16,
+                  "VertScrollBarStyles.OwnerDraw": false,
+                  "HorzScrollBarStyles.ActiveFlat": false,
+                  "HorzScrollBarStyles.ButtonSize": 16,
+                  "HorzScrollBarStyles.Width": 16,
+                  "HorzScrollBarStyles.OwnerDraw": false,
+                  "AutoHistory": false,
+                  "AutoHistoryDirection": "#ahdFirst",
+                  "AutoHistoryLimit": 25,
+                  "TopMargin": 2,
+                  "RightMargin": 1,
+                  "ReadOnly": true,
+                  "BorderSides": [
+                    "ebsLeft",
+                    "ebsRight",
+                    "ebsTop",
+                    "ebsBottom"
+                  ],
+                  "OnMouseEnter": "#StopComboMouseEnter",
+                  "OnChange": "#StopComboChange",
+                  "LineBorderActiveColor": "#clBlack",
+                  "LineBorderInactiveColor": "#clBlack",
+                  "ButtonShortcut": 0,
+                  "ButtonWidth": 15,
+                  "AltButtonNumGlyphs": 1,
+                  "AltButtonPopupPlace": "#ppDown",
+                  "AltButtonShortcut": 0,
+                  "AltButtonWidth": 16,
+                  "BorderStyle": "#bsSingle",
+                  "TabOrder": 3,
+                  "ParentColor": false,
+                  "DockOrientation": "#doNoOrient",
+                  "DoubleBuffered": false
+                },
+                "children": []
+              },
+              {
+                "class": "TElGroupBox",
+                "name": "StepGroup",
+                "offset": 4099,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Left": 12,
+                  "Top": 116,
+                  "Width": 465,
+                  "Height": 69,
+                  "AutoDisableChildren": false,
+                  "BorderSides": [
+                    "ebsLeft",
+                    "ebsRight",
+                    "ebsTop",
+                    "ebsBottom"
+                  ],
+                  "Caption": "Step label",
+                  "Flat": false,
+                  "FlatAlways": false,
+                  "ShowFocus": false,
+                  "TabOrder": 4
+                },
+                "children": [
+                  {
+                    "class": "TElCheckBox",
+                    "name": "StepOnsetBox",
+                    "offset": 4282,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Tag": 33105,
+                      "Left": 116,
+                      "Top": 16,
+                      "Width": 50,
+                      "Height": 17,
+                      "Cursor": "#crDefault",
+                      "Caption": "Onset",
+                      "TabOrder": 1,
+                      "OnClick": "#StepOnsetBoxClick",
+                      "DoubleBuffered": false
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElCheckBox",
+                    "name": "StepEndBox",
+                    "offset": 4435,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Tag": 33106,
+                      "Left": 116,
+                      "Top": 40,
+                      "Width": 41,
+                      "Height": 17,
+                      "Cursor": "#crDefault",
+                      "Caption": "End",
+                      "TabOrder": 4,
+                      "OnClick": "#StepEndBoxClick",
+                      "DoubleBuffered": false
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElCheckBox",
+                    "name": "StepChangeBox",
+                    "offset": 4582,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Tag": 33107,
+                      "Left": 212,
+                      "Top": 16,
+                      "Width": 59,
+                      "Height": 17,
+                      "Cursor": "#crDefault",
+                      "Caption": "Change",
+                      "TabOrder": 2,
+                      "OnClick": "#StepChangeBoxClick",
+                      "DoubleBuffered": false
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElCheckBox",
+                    "name": "StepDeltaCpBox",
+                    "offset": 4739,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Tag": 33108,
+                      "Left": 212,
+                      "Top": 40,
+                      "Width": 63,
+                      "Height": 17,
+                      "Cursor": "#crDefault",
+                      "Caption": "Delta Cp",
+                      "TabOrder": 5,
+                      "OnClick": "#StepDeltaCpBoxClick",
+                      "DoubleBuffered": false
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElCheckBox",
+                    "name": "StepSignedChangeBox",
+                    "offset": 4900,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Tag": 33109,
+                      "Left": 308,
+                      "Top": 18,
+                      "Width": 94,
+                      "Height": 17,
+                      "Cursor": "#crDefault",
+                      "Caption": "Signed change",
+                      "TabOrder": 3,
+                      "OnClick": "#StepSignedChangeBoxClick",
+                      "DoubleBuffered": false
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElCheckBox",
+                    "name": "StepSignedDeltaCpBox",
+                    "offset": 5076,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Tag": 33110,
+                      "Left": 308,
+                      "Top": 42,
+                      "Width": 97,
+                      "Height": 17,
+                      "Cursor": "#crDefault",
+                      "Caption": "Signed delta Cp",
+                      "TabOrder": 6,
+                      "OnClick": "#StepSignedDeltaCpBoxClick",
+                      "DoubleBuffered": false
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElCheckBox",
+                    "name": "StepLimitsBox",
+                    "offset": 5256,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Tag": 33111,
+                      "Left": 20,
+                      "Top": 16,
+                      "Width": 48,
+                      "Height": 17,
+                      "Cursor": "#crDefault",
+                      "Caption": "Limits",
+                      "TabOrder": 0,
+                      "OnClick": "#StepLimitsBoxClick",
+                      "DoubleBuffered": false
+                    },
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "class": "TElCheckBox",
+                "name": "ManualStepBox",
+                "offset": 5413,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Tag": 33101,
+                  "Left": 24,
+                  "Top": 10,
+                  "Width": 141,
+                  "Height": 17,
+                  "Cursor": "#crDefault",
+                  "Caption": "Manual tangent selection",
+                  "TabOrder": 0,
+                  "OnClick": "#ManualStepBoxClick",
+                  "DoubleBuffered": false
+                },
+                "children": []
+              },
+              {
+                "class": "TElGroupBox",
+                "name": "SignalChangeGroup",
+                "offset": 5588,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Left": 12,
+                  "Top": 192,
+                  "Width": 465,
+                  "Height": 41,
+                  "AutoDisableChildren": false,
+                  "BorderSides": [
+                    "ebsLeft",
+                    "ebsRight",
+                    "ebsTop",
+                    "ebsBottom"
+                  ],
+                  "Caption": "Signal change label",
+                  "Flat": false,
+                  "FlatAlways": false,
+                  "ShowFocus": false,
+                  "TabOrder": 5
+                },
+                "children": [
+                  {
+                    "class": "TElCheckBox",
+                    "name": "SignalChangeBox",
+                    "offset": 5789,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Tag": 33114,
+                      "Left": 212,
+                      "Top": 16,
+                      "Width": 59,
+                      "Height": 17,
+                      "Cursor": "#crDefault",
+                      "Caption": "Change",
+                      "TabOrder": 2,
+                      "OnClick": "#SignalChangeBoxClick",
+                      "DoubleBuffered": false
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElCheckBox",
+                    "name": "SignalChangeYLimitsBox",
+                    "offset": 5950,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Tag": 33113,
+                      "Left": 116,
+                      "Top": 16,
+                      "Width": 54,
+                      "Height": 17,
+                      "Cursor": "#crDefault",
+                      "Caption": "Y-limits",
+                      "TabOrder": 1,
+                      "OnClick": "#SignalChangeYLimitsBoxClick",
+                      "DoubleBuffered": false
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElCheckBox",
+                    "name": "SignalChangeSignedBox",
+                    "offset": 6126,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Tag": 33115,
+                      "Left": 308,
+                      "Top": 16,
+                      "Width": 94,
+                      "Height": 17,
+                      "Cursor": "#crDefault",
+                      "Caption": "Signed change",
+                      "TabOrder": 3,
+                      "OnClick": "#SignalChangeSignedBoxClick",
+                      "DoubleBuffered": false
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElCheckBox",
+                    "name": "SignalChangeXLimitsBox",
+                    "offset": 6306,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Tag": 33112,
+                      "Left": 20,
+                      "Top": 16,
+                      "Width": 54,
+                      "Height": 17,
+                      "Cursor": "#crDefault",
+                      "Caption": "X-limits",
+                      "TabOrder": 0,
+                      "OnClick": "#SignalChangeXLimitsBoxClick",
+                      "DoubleBuffered": false
+                    },
+                    "children": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "class": "TElTabSheet",
+            "name": "PeakSheet",
+            "offset": 6484,
+            "prefix_flags": 0,
+            "child_position": null,
+            "props": {
+              "Tag": 33200,
+              "Width": 488,
+              "Height": 274,
+              "PageControl": "#PageControl",
+              "Caption": "Peak",
+              "Visible": false
+            },
+            "children": [
+              {
+                "class": "TElLabel",
+                "name": "PeakOnsetLabel",
+                "offset": 6583,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Left": 216,
+                  "Top": 44,
+                  "Width": 137,
+                  "Height": 13,
+                  "Caption": "Calculate peak onset versus:",
+                  "Alignment": "#taRightJustify"
+                },
+                "children": []
+              },
+              {
+                "class": "TElLabel",
+                "name": "WeightLabel",
+                "offset": 6705,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Left": 316,
+                  "Top": 14,
+                  "Width": 37,
+                  "Height": 13,
+                  "Caption": "Weight:",
+                  "Alignment": "#taRightJustify"
+                },
+                "children": []
+              },
+              {
+                "class": "TElComboBox",
+                "name": "OnsetVersusCombo",
+                "offset": 6802,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Tag": 33203,
+                  "Left": 360,
+                  "Top": 40,
+                  "Width": 109,
+                  "Height": 21,
+                  "Cursor": "#crIBeam",
+                  "ButtonArrowColor": "#clBlack",
+                  "Items.Strings": [
+                    "1",
+                    "2",
+                    "3",
+                    "4"
+                  ],
+                  "Style": "#csDropDownList",
+                  "ItemHeight": 13,
+                  "VertScrollBarStyles.ActiveFlat": false,
+                  "VertScrollBarStyles.ButtonSize": 16,
+                  "VertScrollBarStyles.Width": 16,
+                  "VertScrollBarStyles.OwnerDraw": false,
+                  "HorzScrollBarStyles.ActiveFlat": false,
+                  "HorzScrollBarStyles.ButtonSize": 16,
+                  "HorzScrollBarStyles.Width": 16,
+                  "HorzScrollBarStyles.OwnerDraw": false,
+                  "AutoHistory": false,
+                  "AutoHistoryDirection": "#ahdFirst",
+                  "AutoHistoryLimit": 25,
+                  "TopMargin": 2,
+                  "RightMargin": 1,
+                  "ReadOnly": true,
+                  "BorderSides": [
+                    "ebsLeft",
+                    "ebsRight",
+                    "ebsTop",
+                    "ebsBottom"
+                  ],
+                  "OnMouseEnter": "#OnsetVersusComboMouseEnter",
+                  "OnChange": "#OnsetVersusComboChange",
+                  "LineBorderActiveColor": "#clBlack",
+                  "LineBorderInactiveColor": "#clBlack",
+                  "ButtonShortcut": 0,
+                  "ButtonWidth": 15,
+                  "AltButtonNumGlyphs": 1,
+                  "AltButtonPopupPlace": "#ppDown",
+                  "AltButtonShortcut": 0,
+                  "AltButtonWidth": 16,
+                  "BorderStyle": "#bsSingle",
+                  "TabOrder": 3,
+                  "ParentColor": false,
+                  "DockOrientation": "#doNoOrient",
+                  "DoubleBuffered": false
+                },
+                "children": []
+              },
+              {
+                "class": "TElGroupBox",
+                "name": "PeakGroup",
+                "offset": 7718,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Left": 12,
+                  "Top": 156,
+                  "Width": 465,
+                  "Height": 101,
+                  "AutoDisableChildren": false,
+                  "BorderSides": [
+                    "ebsLeft",
+                    "ebsRight",
+                    "ebsTop",
+                    "ebsBottom"
+                  ],
+                  "Caption": "Peak label",
+                  "Flat": false,
+                  "FlatAlways": false,
+                  "ShowFocus": false,
+                  "TabOrder": 5
+                },
+                "children": [
+                  {
+                    "class": "TElLabel",
+                    "name": "MaximumLabel",
+                    "offset": 7902,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Left": 60,
+                      "Top": 72,
+                      "Width": 47,
+                      "Height": 13,
+                      "Caption": "Maximum:",
+                      "Alignment": "#taRightJustify"
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElCheckBox",
+                    "name": "PeakLimitsBox",
+                    "offset": 8000,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Tag": 33205,
+                      "Left": 20,
+                      "Top": 16,
+                      "Width": 48,
+                      "Height": 17,
+                      "Cursor": "#crDefault",
+                      "Caption": "Limits",
+                      "TabOrder": 0,
+                      "OnClick": "#PeakLimitsBoxClick",
+                      "DoubleBuffered": false
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElCheckBox",
+                    "name": "AreaBox",
+                    "offset": 8156,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Tag": 33206,
+                      "Left": 116,
+                      "Top": 16,
+                      "Width": 44,
+                      "Height": 17,
+                      "Cursor": "#crDefault",
+                      "Caption": "Area",
+                      "TabOrder": 1,
+                      "OnClick": "#AreaBoxClick",
+                      "DoubleBuffered": false
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElCheckBox",
+                    "name": "HeightBox",
+                    "offset": 8298,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Tag": 33207,
+                      "Left": 212,
+                      "Top": 16,
+                      "Width": 53,
+                      "Height": 17,
+                      "Cursor": "#crDefault",
+                      "Caption": "Height",
+                      "TabOrder": 2,
+                      "OnClick": "#HeightBoxClick",
+                      "DoubleBuffered": false
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElCheckBox",
+                    "name": "WidthBox",
+                    "offset": 8447,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Tag": 33208,
+                      "Left": 308,
+                      "Top": 16,
+                      "Width": 114,
+                      "Height": 17,
+                      "Cursor": "#crDefault",
+                      "Caption": "Width at half height",
+                      "TabOrder": 3,
+                      "OnClick": "#WidthBoxClick",
+                      "DoubleBuffered": false
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElComboBox",
+                    "name": "MaximumCombo",
+                    "offset": 8608,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Tag": 33209,
+                      "Left": 116,
+                      "Top": 68,
+                      "Width": 109,
+                      "Height": 21,
+                      "Cursor": "#crIBeam",
+                      "ButtonArrowColor": "#clBlack",
+                      "Items.Strings": [
+                        "1",
+                        "2",
+                        "3",
+                        "4"
+                      ],
+                      "Style": "#csDropDownList",
+                      "ItemHeight": 13,
+                      "VertScrollBarStyles.ActiveFlat": false,
+                      "VertScrollBarStyles.ButtonSize": 16,
+                      "VertScrollBarStyles.Width": 16,
+                      "VertScrollBarStyles.OwnerDraw": false,
+                      "HorzScrollBarStyles.ActiveFlat": false,
+                      "HorzScrollBarStyles.ButtonSize": 16,
+                      "HorzScrollBarStyles.Width": 16,
+                      "HorzScrollBarStyles.OwnerDraw": false,
+                      "AutoHistory": false,
+                      "AutoHistoryDirection": "#ahdFirst",
+                      "AutoHistoryLimit": 25,
+                      "TopMargin": 2,
+                      "RightMargin": 1,
+                      "ReadOnly": true,
+                      "BorderSides": [
+                        "ebsLeft",
+                        "ebsRight",
+                        "ebsTop",
+                        "ebsBottom"
+                      ],
+                      "OnMouseEnter": "#MaximumComboMouseEnter",
+                      "OnChange": "#MaximumComboChange",
+                      "LineBorderActiveColor": "#clBlack",
+                      "LineBorderInactiveColor": "#clBlack",
+                      "ButtonShortcut": 0,
+                      "ButtonWidth": 15,
+                      "AltButtonNumGlyphs": 1,
+                      "AltButtonPopupPlace": "#ppDown",
+                      "AltButtonShortcut": 0,
+                      "AltButtonWidth": 16,
+                      "BorderStyle": "#bsSingle",
+                      "TabOrder": 6,
+                      "ParentColor": false,
+                      "DockOrientation": "#doNoOrient",
+                      "DoubleBuffered": false
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElCheckBox",
+                    "name": "NormalizedBox",
+                    "offset": 9511,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Tag": 33210,
+                      "Left": 212,
+                      "Top": 42,
+                      "Width": 98,
+                      "Height": 17,
+                      "Cursor": "#crDefault",
+                      "Caption": "Normalized area",
+                      "TabOrder": 5,
+                      "OnClick": "#NormalizedBoxClick",
+                      "DoubleBuffered": false
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElCheckBox",
+                    "name": "SignedAreaBox",
+                    "offset": 9677,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Tag": 33211,
+                      "Left": 20,
+                      "Top": 42,
+                      "Width": 125,
+                      "Height": 17,
+                      "Cursor": "#crDefault",
+                      "Caption": "Signed heat flow area",
+                      "TabOrder": 4,
+                      "OnClick": "#SignedAreaBoxClick",
+                      "DoubleBuffered": false
+                    },
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "class": "TElCheckBox",
+                "name": "ManualOnsetBox",
+                "offset": 9849,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Tag": 33202,
+                  "Left": 24,
+                  "Top": 12,
+                  "Width": 170,
+                  "Height": 17,
+                  "Cursor": "#crDefault",
+                  "Caption": "Manual onset tangent selection",
+                  "TabOrder": 0,
+                  "OnClick": "#ManualOnsetBoxClick",
+                  "DoubleBuffered": false
+                },
+                "children": []
+              },
+              {
+                "class": "TElComboBox",
+                "name": "IntWeightCombo",
+                "offset": 10032,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Tag": 33201,
+                  "Left": 360,
+                  "Top": 10,
+                  "Width": 109,
+                  "Height": 21,
+                  "Cursor": "#crIBeam",
+                  "ButtonArrowColor": "#clBlack",
+                  "DropDownCount": 9,
+                  "Items.Strings": [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                    "6",
+                    "7",
+                    "8",
+                    "9"
+                  ],
+                  "ItemHeight": 13,
+                  "VertScrollBarStyles.ActiveFlat": false,
+                  "VertScrollBarStyles.ButtonSize": 16,
+                  "VertScrollBarStyles.Width": 16,
+                  "VertScrollBarStyles.OwnerDraw": false,
+                  "HorzScrollBarStyles.ActiveFlat": false,
+                  "HorzScrollBarStyles.ButtonSize": 16,
+                  "HorzScrollBarStyles.Width": 16,
+                  "HorzScrollBarStyles.OwnerDraw": false,
+                  "AutoHistory": false,
+                  "AutoHistoryDirection": "#ahdFirst",
+                  "AutoHistoryLimit": 25,
+                  "TopMargin": 2,
+                  "RightMargin": 1,
+                  "BorderSides": [
+                    "ebsLeft",
+                    "ebsRight",
+                    "ebsTop",
+                    "ebsBottom"
+                  ],
+                  "OnMouseEnter": "#IntWeightComboMouseEnter",
+                  "OnChange": "#IntWeightComboChange",
+                  "LineBorderActiveColor": "#clBlack",
+                  "LineBorderInactiveColor": "#clBlack",
+                  "ButtonShortcut": 0,
+                  "ButtonWidth": 15,
+                  "AltButtonNumGlyphs": 1,
+                  "AltButtonPopupPlace": "#ppDown",
+                  "AltButtonShortcut": 0,
+                  "AltButtonWidth": 16,
+                  "BorderStyle": "#bsSingle",
+                  "TabOrder": 1,
+                  "ParentColor": false,
+                  "DockOrientation": "#doNoOrient",
+                  "DoubleBuffered": false
+                },
+                "children": []
+              },
+              {
+                "class": "TElGroupBox",
+                "name": "OnsetGroup",
+                "offset": 10941,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Left": 12,
+                  "Top": 76,
+                  "Width": 465,
+                  "Height": 65,
+                  "AutoDisableChildren": false,
+                  "BorderSides": [
+                    "ebsLeft",
+                    "ebsRight",
+                    "ebsTop",
+                    "ebsBottom"
+                  ],
+                  "Caption": "Onset label",
+                  "Flat": false,
+                  "FlatAlways": false,
+                  "ShowFocus": false,
+                  "TabOrder": 4
+                },
+                "children": [
+                  {
+                    "class": "TElCheckBox",
+                    "name": "XAxisBox",
+                    "offset": 11126,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Tag": 33212,
+                      "Left": 20,
+                      "Top": 16,
+                      "Width": 50,
+                      "Height": 17,
+                      "Cursor": "#crDefault",
+                      "Caption": "X-axis",
+                      "TabOrder": 0,
+                      "OnClick": "#XAxisBoxClick",
+                      "DoubleBuffered": false
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElCheckBox",
+                    "name": "YAxisBox",
+                    "offset": 11272,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Tag": 33204,
+                      "Left": 116,
+                      "Top": 16,
+                      "Width": 51,
+                      "Height": 17,
+                      "Cursor": "#crDefault",
+                      "Caption": "Y-Axis",
+                      "TabOrder": 1,
+                      "OnClick": "#YAxisBoxClick",
+                      "DoubleBuffered": false
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElCheckBox",
+                    "name": "TimeBox",
+                    "offset": 11418,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Tag": 33213,
+                      "Left": 212,
+                      "Top": 16,
+                      "Width": 45,
+                      "Height": 17,
+                      "Cursor": "#crDefault",
+                      "Caption": "Time",
+                      "TabOrder": 2,
+                      "OnClick": "#TimeBoxClick",
+                      "DoubleBuffered": false
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElCheckBox",
+                    "name": "TempBox",
+                    "offset": 11561,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Tag": 33214,
+                      "Left": 308,
+                      "Top": 16,
+                      "Width": 82,
+                      "Height": 17,
+                      "Cursor": "#crDefault",
+                      "Caption": "Temperature",
+                      "TabOrder": 3,
+                      "OnClick": "#TempBoxClick",
+                      "DoubleBuffered": false
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElCheckBox",
+                    "name": "XSignalBox",
+                    "offset": 11711,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Tag": 33215,
+                      "Left": 20,
+                      "Top": 40,
+                      "Width": 59,
+                      "Height": 17,
+                      "Cursor": "#crDefault",
+                      "Caption": "X-signal",
+                      "TabOrder": 4,
+                      "OnClick": "#XSignalBoxClick",
+                      "DoubleBuffered": false
+                    },
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "class": "TElCheckBox",
+                "name": "InflectionBox",
+                "offset": 11864,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Tag": 33216,
+                  "Left": 24,
+                  "Top": 42,
+                  "Width": 107,
+                  "Height": 17,
+                  "Cursor": "#crDefault",
+                  "Caption": "Onset at inflection",
+                  "TabOrder": 2,
+                  "OnClick": "#InflectionBoxClick",
+                  "DoubleBuffered": false
+                },
+                "children": []
+              }
+            ]
+          },
+          {
+            "class": "TElTabSheet",
+            "name": "AreaSheet",
+            "offset": 12034,
+            "prefix_flags": 0,
+            "child_position": null,
+            "props": {
+              "Tag": 33300,
+              "Width": 488,
+              "Height": 274,
+              "PageControl": "#PageControl",
+              "Caption": "Area"
+            },
+            "children": [
+              {
+                "class": "TElLabel",
+                "name": "TypeLabel",
+                "offset": 12124,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Left": 88,
+                  "Top": 16,
+                  "Width": 27,
+                  "Height": 13,
+                  "Caption": "Type:",
+                  "Alignment": "#taRightJustify"
+                },
+                "children": []
+              },
+              {
+                "class": "TElPanel",
+                "name": "StandardHeatPanel",
+                "offset": 12216,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Left": 16,
+                  "Top": 44,
+                  "Width": 453,
+                  "Height": 109,
+                  "Align": "#alNone",
+                  "BevelOuter": "#bvNone",
+                  "TabOrder": 2,
+                  "DockOrientation": "#doNoOrient"
+                },
+                "children": [
+                  {
+                    "class": "TElLabel",
+                    "name": "StandardHeatLabel",
+                    "offset": 12347,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Left": 124,
+                      "Top": 24,
+                      "Width": 70,
+                      "Height": 13,
+                      "Caption": "Standard heat:",
+                      "Alignment": "#taRightJustify"
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElLabel",
+                    "name": "StandardHeatUnitsLabel",
+                    "offset": 12456,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Left": 272,
+                      "Top": 24,
+                      "Width": 16,
+                      "Height": 13,
+                      "Caption": "J/g"
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElEdit",
+                    "name": "StandardHeatEdit",
+                    "offset": 12534,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Tag": 33307,
+                      "Left": 200,
+                      "Top": 20,
+                      "Width": 61,
+                      "Height": 21,
+                      "Cursor": "#crIBeam",
+                      "BorderSides": [
+                        "ebsLeft",
+                        "ebsRight",
+                        "ebsTop",
+                        "ebsBottom"
+                      ],
+                      "RightMargin": 1,
+                      "TopMargin": 2,
+                      "BorderStyle": "#bsSingle",
+                      "Text": " ",
+                      "LineBorderActiveColor": "#clBlack",
+                      "LineBorderInactiveColor": "#clBlack",
+                      "MaxUndoLevel": 0,
+                      "Ctl3D": true,
+                      "ParentCtl3D": false,
+                      "TabOrder": 0,
+                      "OnExit": "#StandardHeatEditExit",
+                      "OnKeyPress": "#StandardHeatEditKeyPress",
+                      "OnContextPopup": "#StandardHeatEditContextPopup"
+                    },
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "class": "TElPanel",
+                "name": "MolecularWeightPanel",
+                "offset": 12943,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Left": 16,
+                  "Top": 44,
+                  "Width": 453,
+                  "Height": 109,
+                  "Align": "#alNone",
+                  "BevelOuter": "#bvNone",
+                  "TabOrder": 3,
+                  "DockOrientation": "#doNoOrient"
+                },
+                "children": [
+                  {
+                    "class": "TElLabel",
+                    "name": "MoleculatWeightLabel",
+                    "offset": 13077,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Left": 108,
+                      "Top": 24,
+                      "Width": 83,
+                      "Height": 13,
+                      "Caption": "Molecular weight:",
+                      "Alignment": "#taRightJustify"
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElLabel",
+                    "name": "Label17",
+                    "offset": 13192,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Left": 272,
+                      "Top": 24,
+                      "Width": 33,
+                      "Height": 13,
+                      "Caption": "g/mole"
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElEdit",
+                    "name": "MolecularWeightEdit",
+                    "offset": 13258,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Tag": 33306,
+                      "Left": 200,
+                      "Top": 20,
+                      "Width": 61,
+                      "Height": 21,
+                      "Cursor": "#crIBeam",
+                      "BorderSides": [
+                        "ebsLeft",
+                        "ebsRight",
+                        "ebsTop",
+                        "ebsBottom"
+                      ],
+                      "RightMargin": 1,
+                      "TopMargin": 2,
+                      "BorderStyle": "#bsSingle",
+                      "Text": " ",
+                      "LineBorderActiveColor": "#clBlack",
+                      "LineBorderInactiveColor": "#clBlack",
+                      "MaxUndoLevel": 0,
+                      "Ctl3D": true,
+                      "ParentCtl3D": false,
+                      "TabOrder": 0,
+                      "OnExit": "#MolecularWeightEditExit",
+                      "OnKeyPress": "#MolecularWeightEditKeyPress",
+                      "OnContextPopup": "#MolecularWeightEditContextPopup"
+                    },
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "class": "TElPanel",
+                "name": "GeneralEquationPanel",
+                "offset": 13679,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Left": 16,
+                  "Top": 44,
+                  "Width": 453,
+                  "Height": 109,
+                  "Align": "#alNone",
+                  "BevelOuter": "#bvNone",
+                  "TabOrder": 1,
+                  "Caption": " ",
+                  "DockOrientation": "#doNoOrient"
+                },
+                "children": [
+                  {
+                    "class": "TElLabel",
+                    "name": "ValueLabel",
+                    "offset": 13824,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Left": 52,
+                      "Top": 24,
+                      "Width": 27,
+                      "Height": 13,
+                      "Caption": "Value",
+                      "Alignment": "#taRightJustify"
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElLabel",
+                    "name": "Label8",
+                    "offset": 13917,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Left": 120,
+                      "Top": 20,
+                      "Width": 150,
+                      "Height": 13,
+                      "Caption": "_________________________"
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElLabel",
+                    "name": "Label10",
+                    "offset": 14001,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Left": 284,
+                      "Top": 24,
+                      "Width": 6,
+                      "Height": 13,
+                      "Caption": "+",
+                      "Alignment": "#taCenter"
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElLabel",
+                    "name": "AreaLabel",
+                    "offset": 14082,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Left": 132,
+                      "Top": 12,
+                      "Width": 22,
+                      "Height": 13,
+                      "Caption": "Area",
+                      "Alignment": "#taRightJustify"
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElLabel",
+                    "name": "LabelLabel",
+                    "offset": 14174,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Left": 72,
+                      "Top": 76,
+                      "Width": 29,
+                      "Height": 13,
+                      "Caption": "Label:",
+                      "Alignment": "#taRightJustify"
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElLabel",
+                    "name": "ElLabel1",
+                    "offset": 14268,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Left": 96,
+                      "Top": 24,
+                      "Width": 6,
+                      "Height": 13,
+                      "Caption": "=",
+                      "Alignment": "#taCenter"
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElLabel",
+                    "name": "ElLabel2",
+                    "offset": 14349,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Left": 168,
+                      "Top": 12,
+                      "Width": 5,
+                      "Height": 13,
+                      "Caption": "x",
+                      "Alignment": "#taCenter"
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElEdit",
+                    "name": "Factor1Edit",
+                    "offset": 14431,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Tag": 33302,
+                      "Left": 188,
+                      "Top": 8,
+                      "Width": 61,
+                      "Height": 21,
+                      "Cursor": "#crIBeam",
+                      "BorderSides": [
+                        "ebsLeft",
+                        "ebsRight",
+                        "ebsTop",
+                        "ebsBottom"
+                      ],
+                      "RightMargin": 1,
+                      "TopMargin": 2,
+                      "BorderStyle": "#bsSingle",
+                      "AutoSelect": true,
+                      "LineBorderActiveColor": "#clBlack",
+                      "LineBorderInactiveColor": "#clBlack",
+                      "MaxUndoLevel": 0,
+                      "Ctl3D": true,
+                      "ParentCtl3D": false,
+                      "TabOrder": 0,
+                      "OnExit": "#Factor1EditExit",
+                      "OnKeyPress": "#Factor1EditKeyPress",
+                      "OnContextPopup": "#Factor1EditContextPopup"
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElEdit",
+                    "name": "Factor2Edit",
+                    "offset": 14823,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Tag": 33303,
+                      "Left": 164,
+                      "Top": 36,
+                      "Width": 61,
+                      "Height": 21,
+                      "Cursor": "#crIBeam",
+                      "BorderSides": [
+                        "ebsLeft",
+                        "ebsRight",
+                        "ebsTop",
+                        "ebsBottom"
+                      ],
+                      "RightMargin": 1,
+                      "TopMargin": 2,
+                      "BorderStyle": "#bsSingle",
+                      "AutoSelect": true,
+                      "LineBorderActiveColor": "#clBlack",
+                      "LineBorderInactiveColor": "#clBlack",
+                      "MaxUndoLevel": 0,
+                      "Ctl3D": true,
+                      "ParentCtl3D": false,
+                      "TabOrder": 2,
+                      "OnExit": "#Factor2EditExit",
+                      "OnKeyPress": "#Factor2EditKeyPress",
+                      "OnContextPopup": "#Factor2EditContextPopup"
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElEdit",
+                    "name": "Factor3Edit",
+                    "offset": 15215,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Tag": 33304,
+                      "Left": 308,
+                      "Top": 20,
+                      "Width": 61,
+                      "Height": 21,
+                      "Cursor": "#crIBeam",
+                      "BorderSides": [
+                        "ebsLeft",
+                        "ebsRight",
+                        "ebsTop",
+                        "ebsBottom"
+                      ],
+                      "RightMargin": 1,
+                      "TopMargin": 2,
+                      "BorderStyle": "#bsSingle",
+                      "AutoSelect": true,
+                      "LineBorderActiveColor": "#clBlack",
+                      "LineBorderInactiveColor": "#clBlack",
+                      "MaxUndoLevel": 0,
+                      "Ctl3D": true,
+                      "ParentCtl3D": false,
+                      "TabOrder": 1,
+                      "OnExit": "#Factor3EditExit",
+                      "OnKeyPress": "#Factor3EditKeyPress",
+                      "OnContextPopup": "#Factor3EditContextPopup"
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElEdit",
+                    "name": "AreaLabelEdit",
+                    "offset": 15607,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Tag": 33305,
+                      "Left": 108,
+                      "Top": 72,
+                      "Width": 261,
+                      "Height": 21,
+                      "Cursor": "#crIBeam",
+                      "BorderSides": [
+                        "ebsLeft",
+                        "ebsRight",
+                        "ebsTop",
+                        "ebsBottom"
+                      ],
+                      "RightMargin": 1,
+                      "TopMargin": 2,
+                      "BorderStyle": "#bsSingle",
+                      "AutoSelect": true,
+                      "Text": " ",
+                      "LineBorderActiveColor": "#clBlack",
+                      "LineBorderInactiveColor": "#clBlack",
+                      "MaxUndoLevel": 0,
+                      "Ctl3D": true,
+                      "ParentCtl3D": false,
+                      "TabOrder": 3,
+                      "OnExit": "#AreaLabelEditExit",
+                      "OnKeyPress": "#AreaLabelEditKeyPress",
+                      "OnContextPopup": "#AreaLabelEditContextPopup"
+                    },
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "class": "TElComboBox",
+                "name": "AreaTypeCombo",
+                "offset": 16016,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Tag": 33301,
+                  "Left": 124,
+                  "Top": 12,
+                  "Width": 213,
+                  "Height": 21,
+                  "Cursor": "#crIBeam",
+                  "ButtonArrowColor": "#clBlack",
+                  "Items.Strings": [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5"
+                  ],
+                  "Style": "#csDropDownList",
+                  "ItemHeight": 13,
+                  "VertScrollBarStyles.ActiveFlat": false,
+                  "VertScrollBarStyles.ButtonSize": 16,
+                  "VertScrollBarStyles.Width": 16,
+                  "VertScrollBarStyles.OwnerDraw": false,
+                  "HorzScrollBarStyles.ActiveFlat": false,
+                  "HorzScrollBarStyles.ButtonSize": 16,
+                  "HorzScrollBarStyles.Width": 16,
+                  "HorzScrollBarStyles.OwnerDraw": false,
+                  "AutoHistory": false,
+                  "AutoHistoryDirection": "#ahdFirst",
+                  "AutoHistoryLimit": 25,
+                  "TopMargin": 2,
+                  "RightMargin": 1,
+                  "ReadOnly": true,
+                  "BorderSides": [
+                    "ebsLeft",
+                    "ebsRight",
+                    "ebsTop",
+                    "ebsBottom"
+                  ],
+                  "OnMouseEnter": "#AreaTypeComboMouseEnter",
+                  "OnChange": "#AreaTypeComboChange",
+                  "LineBorderActiveColor": "#clBlack",
+                  "LineBorderInactiveColor": "#clBlack",
+                  "ButtonShortcut": 0,
+                  "ButtonWidth": 15,
+                  "AltButtonNumGlyphs": 1,
+                  "AltButtonPopupPlace": "#ppDown",
+                  "AltButtonShortcut": 0,
+                  "AltButtonWidth": 16,
+                  "BorderStyle": "#bsSingle",
+                  "TabOrder": 0,
+                  "ParentColor": false,
+                  "DockOrientation": "#doNoOrient",
+                  "DoubleBuffered": false
+                },
+                "children": []
+              }
+            ]
+          },
+          {
+            "class": "TElTabSheet",
+            "name": "ResolutionSheet",
+            "offset": 16927,
+            "prefix_flags": 0,
+            "child_position": null,
+            "props": {
+              "Tag": 33500,
+              "Width": 488,
+              "Height": 274,
+              "PageControl": "#PageControl",
+              "Caption": "Resolution",
+              "Visible": false
+            },
+            "children": [
+              {
+                "class": "TElLabel",
+                "name": "TimeLabel",
+                "offset": 17038,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Left": 91,
+                  "Top": 24,
+                  "Width": 26,
+                  "Height": 13,
+                  "Caption": "Time:",
+                  "Alignment": "#taRightJustify"
+                },
+                "children": []
+              },
+              {
+                "class": "TElLabel",
+                "name": "TemperatureLabel",
+                "offset": 17130,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Left": 54,
+                  "Top": 60,
+                  "Width": 63,
+                  "Height": 13,
+                  "Caption": "Temperature:",
+                  "Alignment": "#taRightJustify"
+                },
+                "children": []
+              },
+              {
+                "class": "TElLabel",
+                "name": "Otherlabel",
+                "offset": 17236,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Left": 88,
+                  "Top": 96,
+                  "Width": 29,
+                  "Height": 13,
+                  "Caption": "Other:",
+                  "Alignment": "#taRightJustify"
+                },
+                "children": []
+              },
+              {
+                "class": "TElComboBox",
+                "name": "TimeResCombo",
+                "offset": 17330,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Tag": 33501,
+                  "Left": 128,
+                  "Top": 20,
+                  "Width": 193,
+                  "Height": 21,
+                  "Cursor": "#crIBeam",
+                  "ButtonArrowColor": "#clBlack",
+                  "DropDownCount": 20,
+                  "Items.Strings": [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                    "6",
+                    "7",
+                    "8",
+                    "9",
+                    "0",
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                    "6",
+                    "7",
+                    "8",
+                    "9",
+                    "0"
+                  ],
+                  "Style": "#csDropDownList",
+                  "ItemHeight": 13,
+                  "VertScrollBarStyles.ActiveFlat": false,
+                  "VertScrollBarStyles.ButtonSize": 16,
+                  "VertScrollBarStyles.Width": 16,
+                  "VertScrollBarStyles.OwnerDraw": false,
+                  "HorzScrollBarStyles.ActiveFlat": false,
+                  "HorzScrollBarStyles.ButtonSize": 16,
+                  "HorzScrollBarStyles.Width": 16,
+                  "HorzScrollBarStyles.OwnerDraw": false,
+                  "AutoHistory": false,
+                  "AutoHistoryDirection": "#ahdFirst",
+                  "AutoHistoryLimit": 25,
+                  "TopMargin": 2,
+                  "RightMargin": 1,
+                  "ReadOnly": true,
+                  "BorderSides": [
+                    "ebsLeft",
+                    "ebsRight",
+                    "ebsTop",
+                    "ebsBottom"
+                  ],
+                  "OnMouseEnter": "#TimeResComboMouseEnter",
+                  "OnChange": "#TimeResComboChange",
+                  "LineBorderActiveColor": "#clBlack",
+                  "LineBorderInactiveColor": "#clBlack",
+                  "ButtonShortcut": 0,
+                  "ButtonWidth": 15,
+                  "AltButtonNumGlyphs": 1,
+                  "AltButtonPopupPlace": "#ppDown",
+                  "AltButtonShortcut": 0,
+                  "AltButtonWidth": 16,
+                  "BorderStyle": "#bsSingle",
+                  "TabOrder": 0,
+                  "ParentColor": false,
+                  "DockOrientation": "#doNoOrient",
+                  "DoubleBuffered": false
+                },
+                "children": []
+              },
+              {
+                "class": "TElComboBox",
+                "name": "TempResCombo",
+                "offset": 18299,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Tag": 33502,
+                  "Left": 128,
+                  "Top": 56,
+                  "Width": 193,
+                  "Height": 21,
+                  "Cursor": "#crIBeam",
+                  "ButtonArrowColor": "#clBlack",
+                  "DropDownCount": 20,
+                  "Items.Strings": [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                    "6",
+                    "7",
+                    "8",
+                    "9",
+                    "0",
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                    "6",
+                    "7",
+                    "8",
+                    "9",
+                    "0"
+                  ],
+                  "Style": "#csDropDownList",
+                  "ItemHeight": 13,
+                  "VertScrollBarStyles.ActiveFlat": false,
+                  "VertScrollBarStyles.ButtonSize": 16,
+                  "VertScrollBarStyles.Width": 16,
+                  "VertScrollBarStyles.OwnerDraw": false,
+                  "HorzScrollBarStyles.ActiveFlat": false,
+                  "HorzScrollBarStyles.ButtonSize": 16,
+                  "HorzScrollBarStyles.Width": 16,
+                  "HorzScrollBarStyles.OwnerDraw": false,
+                  "AutoHistory": false,
+                  "AutoHistoryDirection": "#ahdFirst",
+                  "AutoHistoryLimit": 25,
+                  "TopMargin": 2,
+                  "RightMargin": 1,
+                  "ReadOnly": true,
+                  "BorderSides": [
+                    "ebsLeft",
+                    "ebsRight",
+                    "ebsTop",
+                    "ebsBottom"
+                  ],
+                  "OnMouseEnter": "#TempResComboMouseEnter",
+                  "OnChange": "#TempResComboChange",
+                  "LineBorderActiveColor": "#clBlack",
+                  "LineBorderInactiveColor": "#clBlack",
+                  "ButtonShortcut": 0,
+                  "ButtonWidth": 15,
+                  "AltButtonNumGlyphs": 1,
+                  "AltButtonPopupPlace": "#ppDown",
+                  "AltButtonShortcut": 0,
+                  "AltButtonWidth": 16,
+                  "BorderStyle": "#bsSingle",
+                  "TabOrder": 1,
+                  "ParentColor": false,
+                  "DockOrientation": "#doNoOrient",
+                  "DoubleBuffered": false
+                },
+                "children": []
+              },
+              {
+                "class": "TElComboBox",
+                "name": "OtherResCombo",
+                "offset": 19268,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Tag": 33503,
+                  "Left": 128,
+                  "Top": 92,
+                  "Width": 193,
+                  "Height": 21,
+                  "Cursor": "#crIBeam",
+                  "ButtonArrowColor": "#clBlack",
+                  "DropDownCount": 20,
+                  "Items.Strings": [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                    "6",
+                    "7",
+                    "8",
+                    "9",
+                    "0",
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                    "6",
+                    "7",
+                    "8",
+                    "9",
+                    "0"
+                  ],
+                  "Style": "#csDropDownList",
+                  "ItemHeight": 13,
+                  "VertScrollBarStyles.ActiveFlat": false,
+                  "VertScrollBarStyles.ButtonSize": 16,
+                  "VertScrollBarStyles.Width": 16,
+                  "VertScrollBarStyles.OwnerDraw": false,
+                  "HorzScrollBarStyles.ActiveFlat": false,
+                  "HorzScrollBarStyles.ButtonSize": 16,
+                  "HorzScrollBarStyles.Width": 16,
+                  "HorzScrollBarStyles.OwnerDraw": false,
+                  "AutoHistory": false,
+                  "AutoHistoryDirection": "#ahdFirst",
+                  "AutoHistoryLimit": 25,
+                  "TopMargin": 2,
+                  "RightMargin": 1,
+                  "ReadOnly": true,
+                  "BorderSides": [
+                    "ebsLeft",
+                    "ebsRight",
+                    "ebsTop",
+                    "ebsBottom"
+                  ],
+                  "OnMouseEnter": "#OtherResComboMouseEnter",
+                  "OnChange": "#OtherResComboChange",
+                  "LineBorderActiveColor": "#clBlack",
+                  "LineBorderInactiveColor": "#clBlack",
+                  "ButtonShortcut": 0,
+                  "ButtonWidth": 15,
+                  "AltButtonNumGlyphs": 1,
+                  "AltButtonPopupPlace": "#ppDown",
+                  "AltButtonShortcut": 0,
+                  "AltButtonWidth": 16,
+                  "BorderStyle": "#bsSingle",
+                  "TabOrder": 2,
+                  "ParentColor": false,
+                  "DockOrientation": "#doNoOrient",
+                  "DoubleBuffered": false
+                },
+                "children": []
+              }
+            ]
+          },
+          {
+            "class": "TElTabSheet",
+            "name": "OtherSheet",
+            "offset": 20241,
+            "prefix_flags": 0,
+            "child_position": null,
+            "props": {
+              "Tag": 33400,
+              "Width": 488,
+              "Height": 274,
+              "PageControl": "#PageControl",
+              "Caption": "Other",
+              "Visible": false
+            },
+            "children": [
+              {
+                "class": "TElLabel",
+                "name": "SmoothingWidthLabel",
+                "offset": 20342,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Left": 172,
+                  "Top": 16,
+                  "Width": 156,
+                  "Height": 13,
+                  "Caption": "Alpha at a point smoothing width:",
+                  "Alignment": "#taRightJustify"
+                },
+                "children": []
+              },
+              {
+                "class": "TElLabel",
+                "name": "Label13",
+                "offset": 20474,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Left": 408,
+                  "Top": 16,
+                  "Width": 11,
+                  "Height": 13,
+                  "Caption": "°C"
+                },
+                "children": []
+              },
+              {
+                "class": "TElLabel",
+                "name": "HeatFlowWeightLabel",
+                "offset": 20540,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Left": 156,
+                  "Top": 40,
+                  "Width": 172,
+                  "Height": 13,
+                  "Caption": "Corrected heat flow minimum weight:",
+                  "Alignment": "#taRightJustify"
+                },
+                "children": []
+              },
+              {
+                "class": "TElLabel",
+                "name": "Label18",
+                "offset": 20674,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Left": 408,
+                  "Top": 40,
+                  "Width": 8,
+                  "Height": 13,
+                  "Caption": "%"
+                },
+                "children": []
+              },
+              {
+                "class": "TElEdit",
+                "name": "AlphaWindowEdit",
+                "offset": 20735,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Tag": 33401,
+                  "Left": 336,
+                  "Top": 12,
+                  "Width": 61,
+                  "Height": 21,
+                  "Cursor": "#crIBeam",
+                  "BorderSides": [
+                    "ebsLeft",
+                    "ebsRight",
+                    "ebsTop",
+                    "ebsBottom"
+                  ],
+                  "RightMargin": 1,
+                  "TopMargin": 2,
+                  "BorderStyle": "#bsSingle",
+                  "AutoSelect": true,
+                  "LineBorderActiveColor": "#clBlack",
+                  "LineBorderInactiveColor": "#clBlack",
+                  "MaxUndoLevel": 0,
+                  "Ctl3D": true,
+                  "ParentCtl3D": false,
+                  "TabOrder": 0,
+                  "OnExit": "#AlphaWindowEditExit",
+                  "OnKeyPress": "#AlphaWindowEditKeyPress",
+                  "OnContextPopup": "#AlphaWindowEditContextPopup"
+                },
+                "children": []
+              },
+              {
+                "class": "TElCheckBox",
+                "name": "CorrectedSizeBox",
+                "offset": 21143,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Tag": 33402,
+                  "Left": 24,
+                  "Top": 64,
+                  "Width": 324,
+                  "Height": 17,
+                  "Cursor": "#crDefault",
+                  "Caption": "TMA percent calculated with respect to corrected sample length",
+                  "TabOrder": 2,
+                  "OnClick": "#CorrectedSizeBoxClick",
+                  "DoubleBuffered": false
+                },
+                "children": []
+              },
+              {
+                "class": "TElCheckBox",
+                "name": "SigItterationsBox",
+                "offset": 21362,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Tag": 33405,
+                  "Left": 24,
+                  "Top": 136,
+                  "Width": 183,
+                  "Height": 17,
+                  "Cursor": "#crDefault",
+                  "Caption": "Draw sigmoidal baseline itterations",
+                  "TabOrder": 5,
+                  "OnClick": "#SigItterationsBoxClick",
+                  "DoubleBuffered": false
+                },
+                "children": []
+              },
+              {
+                "class": "TElEdit",
+                "name": "MinimumWeightEdit",
+                "offset": 21557,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Tag": 33403,
+                  "Left": 336,
+                  "Top": 36,
+                  "Width": 61,
+                  "Height": 21,
+                  "Cursor": "#crIBeam",
+                  "BorderSides": [
+                    "ebsLeft",
+                    "ebsRight",
+                    "ebsTop",
+                    "ebsBottom"
+                  ],
+                  "RightMargin": 1,
+                  "TopMargin": 2,
+                  "BorderStyle": "#bsSingle",
+                  "AutoSelect": true,
+                  "LineBorderActiveColor": "#clBlack",
+                  "LineBorderInactiveColor": "#clBlack",
+                  "MaxUndoLevel": 0,
+                  "Ctl3D": true,
+                  "ParentCtl3D": false,
+                  "TabOrder": 1,
+                  "OnExit": "#MinimumWeightEditExit",
+                  "OnKeyPress": "#MinimumWeightEditKeyPress",
+                  "OnContextPopup": "#MinimumWeightEditContextPopup"
+                },
+                "children": []
+              },
+              {
+                "class": "TElCheckBox",
+                "name": "AdjustWeightDerivBox",
+                "offset": 21973,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Tag": 33404,
+                  "Left": 24,
+                  "Top": 88,
+                  "Width": 228,
+                  "Height": 17,
+                  "Cursor": "#crDefault",
+                  "Caption": "Adjust TGA weight derivative for modify size",
+                  "TabOrder": 3,
+                  "OnClick": "#AdjustWeightDerivBoxClick",
+                  "DoubleBuffered": false
+                },
+                "children": []
+              },
+              {
+                "class": "TElGroupBox",
+                "name": "TGAGroup",
+                "offset": 22182,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Left": 16,
+                  "Top": 188,
+                  "Width": 461,
+                  "Height": 69,
+                  "AutoDisableChildren": false,
+                  "BorderSides": [
+                    "ebsLeft",
+                    "ebsRight",
+                    "ebsTop",
+                    "ebsBottom"
+                  ],
+                  "Caption": "TGA step change / weight change / residue label",
+                  "Flat": false,
+                  "FlatAlways": false,
+                  "ShowFocus": false,
+                  "TabOrder": 7
+                },
+                "children": [
+                  {
+                    "class": "TElCheckBox",
+                    "name": "TGAWeightBox",
+                    "offset": 22402,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Tag": 33406,
+                      "Left": 136,
+                      "Top": 16,
+                      "Width": 56,
+                      "Height": 17,
+                      "Cursor": "#crDefault",
+                      "Caption": "Weight",
+                      "TabOrder": 1,
+                      "OnClick": "#TGAWeightBoxClick",
+                      "DoubleBuffered": false
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElCheckBox",
+                    "name": "TGAPercentBox",
+                    "offset": 22557,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Tag": 33407,
+                      "Left": 252,
+                      "Top": 16,
+                      "Width": 59,
+                      "Height": 17,
+                      "Cursor": "#crDefault",
+                      "Caption": "Percent",
+                      "TabOrder": 2,
+                      "OnClick": "#TGAPercentBoxClick",
+                      "DoubleBuffered": false
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElCheckBox",
+                    "name": "TGALabelBox",
+                    "offset": 22715,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Tag": 33408,
+                      "Left": 20,
+                      "Top": 40,
+                      "Width": 93,
+                      "Height": 17,
+                      "Cursor": "#crDefault",
+                      "Caption": "Transition label",
+                      "TabOrder": 3,
+                      "OnClick": "#TGALabelBoxClick",
+                      "DoubleBuffered": false
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElCheckBox",
+                    "name": "TGALimitsBox",
+                    "offset": 22877,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Tag": 33409,
+                      "Left": 20,
+                      "Top": 16,
+                      "Width": 48,
+                      "Height": 17,
+                      "Cursor": "#crDefault",
+                      "Caption": "Limits",
+                      "TabOrder": 0,
+                      "OnClick": "#TGALimitsBoxClick",
+                      "DoubleBuffered": false
+                    },
+                    "children": []
+                  },
+                  {
+                    "class": "TElCheckBox",
+                    "name": "TGASignedChangeBox",
+                    "offset": 23031,
+                    "prefix_flags": 0,
+                    "child_position": null,
+                    "props": {
+                      "Tag": 33410,
+                      "Left": 252,
+                      "Top": 42,
+                      "Width": 94,
+                      "Height": 17,
+                      "Cursor": "#crDefault",
+                      "Caption": "Signed change",
+                      "TabOrder": 4,
+                      "OnClick": "#TGASignedChangeBoxClick",
+                      "DoubleBuffered": false
+                    },
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "class": "TElCheckBox",
+                "name": "CurveColorBox",
+                "offset": 23206,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Tag": 33411,
+                  "Left": 24,
+                  "Top": 112,
+                  "Width": 159,
+                  "Height": 17,
+                  "Cursor": "#crDefault",
+                  "Caption": "Label results with curve color",
+                  "TabOrder": 4,
+                  "OnClick": "#CurveColorBoxClick",
+                  "DoubleBuffered": false
+                },
+                "children": []
+              },
+              {
+                "class": "TElCheckBox",
+                "name": "NoArrowheadsBox",
+                "offset": 23387,
+                "prefix_flags": 0,
+                "child_position": null,
+                "props": {
+                  "Tag": 33412,
+                  "Left": 24,
+                  "Top": 160,
+                  "Width": 191,
+                  "Height": 17,
+                  "Cursor": "#crDefault",
+                  "Caption": "Suppress arrowheads on result lines",
+                  "TabOrder": 6,
+                  "OnClick": "#NoArrowheadsBoxClick",
+                  "DoubleBuffered": false
+                },
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "class": "TElPopupButton",
+        "name": "OK",
+        "offset": 23580,
+        "prefix_flags": 0,
+        "child_position": null,
+        "props": {
+          "Tag": 33001,
+          "Left": 48,
+          "Top": 305,
+          "Width": 81,
+          "Height": 25,
+          "Cursor": "#crDefault",
+          "DrawDefaultFrame": false,
+          "Default": true,
+          "ModalResult": 1,
+          "LinkStyle": [
+            "fsUnderline"
+          ],
+          "NumGlyphs": 1,
+          "OldStyled": true,
+          "Caption": "OK",
+          "TabOrder": 1,
+          "OnClick": "#OKClick",
+          "DockOrientation": "#doNoOrient",
+          "DoubleBuffered": false
+        },
+        "children": []
+      },
+      {
+        "class": "TElPopupButton",
+        "name": "Default",
+        "offset": 23830,
+        "prefix_flags": 0,
+        "child_position": null,
+        "props": {
+          "Tag": 33003,
+          "Left": 224,
+          "Top": 305,
+          "Width": 81,
+          "Height": 25,
+          "Cursor": "#crDefault",
+          "DrawDefaultFrame": false,
+          "LinkStyle": [
+            "fsUnderline"
+          ],
+          "NumGlyphs": 1,
+          "OldStyled": true,
+          "Caption": "Default",
+          "TabOrder": 3,
+          "OnClick": "#DefaultClick",
+          "DockOrientation": "#doNoOrient",
+          "DoubleBuffered": false
+        },
+        "children": []
+      },
+      {
+        "class": "TElPopupButton",
+        "name": "Cancel",
+        "offset": 24073,
+        "prefix_flags": 0,
+        "child_position": null,
+        "props": {
+          "Tag": 33004,
+          "Left": 312,
+          "Top": 305,
+          "Width": 81,
+          "Height": 25,
+          "Cursor": "#crDefault",
+          "DrawDefaultFrame": false,
+          "Cancel": true,
+          "ModalResult": 2,
+          "LinkStyle": [
+            "fsUnderline"
+          ],
+          "NumGlyphs": 1,
+          "OldStyled": true,
+          "Caption": "Cancel",
+          "TabOrder": 4,
+          "DockOrientation": "#doNoOrient",
+          "DoubleBuffered": false
+        },
+        "children": []
+      },
+      {
+        "class": "TElPopupButton",
+        "name": "Help",
+        "offset": 24314,
+        "prefix_flags": 0,
+        "child_position": null,
+        "props": {
+          "Tag": 33005,
+          "Left": 400,
+          "Top": 305,
+          "Width": 81,
+          "Height": 25,
+          "Cursor": "#crDefault",
+          "DrawDefaultFrame": false,
+          "LinkStyle": [
+            "fsUnderline"
+          ],
+          "NumGlyphs": 1,
+          "OldStyled": true,
+          "Caption": "Help",
+          "TabOrder": 5,
+          "OnClick": "#HelpClick",
+          "DockOrientation": "#doNoOrient",
+          "DoubleBuffered": false
+        },
+        "children": []
+      },
+      {
+        "class": "TElPopupButton",
+        "name": "Save",
+        "offset": 24548,
+        "prefix_flags": 0,
+        "child_position": null,
+        "props": {
+          "Tag": 33002,
+          "Left": 136,
+          "Top": 305,
+          "Width": 81,
+          "Height": 25,
+          "Cursor": "#crDefault",
+          "DrawDefaultFrame": false,
+          "LinkStyle": [
+            "fsUnderline"
+          ],
+          "NumGlyphs": 1,
+          "OldStyled": true,
+          "Caption": "Save",
+          "TabOrder": 2,
+          "OnClick": "#SaveClick",
+          "DockOrientation": "#doNoOrient",
+          "DoubleBuffered": false
+        },
+        "children": []
+      },
+      {
+        "class": "TElFormCaption",
+        "name": "FormCaption",
+        "offset": 24782,
+        "prefix_flags": 0,
+        "child_position": null,
+        "props": {
+          "Active": false,
+          "Buttons": [],
+          "SystemFont": false,
+          "Font.Charset": "#DEFAULT_CHARSET",
+          "Font.Color": "#clWindowText",
+          "Font.Height": -11,
+          "Font.Name": "MS Sans Serif",
+          "Font.Style": [],
+          "Texts": [
+            {
+              "Font.Charset": "#DEFAULT_CHARSET",
+              "Font.Color": "#clWindowText",
+              "Font.Height": -11,
+              "Font.Name": "MS Sans Serif",
+              "Font.Style": [],
+              "Layout": "#blGlyphLeft",
+              "Align": "#taLeftJustify"
+            }
+          ],
+          "Left": 304,
+          "Top": 248
+        },
+        "children": []
+      },
+      {
+        "class": "TElHook",
+        "name": "FormHook",
+        "offset": 25121,
+        "prefix_flags": 0,
+        "child_position": null,
+        "props": {
+          "Active": true,
+          "DesignActive": false,
+          "Control": "#Owner",
+          "OnAfterProcess": "#FormHookAfterProcess",
+          "Left": 364,
+          "Top": 248
+        },
+        "children": []
+      },
+      {
+        "class": "TElHTMLHint",
+        "name": "HTMLHint",
+        "offset": 25229,
+        "prefix_flags": 0,
+        "child_position": null,
+        "props": {
+          "Enabled": true,
+          "FontName": "Microsoft Sans Serif",
+          "FontCharset": "#ANSI_CHARSET",
+          "Left": 424,
+          "Top": 248
+        },
+        "children": []
+      }
+    ]
+  }
+}

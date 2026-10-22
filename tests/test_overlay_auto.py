@@ -104,6 +104,7 @@ def test_unchecked_automatic_styles_use_normal_graph_styles_not_previous_overlay
 
 def test_file_and_signal_selection_are_effective_and_duplicate_signal_is_used_once(ui, tmp_path):
     imported(ui, tmp_path, 3)
+    ui.show_normal()
     ui.curves[1].axis = 1
     duplicate = replace(ui.curves[0], uid="a"*32)
     ui.curves.append(duplicate); ui.rebuild_files()
@@ -189,6 +190,7 @@ def test_offset_methods_and_default_lists_are_independent():
 
 def test_auto_configure_keeps_derivative_and_raw_signal_on_separate_axes(ui, tmp_path):
     imported(ui, tmp_path, 1)
+    ui.show_normal()
     derivative = replace(ui.curves[0], uid="b"*32, axis=1,
                          working=np.gradient(ui.curves[0].dataset.values[:, 2]), operations=["derivative:temperature"])
     ui.curves.append(derivative); ui.rebuild_files()
