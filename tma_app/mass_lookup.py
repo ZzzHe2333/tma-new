@@ -26,6 +26,7 @@ import os
 import re
 from pathlib import Path
 import csv
+from io import StringIO
 from dataclasses import dataclass
 
 MASS_XLSX = os.environ.get("TMA_MASS_XLSX", "//192.168.0.105/TMA称量数据.xlsx")
@@ -133,8 +134,8 @@ def _to_number(value: object) -> float | None:
         number = float(value)
         return number if math.isfinite(number) else None
     text = str(value).strip().replace(",", "")
-    match = re.search(r"[-+]?\d+(?:\.\d+)?", text)
-    return float(match.group()) if match else None
+    match = re.fullmatch(r"([-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?)\s*(?:mg|g|毫克|克)?", text, re.I)
+    return float(match.group(1)) if match else None
 
 
 
@@ -159,7 +160,7 @@ def _rows(path):
         except UnicodeDecodeError: text = raw.decode('gb18030')
         try: dialect = csv.Sniffer().sniff(text[:8192], delimiters=',;\t')
         except csv.Error: dialect = csv.excel
-        yield '', list(csv.reader(text.splitlines(), dialect))
+        yield '', list(csv.reader(StringIO(text), dialect))
     elif suffix == '.xlsx':
         from openpyxl import load_workbook
         book = load_workbook(path, read_only=True, data_only=True)
