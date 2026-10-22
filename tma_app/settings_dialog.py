@@ -57,7 +57,7 @@ class SettingsDialog(QDialog):
         for row in range(self.paths.rowCount()):
             name, path = (self.paths.item(row, col).text().strip() for col in (0, 1))
             if not name: raise ValueError("请填写路径名称，或删除空白行。")
-            if name in result: raise ValueError(f"路径名称重复：{name}")
+            if name.casefold() in {key.casefold() for key in result}: raise ValueError(f"路径名称重复：{name}")
             result[name] = path
         return result
 

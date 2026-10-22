@@ -1636,6 +1636,7 @@ class ClassicMainWindow(MainWindow):
             if peer.uid in ids:peer.sample_size_mm=size;peer._x_cache=None
             for key,state in states.get(peer.uid,{}).items():setattr(peer,key,state)
         if plots is not None:self.plot_options.clear();self.plot_options.update(plots)
+        if 'Sample' in changes:self.update_curve_mass(curve)
         self.remove_derived_curves(removed)
         self.touch();self.refresh_results();self.selection_changed()
 

@@ -1,8 +1,8 @@
-"""Read-only sample mass (M) lookup by filename against a shared weighing sheet.
+"""Read-only sample mass (M) lookup from configured CSV/XLSX/XLS sources.
 
 The sheet is opened strictly read-only (``read_only=True, data_only=True``) so the
-original file is never modified or locked for other writers. Column layout:
-``B`` = 批次号 (batch number), ``C`` = 重量 (weight, i.e. the mass ``M``).
+original file is never modified or locked for other writers. Headers identify sample and mass columns; without recognized headers the layout
+is B = batch/sample, C = mass. The existing batch normalization below is retained.
 
 Batch-number recognition is intentionally internal (a pure function) and is never
 surfaced in the UI. The weighing sheet uses production writing ``型号-批次号`` with
