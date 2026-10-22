@@ -137,7 +137,7 @@ def validate_links(curves,results):
         if d is None:continue
         source=next((c for c in curves if c.uid==d['source_curve_uid'] and c.derived is None),None)
         parents=[r for r in results if r.get('analysis_id')==d['parent_id']]
-        if source is None or source.dataset.path!=curve.dataset.path or source.dataset.sha256!=d['source_sha'] or len(parents)!=1:
+        if source is None or source.dataset.document_key!=curve.dataset.document_key or source.dataset.sha256!=d['source_sha'] or len(parents)!=1:
             raise ValueError('派生积分缺少对应的源曲线或峰积分')
         parent=parents[0]
         if (parent.get('curve_id')!=source.uid or parent.get('kind') not in ('peak_linear','peak_sigmoid')

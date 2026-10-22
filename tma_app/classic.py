@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from io import BytesIO
 
 import numpy as np
-from PySide6.QtCore import Qt, QSize, Signal, QTimer
+from PySide6.QtCore import Qt, QSize, Signal, QTimer, QSignalBlocker
 from PySide6.QtGui import QAction, QColor, QIcon, QPixmap, QFont, QPalette, QImage, QPainter
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -29,7 +29,8 @@ from .app import MainWindow
 from .workspace import default_plot_options, validate_plot_options
 from .overlay_settings import fill_manual_limits
 from .legend import render_legend, apply_anchor, moved_anchor
-from . import __version__
+from . import __version__, APP_NAME
+from .theme import CUTE_STYLE, cute_palette, app_icon, action_icon, PastelMdiArea
 
 ASSETS = Path(__file__).parent / "assets" / "classic"
 REFERENCE_TOOLBAR = (1, 15, 21, 29, 33, 34, 36, 39, 40, 42, 43, 49, 50, 51, 54,
@@ -71,47 +72,11 @@ def reference_disabled_icon(path, inverted=False):
     return QPixmap.fromImage(image)
 
 
-CLASSIC_STYLE = """
-QWidget { color: black; font-family: 'Tahoma', 'SimSun'; font-size: 12px; }
-QMainWindow, QDialog, QMenuBar, QToolBar, QStatusBar { background: #f0f0f0; }
-QMenuBar { spacing: 0px; border-bottom: 1px solid #a0a0a0; min-height: 20px; max-height: 20px; }
-QMenuBar::item { padding: 0px 8px; height: 18px; background: transparent; }
-QMenuBar::item:selected { background: #0a246a; color: white; }
-QMenu { background: #d4d0c8; border: 1px solid #808080; }
-QMenu::item { padding: 3px 26px 3px 22px; }
-QMenu::item:selected { background: #0a246a; color: white; }
-QMenu::item:disabled { color: #808080; }
-QToolBar { border-top: 1px solid white; border-bottom: 1px solid #a0a0a0; spacing: 0px; padding: 0px 2px; }
-QToolButton { background: #f0f0f0; border: 1px solid transparent; padding: 2px; }
-QToolButton:hover { border-top: 1px solid white; border-left: 1px solid white; border-bottom: 1px solid #808080; border-right: 1px solid #808080; }
-QToolButton:pressed, QToolButton:checked { border-top: 1px solid #808080; border-left: 1px solid #808080; border-bottom: 1px solid white; border-right: 1px solid white; background: #c4c0b8; }
-QPushButton { background: #d4d0c8; border-top: 1px solid white; border-left: 1px solid white; border-bottom: 1px solid #404040; border-right: 1px solid #404040; min-width: 65px; padding: 4px 8px; border-radius: 0; }
-QPushButton#primary { background: #d4d0c8; color: black; border: 1px solid #404040; }
-QPushButton:pressed { border-top: 1px solid #404040; border-left: 1px solid #404040; }
-QGroupBox { background: #d4d0c8; border: 1px solid #808080; margin-top: 9px; padding: 8px; border-radius: 0; }
-QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 3px; }
-QLabel { background: transparent; }
-QTreeWidget, QTableView, QPlainTextEdit { background: white; border: 1px solid #808080; border-radius: 0; color: black; selection-background-color: #0a246a; selection-color: white; }
-QComboBox, QSpinBox, QDoubleSpinBox { background: white; color: black; border: 1px solid #808080; padding: 2px; border-radius: 0; min-height: 15px; }
-QHeaderView::section { background: #d4d0c8; color: black; padding: 3px; border: 1px solid #aaa69e; }
-QTabWidget::pane { border: 1px solid #a0a0a0; background: #f0f0f0; }
-QTabBar::tab { background: #f0f0f0; color: black; border: 1px solid #a0a0a0; padding: 2px 7px; margin: 0; }
-QTabBar::tab:selected { border-bottom-color: #f0f0f0; }
-QStatusBar { border-top: 1px solid white; min-height: 18px; }
-QStatusBar::item { border: 1px solid #a09c94; }
-QMdiArea { background: #808080; }
-"""
+CLASSIC_STYLE = CUTE_STYLE
 
 
 def classic_palette():
-    palette = QApplication.palette()
-    for role, color in ((QPalette.ColorRole.Window, "#f0f0f0"), (QPalette.ColorRole.Button, "#f0f0f0"),
-                        (QPalette.ColorRole.Base, "white"), (QPalette.ColorRole.Text, "black"),
-                        (QPalette.ColorRole.ButtonText, "black"), (QPalette.ColorRole.WindowText, "black"),
-                        (QPalette.ColorRole.Highlight, "#0a246a"), (QPalette.ColorRole.HighlightedText, "white"),
-                        (QPalette.ColorRole.Light, "white"), (QPalette.ColorRole.Dark, "#808080")):
-        palette.setColor(role, QColor(color))
-    return palette
+    return cute_palette()
 
 
 class PlotDocument(QMdiSubWindow):
@@ -137,7 +102,7 @@ class PlotDocument(QMdiSubWindow):
         layout.addWidget(self.canvas)
         self.setWidget(content)
         self.setWindowTitle(title)
-        self.setWindowIcon(QIcon(str(ASSETS / "app.ico")))
+        self.setWindowIcon(app_icon())
         self.resize(790, 590)
         self.canvas.mpl_connect("motion_notify_event", owner.cursor_motion)
         self.canvas.mpl_connect("resize_event", owner.canvas_resized)
@@ -172,8 +137,8 @@ class ClassicMainWindow(MainWindow):
         super().__init__()
         self.setStyleSheet(CLASSIC_STYLE)
         self.setPalette(classic_palette())
-        self.setWindowTitle(f"Universal Analysis — TMA Studio {__version__}")
-        self.setWindowIcon(QIcon(str(ASSETS / "app.ico")))
+        self.setWindowTitle(f"{APP_NAME} {__version__}")
+        self.setWindowIcon(app_icon())
         self.resize(1400, 900)
         self.statusBar().clearMessage()
         self._plot_resize_timer = QTimer(self)
@@ -251,9 +216,12 @@ class ClassicMainWindow(MainWindow):
         callbacks = self._callbacks()
         settings_menu = self.menuBar().addMenu("设置")
         settings_menu.addAction("数据路径…", self.show_path_settings).setObjectName("PathSettings1")
+        settings_menu.addAction("批量窗口设置…", self.show_path_settings).setObjectName("BatchWindowSettings1")
 
         def append(parent, item):
             caption, name = item["caption"], item["name"]
+            if name == "AboutUniversalAnalysis1":
+                caption = f"关于 {APP_NAME}"
             if caption == "-":
                 parent.addSeparator()
                 return
@@ -285,6 +253,14 @@ class ClassicMainWindow(MainWindow):
                 self.window_menu = parent
             if menu["caption"]=="工具":
                 parent.addSeparator();parent.addAction("通用信号处理…",self.show_processing)
+            if menu["caption"] == "文件":
+                action = QAction("批量处理 T1 / T2 / M / H…", self)
+                action.setObjectName("BatchAnalysis1")
+                action.setShortcut("Ctrl+Shift+B")
+                action.triggered.connect(self.show_batch_analysis)
+                action.setIcon(action_icon("Signals1"))
+                parent.insertAction(parent.actions()[1], action)
+                self.classic_actions["BatchAnalysis1"] = action
         height = QAction("高度差", self)
         height.setObjectName("HeightChange")
         height.triggered.connect(lambda: self.start_point_measurement("height_change"))
@@ -323,8 +299,7 @@ class ClassicMainWindow(MainWindow):
         self._panels = {
             "metadata": self.metadata, "data": self.table, "results": self.result_table, "log": self.log,
         }
-        self.mdi = QMdiArea()
-        self.mdi.setBackground(QColor("#808080"))
+        self.mdi = PastelMdiArea()
         self.mdi.setOption(QMdiArea.AreaOption.DontMaximizeSubWindowOnActivation, False)
         self.mdi.subWindowActivated.connect(self.document_activated)
         self.setCentralWidget(self.mdi)
@@ -362,17 +337,9 @@ class ClassicMainWindow(MainWindow):
                 action.triggered.connect(lambda checked=False, title=info["caption"]: QMessageBox.information(self, title, "此功能的界面入口已保留，分析方法尚未实现。"))
             if index in (34, 39, 49):
                 action.setEnabled(False)
-            image_path = ASSETS / "icons" / f"{info['image_index']:03}.png"
-            if image_path.exists():
-                action.setIcon(QIcon(str(image_path)))
-                if index in (34, 39, 49):
-                    icon = action.icon()
-                    icon.addPixmap(reference_disabled_icon(image_path, index == 39), QIcon.Mode.Disabled)
-                    action.setIcon(icon)
-                if target is not None:
-                    target.setIcon(action.icon())
-            else:
-                action.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon))
+            action.setIcon(action_icon(info.get("menu")))
+            if target is not None:
+                target.setIcon(action.icon())
             toolbar.addAction(action)
             toolbar.widgetForAction(action).setFixedSize(24, 24)
         self.classic_toolbar = toolbar
@@ -413,12 +380,13 @@ class ClassicMainWindow(MainWindow):
             if uids is None:return [c for c in self.curves if c.overlay_enabled]
             lookup={c.uid:c for c in self.curves}
             return [lookup[uid] for uid in uids if uid in lookup]
-        return [c for c in self.curves if str(c.dataset.path) == doc.key]
+        return [c for c in self.curves if c.dataset.document_key == doc.key]
 
     def _show_document(self, key):
         doc = self._document(key)
-        doc.showMaximized()
-        self.mdi.setActiveSubWindow(doc)
+        with QSignalBlocker(self.mdi):
+            doc.showMaximized()
+            self.mdi.setActiveSubWindow(doc)
         self.document_activated(doc)
         return doc
 
@@ -459,10 +427,11 @@ class ClassicMainWindow(MainWindow):
                 saved = self.user_defaults("overlay" if self._is_overlay(key) else "graph")
                 if saved["options"]:
                     self.plot_options[key] = validate_plot_options(fill_manual_limits(self, validate_plot_options(saved["options"])))
-            title = self._overlay_title(key) if self._is_overlay(key) else Path(key).name
+            source = next((c.dataset for c in self.curves if c.dataset.document_key == key), None)
+            title = self._overlay_title(key) if self._is_overlay(key) else source.display_name if source else Path(key).name
             options = self.plot_options.setdefault(key, default_plot_options())
             if options["x_domain"] is None:
-                candidates = [c for c in self.curves if self._is_overlay(key) or str(c.dataset.path) == key]
+                candidates = [c for c in self.curves if self._is_overlay(key) or c.dataset.document_key == key]
                 options["x_domain"] = self.domain if self.domain != "signal" or all(c.x_signal_index is not None for c in candidates) else "temperature"
             doc = PlotDocument(self, key, title)
             self.documents[key] = doc
@@ -501,7 +470,7 @@ class ClassicMainWindow(MainWindow):
                 if self._is_overlay(key) and options.get("overlay_members") is not None:
                     options["overlay_members"]=[uid for uid in options["overlay_members"] if uid in valid_uids]
                     if key in self.documents:self.documents[key].curve_uids=list(options["overlay_members"])
-            valid = {str(c.dataset.path) for c in self.curves}
+            valid = {c.dataset.document_key for c in self.curves}
             for key in list(self.documents):
                 if not self._is_overlay(key) and key not in valid:
                     doc = self.documents.pop(key)
@@ -513,7 +482,7 @@ class ClassicMainWindow(MainWindow):
                     self.mdi.removeSubWindow(doc)
                     doc.deleteLater()
             for c in self.curves:
-                key = str(c.dataset.path)
+                key = c.dataset.document_key
                 if key not in self.documents:
                     self._document(key).show()
         finally:
@@ -544,9 +513,10 @@ class ClassicMainWindow(MainWindow):
                 self.domain_box.blockSignals(True); self.domain_box.setCurrentIndex(("temperature", "time", "signal").index(domain)); self.domain_box.blockSignals(False)
             if not self._is_overlay(doc.key):
                 current = self.selected()
-                index = self.curves.index(current) if current is not None and str(current.dataset.path) == doc.key else next((i for i, c in enumerate(self.curves) if str(c.dataset.path) == doc.key), None)
+                index = self.curves.index(current) if current is not None and current.dataset.document_key == doc.key else next((i for i, c in enumerate(self.curves) if c.dataset.document_key == doc.key), None)
                 if index is not None:
-                    self.files.setCurrentItem(self.files.topLevelItem(index))
+                    with QSignalBlocker(self.files):
+                        self.files.setCurrentItem(self.files.topLevelItem(index))
             MainWindow.selection_changed(self)
         finally:
             self._activating = False
@@ -558,7 +528,7 @@ class ClassicMainWindow(MainWindow):
         if hasattr(self, "mdi") and not self._activating and not self._syncing_documents and c:
             active = self.active_document()
             if not isinstance(active, PlotDocument) or not self._is_overlay(active.key):
-                doc = self.documents.get(str(c.dataset.path))
+                doc = self.documents.get(c.dataset.document_key)
                 if doc and doc is not active:
                     self.mdi.setActiveSubWindow(doc)
         MainWindow.selection_changed(self)
@@ -577,7 +547,7 @@ class ClassicMainWindow(MainWindow):
             return []
         if self._is_overlay(active.key):
             return [c for c in self._document_curves(active) if c.visible and c.overlay_enabled and len(c.active_rows)>=2]
-        return [c for c in self.curves if c.visible and str(c.dataset.path) == active.key and c.normal_enabled and len(c.active_rows)>=2]
+        return [c for c in self.curves if c.visible and c.dataset.document_key == active.key and c.normal_enabled and len(c.active_rows)>=2]
 
     def display_x_offset(self,curve):
         if curve is None or not hasattr(self,"mdi"):return 0.
@@ -668,16 +638,16 @@ class ClassicMainWindow(MainWindow):
     def apply_data_limits(self,dataset,spec,*,curve_uid=None):
         from copy import deepcopy
         from .data_limits import limits_proposal
-        if not any(c.dataset.path==dataset.path for c in self.curves):raise ValueError("此数据文件已关闭")
-        if curve_uid is not None and not any(c.uid==curve_uid and c.dataset.path==dataset.path for c in self.curves):raise ValueError("此曲线已关闭")
+        if not any(c.dataset.document_key==dataset.document_key for c in self.curves):raise ValueError("此数据文件已关闭")
+        if curve_uid is not None and not any(c.uid==curve_uid and c.dataset.document_key==dataset.document_key for c in self.curves):raise ValueError("此曲线已关闭")
         draft=limits_proposal(self.curves,dataset,spec,self.domain,curve_uid=curve_uid)
         source=[c for c,old in zip(draft,self.curves) if c is not old]
         selected=self.selected();uid=curve_uid or (selected.uid if selected else source[0].uid)
         range_keys=("auto_x","auto_y","x_limits","y_limits","x_ticks","y_ticks")
-        keys=[key for key in (str(dataset.path),) if key in self.plot_options]
+        keys=[key for key in (dataset.document_key,) if key in self.plot_options]
         keys += [key for key in self.plot_options if self._is_overlay(key)]
         before={key:{name:deepcopy(self.plot_options[key][name]) for name in range_keys} for key in keys}
-        transaction={"source":str(dataset.path),"checkpoints":{c.uid:c.history[-1] for c in source},"ranges":before}
+        transaction={"source":dataset.document_key,"checkpoints":{c.uid:c.history[-1] for c in source},"ranges":before}
         self.cancel_measurement(redraw=False);self.curves=draft
         for key in keys:
             self.plot_options[key].update(auto_x=True,auto_y=[True]*4,x_limits=None,y_limits=[None]*4,x_ticks=None,y_ticks=[None]*4)
@@ -709,6 +679,7 @@ class ClassicMainWindow(MainWindow):
         self.touch();self.selection_changed()
 
     def redraw(self, *_):
+        if getattr(self, '_import_batch', False): return
         if not hasattr(self, "mdi"):
             return
         active = self.active_document()
@@ -798,7 +769,7 @@ class ClassicMainWindow(MainWindow):
                 return "; ".join(ds.metadata.get(name, []))
             self.figure.text(8/1920, 1, options["title"] or f"样品: {curves[0].sample_name}", ha="left", va="top", fontsize=22*scale, fontfamily=PLOT_FONTS, color="black", parse_math=False, gid="tma-header")
             module = (field("Module").split() or ["TMA"])[0]
-            source = str(ds.path.resolve())
+            source = str(ds.path)
             self.figure.text(.996, 1, f"{module} 文件: {source}", ha="right", va="top", fontsize=22*scale, fontfamily=PLOT_FONTS, color="black", parse_math=False, gid="tma-source")
         self.figure.text(.996, .017, "Power By ZzzHe", ha="right", fontsize=20*scale, fontfamily="Times New Roman")
         if self._is_overlay(active.key): active.setWindowTitle(options["window_name"] or self._overlay_title(active.key))
@@ -1165,11 +1136,21 @@ class ClassicMainWindow(MainWindow):
             self.redraw()
 
     def finish_import(self, datasets, failures):
-        before = {str(c.dataset.path) for c in self.curves}
+        self._import_batch = True
+        try:
+            self._finish_import_batch(datasets, failures)
+        finally:
+            self._import_batch = False
+        if datasets:
+            self._show_document(datasets[-1].document_key)
+        else: self.redraw()
+
+    def _finish_import_batch(self, datasets, failures):
+        before = {c.dataset.document_key for c in self.curves}
         rules=self.smoothing_rules()
         MainWindow.finish_import(self, datasets, failures)
         for i, c in enumerate(self.curves):
-            if str(c.dataset.path) not in before:
+            if c.dataset.document_key not in before:
                 c.color = "#000000"
                 c.width = .45
         if datasets:
@@ -1181,12 +1162,12 @@ class ClassicMainWindow(MainWindow):
                     from .signals_dialog import build_proposal
                     try:
                         self.curves = build_proposal(self.curves, dataset, template)
-                        options = self.plot_options.setdefault(str(dataset.path), default_plot_options())
+                        options = self.plot_options.setdefault(dataset.document_key, default_plot_options())
                         options.update(x_domain=template["x"]["domain"], secondary_x=template["secondary"])
                     except ValueError as exc: self.log.appendPlainText(f"信号默认设置未应用于{dataset.path.name}：{exc}")
                 if rules:
                     from .data_limits import reusable_smoothing
-                    domain=self.plot_options.get(str(dataset.path),{}).get("x_domain") or self.domain
+                    domain=self.plot_options.get(dataset.document_key,{}).get("x_domain") or self.domain
                     for curve in [c for c in self.curves if c.dataset is dataset and c.normal_enabled]:
                         try:
                             values=reusable_smoothing(curve,rules,domain)
@@ -1194,18 +1175,13 @@ class ClassicMainWindow(MainWindow):
                                 for key,value in values.items():setattr(curve,key,value)
                         except ValueError as exc:self.log.appendPlainText(f"平滑复用未应用于{dataset.path.name}：{exc}")
         self.sync_documents()
-        # Populate each independent plot, then leave the last imported file active.
-        for ds in datasets:
-            doc = self.documents[str(ds.path)]
-            self.mdi.setActiveSubWindow(doc)
-            self.document_activated(doc)
+        # Hidden documents draw when activated; import paints only the last one.
         self.rebuild_files()
-        if datasets:
-            self.documents[str(datasets[-1].path)].showMaximized()
         self.statusBar().clearMessage()
 
     def open_files(self):
-        paths, _ = QFileDialog.getOpenFileNames(self, "打开数据文件", "", "TA 数据 / TMA 会话 (*.0?? *.1?? *.2?? *.3?? *.4?? *.5?? *.6?? *.7?? *.8?? *.9?? *.tai *.txt *.tmas);;所有文件 (*)")
+        from .path_settings import import_folder
+        paths, _ = QFileDialog.getOpenFileNames(self, "打开数据文件", import_folder(), "TA 数据 / TMA 会话 (*.0?? *.1?? *.2?? *.3?? *.4?? *.5?? *.6?? *.7?? *.8?? *.9?? *.tai *.txt *.tmas);;所有文件 (*)")
         if not paths:
             return
         sessions = [p for p in paths if Path(p).suffix.casefold() == ".tmas"]
@@ -1248,7 +1224,7 @@ class ClassicMainWindow(MainWindow):
 
     def touch(self):
         self.dirty = True
-        self.setWindowTitle(f"Universal Analysis — TMA Studio {__version__} *")
+        self.setWindowTitle(f"{APP_NAME} {__version__} *")
 
     def _update_measurement_controls(self):
         MainWindow._update_measurement_controls(self)
@@ -1315,7 +1291,7 @@ class ClassicMainWindow(MainWindow):
     def show_normal(self):
         c = self.selected()
         if c:
-            doc = self._document(str(c.dataset.path))
+            doc = self._document(c.dataset.document_key)
             doc.showMaximized()
             self.mdi.setActiveSubWindow(doc)
             self.document_activated(doc)
@@ -1326,7 +1302,11 @@ class ClassicMainWindow(MainWindow):
         self.cancel_measurement(redraw=False)
         self.documents.pop(doc.key, None)
         if not self._is_overlay(doc.key):
-            self.curves = [c for c in self.curves if str(c.dataset.path) != doc.key]
+            removed = {c.uid for c in self.curves if c.dataset.document_key == doc.key}
+            self.curves = [c for c in self.curves if c.dataset.document_key != doc.key]
+            self.results[:] = [r for r in self.results if r.get('curve_id') not in removed]
+            self.refresh_results()
+            self.plot_options.pop(doc.key, None)
             self.touch()
             self.rebuild_files()
             self.sync_documents()
@@ -1345,6 +1325,7 @@ class ClassicMainWindow(MainWindow):
             active.close()
 
     def close_all_documents(self):
+        self._opening_counts = {}
         self._limits_undo.clear()
         self._overlay_seq = 0
         self._session_smooth_rules=self.smoothing_rules()
@@ -1379,14 +1360,17 @@ class ClassicMainWindow(MainWindow):
         if key not in self.dialogs:
             dialog = QDialog(self)
             dialog.setWindowTitle(title)
-            dialog.setWindowFlags(dialog.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+            # In PySide, ~WindowType masks out flags beyond the enum mask,
+            # including WindowCloseButtonHint. Toggle flags individually.
+            dialog.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
+            dialog.setWindowFlag(Qt.WindowType.WindowCloseButtonHint, True)
             layout = QVBoxLayout(dialog)
             for widget in widgets:
                 widget.setParent(dialog)
                 widget.show()
                 layout.addWidget(widget)
             close_buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-            close_buttons.rejected.connect(dialog.hide)
+            close_buttons.rejected.connect(dialog.reject)
             layout.addWidget(close_buttons)
             dialog.resize(*size)
             self.dialogs[key] = dialog
@@ -1616,7 +1600,7 @@ class ClassicMainWindow(MainWindow):
         if not states:return
         changed={uid for uid,state in states.items() if 'unit_options' in state}
         sources={(c.dataset.path.name,c.dataset.sha256) for c in self.curves if c.uid in changed}
-        paths={str(c.dataset.path) for c in self.curves if c.uid in changed}
+        paths={c.dataset.document_key for c in self.curves if c.uid in changed}
         if self._pending_measurement is not None and self._pending_measurement.get('curve_id') in changed:self.cancel_measurement(redraw=False)
         linked={c.derived['parent_id'] for c in self.curves if c.derived is not None}
         self.results[:]=[r for r in self.results if r.get('analysis_id') in linked or (r.get('curve_id') not in changed if r.get('curve_id') else (r['file'],r['sha256']) not in sources)]
@@ -1630,7 +1614,7 @@ class ClassicMainWindow(MainWindow):
     def apply_sample_size(self,curve,size):
         from dataclasses import replace
         from .dimension_units import reconcile_views,processing_state
-        ids={c.uid for c in self.curves if c.dataset.path==curve.dataset.path and c.dataset.sha256==curve.dataset.sha256}
+        ids={c.uid for c in self.curves if c.dataset.document_key==curve.dataset.document_key and c.dataset.sha256==curve.dataset.sha256}
         copies={c.uid:replace(c,sample_size_mm=size if c.uid in ids else c.sample_size_mm) for c in self.curves}
         removed={c.uid for c in self.curves if c.uid in ids and c.derived is not None}
         dependent={c.uid for c in self.curves if c.uid in ids and c.unit_options is not None and c.uid not in removed}
@@ -1646,7 +1630,6 @@ class ClassicMainWindow(MainWindow):
             if peer.uid in ids:peer.sample_size_mm=size;peer._x_cache=None
             for key,state in states.get(peer.uid,{}).items():setattr(peer,key,state)
         if plots is not None:self.plot_options.clear();self.plot_options.update(plots)
-        if 'Sample' in changes:self.update_curve_mass(curve)
         self.remove_derived_curves(removed)
         self.touch();self.refresh_results();self.selection_changed()
 
@@ -1676,10 +1659,11 @@ class ClassicMainWindow(MainWindow):
         if size_changed:
             if self._pending_measurement is not None and self._pending_measurement.get('curve_id') in ids:self.cancel_measurement(redraw=False)
             self.results[:]=[r for r in self.results if (r.get('curve_id') not in ids if r.get('curve_id') else not (r['sha256']==curve.dataset.sha256 and r['file']==curve.dataset.path.name))]
-            self._limits_undo={key:value for key,value in self._limits_undo.items() if value['source']!=str(curve.dataset.path)}
+            self._limits_undo={key:value for key,value in self._limits_undo.items() if value['source']!=curve.dataset.document_key}
         for peer in self.curves:
             if peer.uid in proposals:
                 for key,value in proposals[peer.uid].items():setattr(peer,key,value)
+        if 'Sample' in changes:self.update_curve_mass(curve)
         if plots is not None:self.plot_options.clear();self.plot_options.update(plots)
         self.remove_derived_curves(removed)
         self.touch();self.refresh_results();self.rebuild_files();self.selection_changed()

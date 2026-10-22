@@ -151,7 +151,7 @@ def limits_proposal(curves,dataset,spec,domain,*,curve_uid=None):
     derived_only=target is not None and target.derived is not None
     rows=select_rows(target.logical_dataset if derived_only else dataset,spec);draft=[]
     for curve in curves:
-        if curve.dataset.path!=dataset.path or derived_only and curve.uid!=curve_uid:draft.append(curve);continue
+        if curve.dataset.document_key!=dataset.document_key or derived_only and curve.uid!=curve_uid:draft.append(curve);continue
         candidate=replace(curve,operations=list(curve.operations),history=list(curve.history))
         candidate.checkpoint()
         candidate.data_indices=deepcopy(rows);candidate.data_limit_spec=deepcopy(spec)

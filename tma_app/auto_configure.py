@@ -12,8 +12,8 @@ from .overlay_settings import default_auto_configure, validate_auto_configure, a
 
 def optimize_legend(curves, options):
     """Independent minimum-field policy; exact vendor tie-breaking is unknown."""
-    datasets = {str(c.dataset.path): c.dataset for c in curves}
-    names = [next(c.display_filename for c in curves if str(c.dataset.path) == key) for key in datasets]
+    datasets = {c.dataset.document_key: c.dataset for c in curves}
+    names = [next(c.display_filename for c in curves if c.dataset.document_key == key) for key in datasets]
     samples = [ds.name for ds in datasets.values()]
     for curve in curves: curve.show_legend = curve.show_legend_text = True
     options["legend"] = True
@@ -25,13 +25,13 @@ def optimize_legend(curves, options):
     else:
         options.update(legend_file=False, legend_text=True)
         paths = list(datasets)
-        labels = {path: Path(path).name for path in paths}
+        labels = {path: datasets[path].display_name for path in paths}
         depth = 1
         while len(set(labels.values())) < len(paths):
             depth += 1
-            labels = {path: str(Path(*Path(path).parts[-depth:])) for path in paths}
-            if depth > max(len(Path(path).parts) for path in paths): break
-        for curve in curves: curve.legend_text = labels[str(curve.dataset.path)]
+            labels = {key: str(Path(*datasets[key].path.parts[-depth:])) + (f" [{datasets[key].opening_index}]" if datasets[key].opening_index>1 else "") for key in paths}
+            if depth > max(len(datasets[key].path.parts) for key in paths): break
+        for curve in curves: curve.legend_text = labels[curve.dataset.document_key]
 
 
 def optimize_axis_labels(curves):
@@ -52,16 +52,16 @@ class AutoConfigureDialog(QDialog):
         base = default_plot_options(); base.update(owner.user_defaults("overlay")["options"])
         self.key = owner._overlay_key_for_edit() if hasattr(owner, "_overlay_key_for_edit") else "__overlay__"
         self.options = validate_plot_options(owner.plot_options.get(self.key, base))
-        self.sources = list({str(c.dataset.path): c.dataset for c in owner.curves}.values())
+        self.sources = list({c.dataset.document_key: c.dataset for c in owner.curves}.values())
         self.setObjectName("AutoConfigureForm"); self.setWindowTitle("叠图自动配置")
         self.setFixedSize(631, 355); self.setModal(True)
         files_group = QGroupBox("文件", self); files_group.setGeometry(10, 8, 299, 189)
         self.files = QListWidget(files_group); self.files.setGeometry(8, 17, 283, 164)
         self.file_items = []
-        selected = {str(c.dataset.path) for c in owner.visible_curves()}
+        selected = {c.dataset.document_key for c in owner.visible_curves()}
         for source in self.sources:
-            item = QListWidgetItem(source.path.name); item.setToolTip(str(source.path)); item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(Qt.CheckState.Checked if str(source.path) in selected else Qt.CheckState.Unchecked)
+            item = QListWidgetItem(source.display_name); item.setToolTip(str(source.path)); item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked if source.document_key in selected else Qt.CheckState.Unchecked)
             self.files.addItem(item); self.file_items.append(item)
         signals = QGroupBox("信号", self); signals.setGeometry(317, 8, 60, 189)
         self.signal_boxes = []
@@ -112,7 +112,7 @@ class AutoConfigureDialog(QDialog):
     def accept(self):
         try:
             config = self.collect()
-            selected = {str(source.path) for source, item in zip(self.sources, self.file_items) if item.checkState() == Qt.CheckState.Checked}
+            selected = {source.document_key for source, item in zip(self.sources, self.file_items) if item.checkState() == Qt.CheckState.Checked}
             if not selected: raise ValueError("请选择要叠加的文件")
             draft = [replace(c, operations=list(c.operations), history=list(c.history)) for c in self.owner.curves]
             for curve in draft:
@@ -125,8 +125,8 @@ class AutoConfigureDialog(QDialog):
                 for key,value in details.items():setattr(curve,key,value)
             curves, used = [], set()
             for curve in draft:
-                identity = (str(curve.dataset.path), curve.y_index, curve.result_unit, curve.uid if curve.derived is not None else None)
-                included = str(curve.dataset.path) in selected and config["signals"][curve.axis] and curve.visible and curve.normal_enabled and identity not in used
+                identity = (curve.dataset.document_key, curve.y_index, curve.result_unit, curve.uid if curve.derived is not None else None)
+                included = curve.dataset.document_key in selected and config["signals"][curve.axis] and curve.visible and curve.normal_enabled and identity not in used
                 curve.overlay_enabled = included
                 if included: curves.append(curve); used.add(identity)
             if not curves: raise ValueError("所选文件没有勾选的已绘制信号")

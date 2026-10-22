@@ -73,7 +73,8 @@ def test_settings_save_cancel_match_sample_name_and_preserve_active_file(ui,tmp_
     assert '12.5 mg' in dialog.feedback.text()
     dialog.reject();assert settings.load_paths()['m']=='' and 'LookupMass' not in curve.dataset.metadata
     dialog=ui.show_path_settings();dialog.paths.item(0,1).setText(str(path));dialog.add_path()
-    dialog.paths.item(1,0).setText('future');dialog.paths.item(1,1).setText(str(tmp_path/'future'));dialog.accept()
+    added=dialog.paths.rowCount()-1
+    dialog.paths.item(added,0).setText('future');dialog.paths.item(added,1).setText(str(tmp_path/'future'));dialog.accept()
     assert settings.load_paths()['future']==str(tmp_path/'future')
     assert ui.selected() is curve and ui.active_document() is doc
     assert curve.dataset.metadata['LookupMass']==['12.5'] and curve.dataset.metadata['LookupMassUnit']==['mg']
@@ -82,3 +83,34 @@ def test_settings_save_cancel_match_sample_name_and_preserve_active_file(ui,tmp_
     np.testing.assert_array_equal(original,curve.dataset.values)
     session=tmp_path/'mass.tmas';save_session(session,ui.curves,ui.domain,ui.results,ui.plot_options)
     assert load_session(session)[0][0].dataset.metadata['LookupMass']==['12.5']
+
+
+def test_default_folder_picker_save_restart_and_import(ui,tmp_path,monkeypatch):
+    from PySide6.QtWidgets import QFileDialog
+    from tma_app.classic import ClassicMainWindow
+    from tma_app.app import MainWindow
+    desktop=tmp_path/'Desktop';desktop.mkdir()
+    def forbid_mass_refresh():raise AssertionError('Folder-only save must not reread the weighing table')
+    monkeypatch.setattr(ui,'refresh_mass_lookup',forbid_mass_refresh)
+    dialog=ui.show_path_settings();assert dialog.paths.item(1,0).text()=='默认打开文件夹'
+    monkeypatch.setattr(QFileDialog,'getExistingDirectory',lambda *a:str(desktop))
+    dialog.paths.setCurrentCell(1,1);dialog.choose_file();dialog.accept()
+    assert settings.load_paths()['open_folder']==str(desktop)
+    initial=[]
+    def pick(*args):initial.append(args[2]);return [],''
+    monkeypatch.setattr(QFileDialog,'getOpenFileNames',pick)
+    ui.open_files()
+    restarted=ClassicMainWindow()
+    try:restarted.open_files()
+    finally:restarted.dirty=False;restarted.close()
+    MainWindow.open_files(ui)
+    assert initial==[str(desktop)]*3
+
+
+def test_folder_cancel_clear_and_preserve_other_paths(ui,tmp_path):
+    settings.save_paths({'m':'mass.xlsx','open_folder':str(tmp_path),'future':'next'})
+    dialog=ui.show_path_settings();dialog.paths.item(1,1).setText('cancelled');dialog.reject()
+    assert settings.import_folder()==str(tmp_path)
+    dialog=ui.show_path_settings();dialog.paths.item(1,1).setText('');dialog.accept()
+    assert settings.import_folder()==''
+    assert settings.load_paths()=={'m':'mass.xlsx','open_folder':'','future':'next'}

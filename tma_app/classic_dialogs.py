@@ -251,7 +251,7 @@ class AddCurvesDialog(QDialog):
         self.setWindowTitle("添加曲线")
         self.source_curves=list(curves)
         self.resize(630, 349)
-        self.datasets = list({str(c.dataset.path): c.dataset for c in curves}.values())
+        self.datasets = list({c.dataset.document_key: c.dataset for c in curves}.values())
         self.axis = axis
         self.reference = next((c.result_unit for c in curves if c.overlay_enabled and c.axis == axis), None)
         self.selected_curves = []
@@ -284,7 +284,7 @@ class AddCurvesDialog(QDialog):
     def refresh_files(self):
         self.files.blockSignals(True); self.files.clear()
         for ds in self.datasets:
-            item = QListWidgetItem(ds.path.name)
+            item = QListWidgetItem(ds.display_name)
             item.setToolTip(str(ds.path)); item.setCheckState(Qt.CheckState.Checked)
             self.files.addItem(item)
         self.files.blockSignals(False); self.refresh_signals()
@@ -308,7 +308,8 @@ class AddCurvesDialog(QDialog):
             self.signals.setCurrentRow(labels.index(old) if old in labels else 0)
 
     def open_files(self):
-        paths, _ = QFileDialog.getOpenFileNames(self, "添加数据文件", "", "TA 数据 (*.0?? *.1?? *.2?? *.3?? *.4?? *.5?? *.6?? *.7?? *.8?? *.9?? *.txt *.tai);;所有文件 (*)")
+        from .path_settings import import_folder
+        paths, _ = QFileDialog.getOpenFileNames(self, "添加数据文件", import_folder(), "TA 数据 (*.0?? *.1?? *.2?? *.3?? *.4?? *.5?? *.6?? *.7?? *.8?? *.9?? *.txt *.tai);;所有文件 (*)")
         failures = []
         known = {str(ds.path.resolve()) for ds in self.datasets}
         for path in paths:
@@ -330,7 +331,7 @@ class AddCurvesDialog(QDialog):
             self.error.setText("以下文件没有所选信号：" + "、".join(missing)); return
         candidates = [Curve(ds, y_index=next(i for i, s in enumerate(ds.signals) if s.label == label), axis=self.axis, color="#000000", width=.45) for ds in self.checked_datasets()]
         for candidate in candidates:
-            existing=next((c for c in self.source_curves if c.dataset.path==candidate.dataset.path and c.normal_enabled and c.derived is None),None)
+            existing=next((c for c in self.source_curves if c.dataset.document_key==candidate.dataset.document_key and c.normal_enabled and c.derived is None),None)
             if existing:
                 candidate.data_indices=deepcopy(existing.data_indices);candidate.data_limit_spec=deepcopy(existing.data_limit_spec);candidate.reset_time=existing.reset_time
                 candidate.x_signal_index,candidate.x_signal_type,candidate.x_smooth_width=existing.x_signal_index,existing.x_signal_type,existing.x_smooth_width
@@ -416,7 +417,7 @@ class OverlayOptionsDialog(QDialog):
             color.setCurrentIndex(max(0, color.findData(curve.color if curve else "#000000")))
             offset = number(value=curve.display_y_offset(curve.overlay_offset) if curve else 0, decimals=4); offset.setButtonSymbols(offset.ButtonSymbols.NoButtons)
             filename = QLineEdit(curve.display_filename if curve else ""); filename.setMaxLength(4096)
-            filename.setToolTip(str(curve.dataset.path) + "\n" + curve.result_label if curve else "")
+            filename.setToolTip(curve.dataset.document_key + "\n" + curve.result_label if curve else "")
             legend = QWidget(); lr = QHBoxLayout(legend); lr.setContentsMargins(0, 0, 0, 0); lr.setSpacing(1)
             check = QCheckBox(); check.setChecked(curve.show_legend_text if curve else False)
             text = QLineEdit(curve.legend_text if curve else ""); text.setMaxLength(32)
@@ -484,7 +485,7 @@ class OverlayOptionsDialog(QDialog):
         selected = dialog.selected_curves
         additions = []
         for c in selected:
-            match = next((e for e in self.draft if e.dataset.path == c.dataset.path and e.y_index == c.y_index and not e.operations and e.axis == self.axis), None)
+            match = next((e for e in self.draft if e.dataset.document_key == c.dataset.document_key and e.y_index == c.y_index and not e.operations and e.axis == self.axis), None)
             if match:
                 if not match.overlay_enabled or not match.visible: additions.append(match)
             else: additions.append(c)

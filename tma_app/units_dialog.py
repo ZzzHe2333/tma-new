@@ -80,7 +80,7 @@ class UnitsDialog(QDialog):
             widget.setObjectName(node['name']);widget.setGeometry(p.get('Left',0),p.get('Top',0),p.get('Width',100),p.get('Height',21))
             self.controls[node['name']]=widget
             if kind=='TElComboBox':
-                widget.setEnabled(False);widget.setToolTip('此类单位换算尚未接入');widget.setStyleSheet('QComboBox:disabled {color:#808080;background:#f0f0f0;}')
+                widget.setEnabled(False);widget.setToolTip('此类单位换算尚未接入');widget.setStyleSheet('QComboBox:disabled {color:#aa9daf;background:#f4eff6;}')
             self.render(node['children'],widget)
 
     def members(self):

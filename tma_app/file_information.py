@@ -54,7 +54,7 @@ def snapshot(curve):
 def prepare_edit(curves,curve,text_changes,size_changed=False,size=None):
     """Validate and read before proposing any live change; only known TMA size is editable."""
     changes=validate_text_overrides(text_changes)
-    peers=[c for c in curves if c.dataset.path==curve.dataset.path and c.dataset.sha256==curve.dataset.sha256]
+    peers=[c for c in curves if c.dataset.document_key==curve.dataset.document_key and c.dataset.sha256==curve.dataset.sha256]
     if not peers:raise ValueError('文件已关闭')
     if size_changed:size=nonnegative_size(size)
     new_info=dict(curve.file_info)

@@ -24,7 +24,7 @@ def verify_routes(datasets,application,output):
             datasets=list(datasets)[:3]
             w.finish_import(datasets,[]);source=w.curves[min(1,len(w.curves)-1)]
             raw={c.uid:c.dataset.values.copy() for c in w.curves}
-            document=w._show_document(str(source.dataset.path));w.refresh_curve(source.uid)
+            document=w._show_document(source.dataset.document_key);w.refresh_curve(source.uid)
             peak=w.start_peak_integration('peak_linear');w.confirm_measurement()
             if peak not in w.results:raise ValueError('Real running-integral parent was not confirmed')
             e=w.start_running_integral();menu=w.create_measurement_menu()
@@ -67,7 +67,7 @@ def verify_routes(datasets,application,output):
             multi,_,_,multi_plots=load_session(multi_session,include_plot_options=True)
             if not ids<=set(multi_plots[w.active_document().key]['overlay_members']):raise ValueError('Distinct derived quantities were lost in the overlay session')
             # Native Slope uses two graph handles and the exact manual editor.
-            w._show_document(str(source.dataset.path));w.refresh_curve(source.uid)
+            w._show_document(source.dataset.document_key);w.refresh_curve(source.uid)
             current=next(c for c in w.curves if c.uid==source.uid)
             w.classic_actions['Slope1'].trigger();slope=w._pending_measurement
             if slope is None or slope['kind']!='slope' or len(slope['interactive']['indices'])!=2:raise ValueError('Slope did not start two graph markers')
@@ -99,10 +99,10 @@ def verify_routes(datasets,application,output):
             w.classic_actions['DeletePeak1'].trigger();delete=w._pending_measurement
             if delete is None or delete.get('purpose')!='delete_peak' or len(delete['interactive']['indices'])!=1:raise ValueError('Delete Peak did not start its native single marker')
             if len(datasets)>1:
-                other=next(c for c in w.curves if c.derived is None and c.dataset.path!=source.dataset.path)
-                w._show_document(str(other.dataset.path));w.confirm_measurement()
+                other=next(c for c in w.curves if c.derived is None and c.dataset.document_key!=source.dataset.document_key)
+                w._show_document(other.dataset.document_key);w.confirm_measurement()
                 if w._pending_measurement is not delete or not any(r is peak for r in w.results):raise ValueError('Another document deleted the selected peak')
-                w._show_document(str(source.dataset.path));w.refresh_curve(source.uid)
+                w._show_document(source.dataset.document_key);w.refresh_curve(source.uid)
             w.cancel_measurement()
             if not ids<=set(c.uid for c in w.curves) or not any(r is peak for r in w.results):raise ValueError('Cancel deleted a peak or derived quantity')
             w.start_delete_peak();w.canvas.draw();w.grab().save(str(output.with_suffix('.delete_peak_marker.png')))

@@ -1,3 +1,4 @@
-"""TMA Studio — independent thermal analysis workspace."""
+"""ZzzHe TMA Analysis — independent thermal analysis workspace."""
 
-__version__ = "0.27.1"
+APP_NAME = "ZzzHe TMA Analysis"
+__version__ = "0.29.0"

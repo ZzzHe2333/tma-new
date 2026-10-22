@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import uuid
 from copy import deepcopy
 
 import numpy as np
@@ -28,7 +29,8 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolb
 from matplotlib.widgets import SpanSelector
 from matplotlib.text import Text
 
-from . import __version__
+from . import __version__, APP_NAME
+from .theme import CUTE_STYLE, cute_palette, app_icon
 from .reader import read_dataset
 from .numerics import analyze, process_signal
 from .workspace import Curve, PALETTE, save_session, load_session
@@ -39,26 +41,7 @@ from .legacy_t1_t2_h import format_plot_temp_c
 from .graph_options import render_style
 
 
-STYLE = """
-QMainWindow, QWidget { background: #f5f7fb; color: #25334a; font-family: 'Microsoft YaHei'; font-size: 12px; }
-QMenuBar, QMenu, QToolBar { background: white; }
-QPushButton { background: white; border: 1px solid #d8dfeb; border-radius: 5px; padding: 7px 10px; }
-QPushButton:hover { background: #eaf1ff; border-color: #a2bdec; }
-QPushButton#primary { background: #2469d9; color: white; border: none; font-weight: 600; }
-QPushButton#primary:hover { background: #195abe; }
-QPushButton:disabled { color: #a7b0bf; }
-QTreeWidget, QTableView, QPlainTextEdit { background: white; border: 1px solid #e0e5ef; border-radius: 5px; selection-background-color: #e4efff; selection-color: #17498f; }
-QHeaderView::section { background: #f0f4fa; border: none; border-bottom: 1px solid #e0e5ef; padding: 7px; }
-QGroupBox { background: white; border: 1px solid #e0e5ef; border-radius: 6px; margin-top: 14px; padding: 13px 10px 10px; font-weight: 600; }
-QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 5px; }
-QComboBox, QDoubleSpinBox, QSpinBox { background: white; border: 1px solid #d8dfeb; border-radius: 4px; padding: 5px; min-height: 18px; }
-QTabWidget::pane { border: 1px solid #e0e5ef; background: white; }
-QTabBar::tab { background: #edf1f7; padding: 9px 18px; margin-right: 2px; }
-QTabBar::tab:selected { background: white; color: #2469d9; }
-QStatusBar { background: white; color: #617087; }
-QSplitter::handle { background: #e7ebf2; }
-QLabel#muted { color: #78859a; }
-"""
+STYLE = CUTE_STYLE
 
 
 def number(minimum=-1e12, maximum=1e12, value=0, decimals=4):
@@ -120,6 +103,8 @@ class DataModel(QAbstractTableModel):
 
 class ImportWorker(QThread):
     completed = QtSignal(object, object)
+    progress = QtSignal(str)
+    mass_ready = QtSignal(str, str, str, object)
 
     def __init__(self, paths):
         super().__init__()
@@ -127,12 +112,27 @@ class ImportWorker(QThread):
 
     def run(self):
         datasets, failures = [], []
+        from .mass_lookup import lookup_record, MassMatch, configured_source
+        cache = {}
         for path in self.paths:
             try:
-                datasets.append(read_dataset(path))
+                self.progress.emit(f"正在读取 {Path(path).name}…")
+                key = os.path.normcase(os.path.abspath(path))
+                if key not in cache: cache[key] = read_dataset(path)
+                dataset = deepcopy(cache[key])
+                dataset._import_ticket = uuid.uuid4().hex
+                dataset._mass_match = MassMatch(message='m 正在后台匹配')
+                datasets.append(dataset)
             except Exception as exc:
                 failures.append(f"{Path(path).name}: {exc}")
+        requests = [(ds._import_ticket, ds.name) for ds in datasets]
         self.completed.emit(datasets, failures)
+        # Display curves before opening a potentially slow/network weighing table.
+        for ticket, sample in requests:
+            self.progress.emit(f"正在后台匹配 {sample} 的 m…")
+            try: source = configured_source()
+            except (ValueError, OSError): source = ''
+            self.mass_ready.emit(ticket, sample, source, lookup_record(sample, source))
 
 
 class MainWindow(QMainWindow):
@@ -145,7 +145,7 @@ class MainWindow(QMainWindow):
                 QFontDatabase.addApplicationFont(str(font_path))
                 QApplication.instance().setFont(QFont("Microsoft YaHei", 9))
         super().__init__()
-        self.setWindowTitle(f"TMA Studio  {__version__}")
+        self.setWindowTitle(f"ZzzHe TMA Analysis  {__version__}")
         self.resize(1500, 950)
         self.setMinimumSize(1080, 720)
         self.setAcceptDrops(True)
@@ -174,6 +174,7 @@ class MainWindow(QMainWindow):
         filemenu = self.menuBar().addMenu("文件")
         actions = [
             ("导入数据…", self.open_files, "Ctrl+O"),
+            ("批量处理 T1 / T2 / M / H…", self.show_batch_analysis, "Ctrl+Shift+B"),
             ("打开会话…", self.open_session, "Ctrl+Shift+O"),
             ("保存会话…", self.save, "Ctrl+S"),
             ("导出图像…", self.export_plot, "Ctrl+E"),
@@ -199,8 +200,8 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(18, 14, 18, 12)
         layout.setSpacing(12)
         header = QHBoxLayout()
-        brand = QLabel("TMA <b>Studio</b>")
-        brand.setStyleSheet("font-size: 26px; color: #183458;")
+        brand = QLabel("ZzzHe <b>TMA Analysis</b>")
+        brand.setStyleSheet("font-size: 26px; color: #765d86;")
         header.addWidget(brand)
         caption = QLabel("热分析工作台  /  数据 · 曲线 · 分析")
         caption.setObjectName("muted")
@@ -380,11 +381,11 @@ class MainWindow(QMainWindow):
 
     def warn(self, message):
         self.log.appendPlainText(str(message))
-        QMessageBox.warning(self, "TMA Studio", str(message))
+        QMessageBox.warning(self, "ZzzHe TMA Analysis", str(message))
 
     def touch(self):
         self.dirty = True
-        self.setWindowTitle(f"TMA Studio {__version__}  • 未保存")
+        self.setWindowTitle(f"ZzzHe TMA Analysis {__version__}  • 未保存")
 
     def protect_output(self, *paths):
         sources = {str(c.dataset.path.resolve()).casefold() for c in self.curves}
@@ -393,23 +394,22 @@ class MainWindow(QMainWindow):
                 raise ValueError("输出路径与原始数据相同，请选择新的文件名。")
 
     def open_files(self):
-        paths, _ = QFileDialog.getOpenFileNames(self, "导入 TA 数据", "", "TA 数据 (*.0?? *.1?? *.2?? *.3?? *.4?? *.5?? *.6?? *.7?? *.8?? *.9?? *.tai *.txt *.csv);;所有文件 (*)")
+        from .path_settings import import_folder
+        paths, _ = QFileDialog.getOpenFileNames(self, "导入 TA 数据", import_folder(), "TA 数据 (*.0?? *.1?? *.2?? *.3?? *.4?? *.5?? *.6?? *.7?? *.8?? *.9?? *.tai *.txt *.csv);;所有文件 (*)")
         if paths:
             self.import_files(paths)
 
     def import_files(self, paths, synchronous=False):
-        known = {str(c.dataset.path.resolve()).casefold() for c in self.curves}
-        unique = []
-        for p in paths:
-            key = str(Path(p).resolve()).casefold()
-            if key not in known:
-                known.add(key)
-                unique.append(str(p))
-        if not unique:
+        paths = [str(p) for p in paths]
+        if not paths:
             return
+        numeric_paths = [p for p in paths if Path(p).suffix[1:].isdigit()]
+        if not synchronous and len(numeric_paths) > 1:
+            from .path_settings import batch_popup_enabled
+            self.show_batch_analysis(numeric_paths, popup=batch_popup_enabled())
         if synchronous:
             datasets, failures = [], []
-            for path in unique:
+            for path in paths:
                 try:
                     datasets.append(read_dataset(path))
                 except Exception as exc:
@@ -417,20 +417,52 @@ class MainWindow(QMainWindow):
             self.finish_import(datasets, failures)
             return
         if self.worker is not None:
-            self.warn("正在导入数据，请等待当前导入结束。")
+            self._pending_import_paths = getattr(self, '_pending_import_paths', []) + paths
+            self.statusBar().showMessage(f"已排队 {len(self._pending_import_paths)} 个文件…")
             return
-        self.worker = ImportWorker(unique)
+        self.worker = ImportWorker(paths)
         self.worker.completed.connect(self.finish_import)
         self.worker.finished.connect(self.worker_finished)
+        self.worker.progress.connect(self.statusBar().showMessage)
+        self.worker.mass_ready.connect(self.import_mass_ready)
         self.worker.start()
-        self.statusBar().showMessage(f"正在解析 {len(unique)} 个文件…")
+        self.statusBar().showMessage(f"正在解析 {len(paths)} 个文件…")
 
     def worker_finished(self):
         self.worker.deleteLater()
         self.worker = None
+        queued = getattr(self, '_pending_import_paths', [])
+        self._pending_import_paths = []
+        if queued: QTimer.singleShot(0, lambda: self.import_files(queued))
+
+    def show_batch_analysis(self, paths=None, popup=True):
+        from .batch_dialog import BatchDialog
+        dialog = getattr(self, "batch_dialog", None)
+        if dialog is None:
+            dialog = self.batch_dialog = BatchDialog(self)
+        if popup:
+            dialog.show()
+            dialog.raise_()
+        if isinstance(paths, (list, tuple)) and paths:
+            dialog.enqueue_files(paths)
+        return dialog
 
     def finish_import(self, datasets, failures):
-        for ds in datasets:
+        used = {c.dataset.document_key for c in self.curves}
+        counts = self._opening_counts = getattr(self, '_opening_counts', {})
+        for index, ds in enumerate(datasets):
+            path_key = os.path.normcase(str(ds.path))
+            previous_count = max(counts.get(path_key, 0), max((c.dataset.opening_index for c in self.curves if os.path.normcase(str(c.dataset.path)) == path_key), default=0))
+            if ds.document_key in used or (not ds.instance_id and previous_count):
+                ds = deepcopy(ds)
+                ds.instance_id = uuid.uuid4().hex
+                ds.opening_index = previous_count+1
+                datasets[index] = ds
+            counts[path_key] = max(previous_count, ds.opening_index)
+            used.add(ds.document_key)
+            if hasattr(ds, '_import_ticket'):
+                if not hasattr(self, '_import_mass_targets'): self._import_mass_targets = {}
+                self._import_mass_targets[ds._import_ticket] = ds.document_key
             yi = next((i for i, s in enumerate(ds.signals) if "dimension" in s.name.lower()), min(2, len(ds.signals) - 1))
             curve = Curve(ds, y_index=yi, color=PALETTE[len(self.curves) % len(PALETTE)])
             from .dimension_units import dimension_index
@@ -440,7 +472,7 @@ class MainWindow(QMainWindow):
                 except (ValueError,OSError) as exc:self.log.appendPlainText(f'单位默认设置未载入：{exc}')
             self.curves.append(curve)
             self.log.appendPlainText(f"导入 {ds.path.name} · {len(ds.values):,} 点 · SHA256 {ds.sha256}")
-            self.update_curve_mass(curve)
+            self.update_curve_mass(curve, ds.__dict__.pop('_mass_match', None))
             for warning in ds.warnings:
                 self.log.appendPlainText(f"  提示: {warning}")
         if datasets:
@@ -453,9 +485,9 @@ class MainWindow(QMainWindow):
         if failures:
             self.warn("以下文件未能导入：\n" + "\n".join(failures))
 
-    def update_curve_mass(self, curve):
+    def update_curve_mass(self, curve, result=None):
         from .mass_lookup import lookup_record
-        result = lookup_record(curve.sample_name)
+        result = lookup_record(curve.sample_name) if result is None else result
         metadata = curve.dataset.metadata
         for key in ("LookupMass", "LookupMassUnit", "LookupMassSource", "LookupMassSample"): metadata.pop(key, None)
         if result.value is not None:
@@ -463,6 +495,19 @@ class MainWindow(QMainWindow):
             self.log.appendPlainText(f"  m = {result.value:g} {result.unit} · {curve.sample_name} · {result.source}")
         else: self.log.appendPlainText(f"  m：{result.message}")
         return result
+
+    def import_mass_ready(self, ticket, sample, source, result):
+        from .mass_lookup import configured_source
+        key = getattr(self, '_import_mass_targets', {}).pop(ticket, None)
+        curve = next((c for c in self.curves if c.dataset.document_key == key and c.sample_name == sample), None)
+        if curve is None: return
+        try:
+            if configured_source() != source: return
+        except (ValueError, OSError): return
+        previous = curve.dataset.metadata.get('LookupMass')
+        self.update_curve_mass(curve, result)
+        if result.value is not None or previous:
+            self.touch(); self.rebuild_files()
 
     def refresh_mass_lookup(self):
         seen = set(); matched = 0
@@ -477,7 +522,7 @@ class MainWindow(QMainWindow):
         self._updating = True
         self.files.clear()
         for curve in self.curves:
-            item = QTreeWidgetItem([curve.dataset.path.name, f"{curve.sample_count:,}"])
+            item = QTreeWidgetItem([curve.dataset.display_name, f"{curve.sample_count:,}"])
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(0, Qt.CheckState.Checked if curve.visible else Qt.CheckState.Unchecked)
             item.setForeground(0, QColor(curve.color))
@@ -491,7 +536,7 @@ class MainWindow(QMainWindow):
             self.files.addTopLevelItem(item)
             if previous is not None and curve.uid == previous.uid:
                 self.files.setCurrentItem(item)
-        source_count = len({str(c.dataset.path) for c in self.curves})
+        source_count = len({c.dataset.document_key for c in self.curves})
         self.count_label.setText(f"{source_count} 个文件 · {len(self.curves)} 条曲线")
         self._updating = False
         self.selection_changed()
@@ -634,6 +679,7 @@ class MainWindow(QMainWindow):
         return 0.
 
     def redraw(self, *_):
+        if getattr(self, '_import_batch', False): return
         if not hasattr(self, "figure"):
             return
         if hasattr(self, "span"):
@@ -1207,7 +1253,7 @@ class MainWindow(QMainWindow):
             self.selection_changed()
 
     def save(self):
-        path, _ = QFileDialog.getSaveFileName(self, "保存完整会话（内嵌数据）", str(self.session_path or "未命名.tmas"), "TMA Studio 会话 (*.tmas)")
+        path, _ = QFileDialog.getSaveFileName(self, "保存完整会话（内嵌数据）", str(self.session_path or "未命名.tmas"), "ZzzHe TMA Analysis 会话 (*.tmas)")
         if not path:
             return False
         try:
@@ -1217,7 +1263,7 @@ class MainWindow(QMainWindow):
             save_session(path, self.curves, self.domain, self.results, plot_options=self.plot_options)
             self.session_path = Path(path)
             self.dirty = False
-            self.setWindowTitle(f"TMA Studio {__version__}  ·  {Path(path).name}")
+            self.setWindowTitle(f"ZzzHe TMA Analysis {__version__}  ·  {Path(path).name}")
             self.statusBar().showMessage(f"会话已保存：{path}")
             return True
         except Exception as exc:
@@ -1236,7 +1282,8 @@ class MainWindow(QMainWindow):
         if self.worker is not None:
             self.warn("正在导入数据，请等待完成后打开会话。")
             return
-        path, _ = QFileDialog.getOpenFileName(self, "打开会话", "", "TMA Studio 会话 (*.tmas)")
+        from .path_settings import import_folder
+        path, _ = QFileDialog.getOpenFileName(self, "打开会话", import_folder(), "ZzzHe TMA Analysis 会话 (*.tmas)")
         if not path or not self.confirm_discard():
             return
         self.restore_session(path)
@@ -1257,7 +1304,7 @@ class MainWindow(QMainWindow):
             self.redraw()
             self.session_path = Path(path)
             self.dirty = False
-            self.setWindowTitle(f"TMA Studio {__version__}  ·  {Path(path).name}")
+            self.setWindowTitle(f"ZzzHe TMA Analysis {__version__}  ·  {Path(path).name}")
         except Exception as exc:
             self.warn(f"会话未打开：{exc}")
 
@@ -1343,7 +1390,7 @@ class MainWindow(QMainWindow):
         image = base64.b64encode(buffer.getvalue()).decode("ascii")
         payload = escape(json.dumps(self.results, ensure_ascii=False, indent=2))
         sources = "".join(f"<h3>{escape(c.dataset.path.name)} · {escape(c.result_label)}</h3><pre>{escape(json.dumps({'sha256':c.dataset.sha256,'metadata':c.dataset.metadata,'file_information':snapshot(c),'warnings':c.dataset.warnings,'derived':c.derived}, ensure_ascii=False,indent=2))}</pre>" for c in self.curves)
-        Path(path).write_text(f'<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>TMA Studio 报告</title><style>body{{max-width:1100px;margin:40px auto;font:14px sans-serif;color:#25334a}}img{{width:100%}}pre{{white-space:pre-wrap;background:#f4f6fa;padding:18px}}h1{{color:#2469d9}}@media print{{pre{{break-inside:avoid}}}}</style><h1>TMA Studio · 分析报告</h1><p>版本 {__version__} · 分析方法为独立实现。原生峰积分对记录时间积分；旧通用积分使用当前X。基线、始点方法和未验证项见各结果参数。</p><img src="data:image/png;base64,{image}"><h2>分析结果与参数</h2><pre>{payload}</pre><h2>原始数据与实验方法</h2>{sources}</html>', encoding="utf-8")
+        Path(path).write_text(f'<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>ZzzHe TMA Analysis 报告</title><style>body{{max-width:1100px;margin:40px auto;font:14px sans-serif;color:#25334a}}img{{width:100%}}pre{{white-space:pre-wrap;background:#f4f6fa;padding:18px}}h1{{color:#2469d9}}@media print{{pre{{break-inside:avoid}}}}</style><h1>ZzzHe TMA Analysis · 分析报告</h1><p>版本 {__version__} · 分析方法为独立实现。原生峰积分对记录时间积分；旧通用积分使用当前X。基线、始点方法和未验证项见各结果参数。</p><img src="data:image/png;base64,{image}"><h2>分析结果与参数</h2><pre>{payload}</pre><h2>原始数据与实验方法</h2>{sources}</html>', encoding="utf-8")
 
     def export_report(self):
         path, _ = QFileDialog.getSaveFileName(self, "导出可打印报告", "TMA-report.html", "HTML (*.html)")
@@ -1355,7 +1402,7 @@ class MainWindow(QMainWindow):
                 self.warn(str(exc))
 
     def about(self):
-        QMessageBox.information(self, "关于 TMA Studio", f"TMA Studio {__version__}\nPython + PySide6 (Qt) + Matplotlib\n\n独立实现的热分析工作台。支持已验证的 TA TMA 二进制与 StartOfData 文本。\n保留原始采集顺序；区间拟合/求导不自动排序升降温分支。\n\n斜率：最小二乘直线拟合。\n积分：支持直线／水平S形基线；原生峰积分使用记录时间，不直接作为焓。\nCTE：斜率(µm/°C) / 长度(mm) × 1000 ppm/K。\nOnset：区间前段基线与最大绝对斜率附近切线交点，需人工核对。\n\n尚未实现原 UA 的专用 DSC/TGA/DMA 分析、旧会话/宏兼容。")
+        QMessageBox.information(self, "关于 ZzzHe TMA Analysis", f"ZzzHe TMA Analysis {__version__}\nPython + PySide6 (Qt) + Matplotlib\n\n独立实现的热分析工作台。支持已验证的 TA TMA 二进制与 StartOfData 文本。\n保留原始采集顺序；区间拟合/求导不自动排序升降温分支。\n\n斜率：最小二乘直线拟合。\n积分：支持直线／水平S形基线；原生峰积分使用记录时间，不直接作为焓。\nCTE：斜率(µm/°C) / 长度(mm) × 1000 ppm/K。\nOnset：区间前段基线与最大绝对斜率附近切线交点，需人工核对。\n\n尚未实现原 UA 的专用 DSC/TGA/DMA 分析、旧会话/宏兼容。")
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -1371,6 +1418,9 @@ class MainWindow(QMainWindow):
             self.warn("正在导入文件，请等待完成后关闭。")
             event.ignore()
         elif self.confirm_discard():
+            batch = getattr(self, "batch_dialog", None)
+            if batch is not None:
+                batch.prepare_shutdown()
             event.accept()
         else:
             event.ignore()
@@ -1381,7 +1431,9 @@ def main():
     if verify_mode:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     application = QApplication(sys.argv)
-    application.setApplicationName("TMA Studio")
+    application.setApplicationName(APP_NAME)
+    application.setWindowIcon(app_icon())
+    application.setPalette(cute_palette())
     application.setOrganizationName("TMA-New")
     application.setStyle("Fusion")
     if "--modern" in sys.argv:
@@ -1592,7 +1644,7 @@ def main():
                     restore_verify_state(alpha_before);checked_dialogs.append('alpha_three_menu_analyses')
                     info_target=window.current_data_curve();info_doc=window.active_document()
                     info_before=capture_verify_state();info_results=list(window.results)
-                    info_ids={c.uid for c in window.curves if c.dataset.path==info_target.dataset.path}
+                    info_ids={c.uid for c in window.curves if c.dataset.document_key==info_target.dataset.document_key}
                     window.classic_actions['FileInformation1'].trigger();info=window.dialogs['file_information'];application.processEvents()
                     info.grab().save(str(output.with_suffix('.file_information.png')))
                     info.fields['Sample'].setText('Windows file information QA');info.accept()
@@ -1640,7 +1692,7 @@ def main():
                     transition_target=None
                     for candidate in window.curves:
                         if not candidate.normal_enabled or candidate.y_type!='normal':continue
-                        window._show_document(str(candidate.dataset.path))
+                        window._show_document(candidate.dataset.document_key)
                         window.files.setCurrentItem(window.files.topLevelItem(window.curves.index(candidate)))
                         config=transition_defaults();config['midpoint']='half_width'
                         positions=initial_indices(candidate,window.domain,'glass_transition',config)
@@ -1675,7 +1727,7 @@ def main():
                     checked_dialogs.append('native_step_six_marker_manual')
                     restore_verify_state(transition_before)
                     peak_before=capture_verify_state()
-                    window._show_document(str(transition_target.dataset.path))
+                    window._show_document(transition_target.dataset.document_key)
                     window.files.setCurrentItem(window.files.topLevelItem(window.curves.index(transition_target)))
                     options=window.show_analysis_options();options.tabs.setCurrentIndex(1)
                     options.controls['ManualOnsetBox'].setChecked(False);options.controls['InflectionBox'].setChecked(True)
@@ -1713,7 +1765,7 @@ def main():
                     window.cancel_measurement();checked_dialogs.append('native_signal_derivative_fraction_limits')
                     restore_verify_state(peak_before)
                     integration_before=capture_verify_state()
-                    window._show_document(str(transition_target.dataset.path))
+                    window._show_document(transition_target.dataset.document_key)
                     window.files.setCurrentItem(window.files.topLevelItem(window.curves.index(transition_target)))
                     options=window.show_analysis_options();options.tabs.setCurrentIndex(1)
                     options.controls['ManualOnsetBox'].setChecked(False);options.controls['AreaBox'].setChecked(True);options.accept()
@@ -1743,7 +1795,7 @@ def main():
                     checked_dialogs.append('native_four_marker_peak_onset')
                     restore_verify_state(integration_before)
                     sigmoid_before=capture_verify_state()
-                    window._show_document(str(transition_target.dataset.path))
+                    window._show_document(transition_target.dataset.document_key)
                     window.files.setCurrentItem(window.files.topLevelItem(window.curves.index(transition_target)))
                     options=window.show_analysis_options();options.tabs.setCurrentIndex(4)
                     options.controls['SigItterationsBox'].setChecked(True);options.controls['ManualOnsetBox'].setChecked(False)
@@ -1803,7 +1855,7 @@ def main():
                     checked_dialogs.append('native_nonconvergent_sigmoid_preview')
                     from .running_integral_qa import verify_routes
                     from .dimension_units import dimension_index
-                    running_datasets=list({str(c.dataset.path):c.dataset for c in window.curves if c.derived is None and dimension_index(c.dataset)==c.y_index}.values())
+                    running_datasets=list({c.dataset.document_key:c.dataset for c in window.curves if c.derived is None and dimension_index(c.dataset)==c.y_index}.values())
                     if running_datasets:checked_dialogs.extend(verify_routes(running_datasets,application,output))
             else:
                 window.import_files(inputs, synchronous=True)
@@ -1813,7 +1865,7 @@ def main():
                 entry = next((r for r in window.results if "interactive" in r),None)
                 curve = next((c for c in window.curves if entry and c.uid == entry.get("curve_id") and c.normal_enabled),None)
                 if curve is not None:
-                    doc = window.documents[str(curve.dataset.path)]
+                    doc = window.documents[curve.dataset.document_key]
                     window.mdi.setActiveSubWindow(doc); window.document_activated(doc); window.canvas.draw()
             post_routes_state=capture_verify_state() if session_check and hasattr(window,'documents') else None
             interactive_drag_checked = False
@@ -1893,7 +1945,7 @@ def main():
                     active = window.active_document()
                     window.edit_measurement(original)
                     pending = window._pending_measurement
-                    doc = window.documents[str(other.dataset.path)]
+                    doc = window.documents[other.dataset.document_key]
                     window.mdi.setActiveSubWindow(doc); window.document_activated(doc)
                     window.canvas.callbacks.process("key_press_event", KeyEvent("key_press_event", window.canvas, key="enter"))
                     if window.current_measurement() is not None or window._pending_measurement is not pending:

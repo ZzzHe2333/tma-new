@@ -42,6 +42,16 @@ class Dataset:
     metadata: dict[str, list[str]]
     warnings: list[str]
     sha256: str
+    instance_id: str = ""
+    opening_index: int = 1
+
+    @property
+    def document_key(self):
+        return str(self.path) + (f"::open::{self.instance_id}" if self.instance_id else "")
+
+    @property
+    def display_name(self):
+        return self.path.name + (f" [{self.opening_index}]" if self.opening_index > 1 else "")
 
     @property
     def name(self) -> str:

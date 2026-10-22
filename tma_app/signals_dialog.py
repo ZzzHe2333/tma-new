@@ -13,13 +13,13 @@ SUPPORTED = {"normal", "d_time", "d_temperature", "d2_time", "d2_temperature"}
 
 
 def current_template(owner, dataset):
-    curves = [c for c in owner.curves if c.dataset.path == dataset.path and c.normal_enabled]
+    curves = [c for c in owner.curves if c.dataset.document_key == dataset.document_key and c.normal_enabled]
     template = factory_template(dataset)
     for axis in range(4):
         curve = next((c for c in curves if c.axis == axis), None)
         template["y"][axis] = {"signal": curve.signal_label if curve else None, "type": curve.y_type if curve else "normal", "width": curve.smooth_width if curve else 0.}
-    curve = curves[0] if curves else next(c for c in owner.curves if c.dataset.path == dataset.path)
-    options = owner.plot_options.get(str(dataset.path), {})
+    curve = curves[0] if curves else next(c for c in owner.curves if c.dataset.document_key == dataset.document_key)
+    options = owner.plot_options.get(dataset.document_key, {})
     template["x"] = {"domain": options.get("x_domain") or owner.domain,
                        "signal": dataset.signals[curve.x_signal_index].label if curve.x_signal_index is not None else template["x"]["signal"],
                        "type": curve.x_signal_type, "width": curve.x_smooth_width}
@@ -32,8 +32,8 @@ def build_proposal(curves, dataset, template):
     domain = template["x"]["domain"]
     if domain not in ("temperature", "time", "signal"): raise ValueError("X信号无效")
     draft = [replace(c, operations=list(c.operations), history=list(c.history)) for c in curves]
-    computed = [c for c in draft if c.dataset.path == dataset.path and c.derived is not None and c.normal_enabled]
-    source = [c for c in draft if c.dataset.path == dataset.path and c.derived is None]
+    computed = [c for c in draft if c.dataset.document_key == dataset.document_key and c.derived is not None and c.normal_enabled]
+    source = [c for c in draft if c.dataset.document_key == dataset.document_key and c.derived is None]
     originals = [c for c in source if c.normal_enabled]
     for curve in source: curve.activate_appearance("normal"); curve.normal_enabled = False
     def index(label):
@@ -44,7 +44,7 @@ def build_proposal(curves, dataset, template):
     xkind, xwidth = template["x"]["type"], template["x"]["width"]
     if xkind not in SUPPORTED: raise ValueError("所选X类型的数学定义尚未确认")
     if domain == "signal" and xindex is None: raise ValueError("请选择X信号")
-    for curve in source+[c for c in draft if c.dataset.path==dataset.path and c.derived is not None]: curve.x_signal_index, curve.x_signal_type, curve.x_smooth_width = xindex, xkind, xwidth
+    for curve in source+[c for c in draft if c.dataset.document_key==dataset.document_key and c.derived is not None]: curve.x_signal_index, curve.x_signal_type, curve.x_smooth_width = xindex, xkind, xwidth
     reference = source[0] if source else Curve(dataset)
     x = reference.x_values(domain)
     for axis, item in enumerate(template["y"]):
@@ -90,7 +90,7 @@ class SignalsDialog(QDialog):
             for sig in self.dataset.signals:signal.addItem(sig.label,sig.label)
             kind=self.type_combo(group,custom=self.template["y"][axis]["type"]=="custom");kind.setGeometry(456,16,141,23)
             self.signals.append(signal);self.types.append(kind)
-            computed=next((c for c in owner.curves if c.dataset.path==self.dataset.path and c.normal_enabled and c.derived is not None and c.axis==axis),None)
+            computed=next((c for c in owner.curves if c.dataset.document_key==self.dataset.document_key and c.normal_enabled and c.derived is not None and c.axis==axis),None)
             if computed is not None:
                 signal.addItem(computed.signal_label,computed.signal_label)
                 signal.setEnabled(False);kind.setEnabled(False)
@@ -149,14 +149,14 @@ class SignalsDialog(QDialog):
         try:
             value=self.collect();draft=build_proposal(self.owner.curves,self.dataset,value)
             selected=self.owner.selected();uid=selected.uid if selected else None
-            enabled=[c for c in draft if c.dataset.path==self.dataset.path and c.normal_enabled]
+            enabled=[c for c in draft if c.dataset.document_key==self.dataset.document_key and c.normal_enabled]
             if not any(c.uid==uid for c in enabled) and enabled:uid=enabled[0].uid
             self.owner.cancel_measurement(redraw=False);self.owner.curves=draft
-            options=self.owner.plot_options.setdefault(str(self.dataset.path),default_plot_options())
+            options=self.owner.plot_options.setdefault(self.dataset.document_key,default_plot_options())
             options.update(x_domain=value["x"]["domain"],secondary_x=value["secondary"],x_limits=None,x_ticks=None,auto_x=True,
                            y_limits=[None]*4,y_ticks=[None]*4,auto_y=[True]*4)
             self.owner.sync_documents();self.owner.rebuild_files()
-            doc=self.owner._document(str(self.dataset.path));doc.plot_signature=None
+            doc=self.owner._document(self.dataset.document_key);doc.plot_signature=None
             self.owner.mdi.setActiveSubWindow(doc);self.owner.document_activated(doc)
             index=next((i for i,c in enumerate(draft) if c.uid==uid),None)
             if index is not None:self.owner.files.setCurrentItem(self.owner.files.topLevelItem(index))

@@ -195,7 +195,8 @@ def _records(path):
             mi = next((i for i,h in enumerate(headers) if h in masses or any(h == base+u for base in masses for u in ('mg','g'))), None)
             if ni is not None and mi is not None:
                 name_col, mass_col, start = ni, mi, index+1
-                unit = 'mg' if headers[mi].endswith('mg') else 'g' if headers[mi].endswith('g') else ''
+                explicit_unit = re.search(r'[（(\[]\s*(mg|g)\s*[）)\]]', str(row[mi]), re.I)
+                unit = explicit_unit.group(1).lower() if explicit_unit else 'mg' if headers[mi].endswith('mg') else 'g' if headers[mi].endswith('g') else ''
                 break
         for row in rows[start:]:
             if len(row) <= max(name_col, mass_col) or row[name_col] is None: continue

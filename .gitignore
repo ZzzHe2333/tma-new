@@ -5,6 +5,7 @@ build/
 dist/
 dist-*/
 *.spec
+!ZzzHe TMA Analysis.spec
 *.tmas
 artifacts/
 
@@ -20,3 +21,4 @@ analysis/winua_strings.txt
 测试文件/
 analysis/
 /*.png
+power/*.pdf

@@ -77,7 +77,7 @@ class GraphOptionsDialog(QDialog):
             raise ValueError("曲线图选项需要活动的普通数据文档")
         if self.document is None or self.document.key != self.key:
             raise ValueError("活动文档与曲线图选项不匹配")
-        self.originals = [c for c in owner.curves if str(c.dataset.path) == self.key]
+        self.originals = [c for c in owner.curves if c.dataset.document_key == self.key]
         if not self.originals:
             raise ValueError("活动文档没有曲线")
         self.draft = [replace(c, operations=list(c.operations), history=list(c.history)) for c in self.originals]

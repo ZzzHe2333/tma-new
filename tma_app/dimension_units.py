@@ -188,8 +188,8 @@ def proposal(owner,document,options):
     selected=validate(options)
     active_overlay=owner._is_overlay(document.key)
     members=[c for c in owner._document_curves(document) if c.overlay_enabled] if active_overlay else [c for c in owner._document_curves(document) if c.normal_enabled]
-    sources={(str(c.dataset.path),c.dataset.sha256) for c in members}
-    changed={c.uid for c in owner.curves if (str(c.dataset.path),c.dataset.sha256) in sources and validate(c.unit_options)!=selected}
+    sources={(c.dataset.document_key,c.dataset.sha256) for c in members}
+    changed={c.uid for c in owner.curves if (c.dataset.document_key,c.dataset.sha256) in sources and validate(c.unit_options)!=selected}
     if not changed:return {},deepcopy(owner.plot_options)
     copies={c.uid:replace(c,unit_options=dict(selected) if c.uid in changed else deepcopy(c.unit_options),history=list(c.history)) for c in owner.curves}
     states={}

@@ -640,7 +640,7 @@ def save_session(path, curves, domain, results, plot_options=None):
             for i, curve in enumerate(curves):
                 curve.save_overlay_view()
                 ds = curve.dataset
-                entry = {"path": str(ds.path), "metadata": ds.metadata, "warnings": ds.warnings,
+                entry = {"path": str(ds.path), "instance_id": ds.instance_id, "opening_index": ds.opening_index, "metadata": ds.metadata, "warnings": ds.warnings,
                          "sha256": ds.sha256, "signals": [{"name": s.name, "unit": s.unit} for s in ds.signals]}
                 state = {key: getattr(curve, key) for key in CURVE_FIELDS}
                 if curve.derived is not None:
@@ -685,7 +685,11 @@ def load_session(path, include_plot_options=False):
             signals = [Signal(**s) for s in entry["signals"]]
             if values.dtype.kind not in "fiu" or values.ndim != 2 or values.shape[1] != len(signals) or len(values) < 2 or not np.isfinite(values).all():
                 raise ValueError("会话包含无效数据矩阵")
-            ds = Dataset(path=Path(entry["path"]), signals=signals, values=values,
+            instance_id = entry.get("instance_id", "")
+            opening_index = entry.get("opening_index", 1)
+            if not isinstance(instance_id, str) or (instance_id and not re.fullmatch(r"[0-9a-f]{32}", instance_id)) or type(opening_index) is not int or opening_index < 1:
+                raise ValueError("文件打开实例标识无效")
+            ds = Dataset(path=Path(entry["path"]), signals=signals, values=values, instance_id=instance_id, opening_index=opening_index,
                          metadata=entry["metadata"], warnings=entry["warnings"], sha256=entry["sha256"])
             state = {k: deepcopy(entry[k]) if k in entry else (uuid.uuid4().hex if k == "uid" else deepcopy(CURVE_OPTION_DEFAULTS[k])) for k in CURVE_FIELDS}
             if "display_filename" not in entry: state["display_filename"] = ds.path.name
