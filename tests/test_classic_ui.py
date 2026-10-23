@@ -35,7 +35,7 @@ def dataset(path):
 
 
 def test_source_menu_order_and_glyphs(ui):
-    assert [a.text() for a in ui.menuBar().actions()] == ["设置", "文件", "编辑", "重定刻度", "曲线图", "分析", "工具", "视图", "宏", "窗口", "帮助"]
+    assert [a.text() for a in ui.menuBar().actions()] == ["设置", "文件", "编辑", "重定刻度", "曲线图", "分析", "工具", "视图", "宏", "窗口", "帮助", "用户"]
     assert not ui.documents
     assert not ui.classic_actions["Open1"].icon().isNull()
     assert ui.classic_actions["Open1"].isEnabled()

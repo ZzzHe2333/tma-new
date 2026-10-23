@@ -10,7 +10,7 @@ import uuid
 from copy import deepcopy
 
 import numpy as np
-from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QTimer, QThread, Signal as QtSignal
+from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QTimer, QThread, Signal as QtSignal, Slot
 from PySide6.QtGui import QAction, QColor, QKeySequence, QFontDatabase, QFont
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
@@ -137,6 +137,12 @@ class ImportWorker(QThread):
 
 class MainWindow(QMainWindow):
     def __init__(self):
+        from .ui_help import install as install_help
+        install_help(QApplication.instance())
+        from .ui_size import install_runtime
+        install_runtime(QApplication.instance())
+        from .gui_gc import ensure_gui_gc
+        ensure_gui_gc(QApplication.instance())
         # Windows' offscreen Qt plugin has no system-font enumeration. Register
         # the OS font explicitly; keep the same readable font in GUI and QA.
         if "Microsoft YaHei" not in QFontDatabase.families():
@@ -174,6 +180,8 @@ class MainWindow(QMainWindow):
         self._menu()
         self._build()
         self._build_measurement_controls()
+        from .user_dialog import install as install_user_menu
+        install_user_menu(self)
         self.statusBar().showMessage("就绪 · 拖入 TA 数据文件，或点击「导入数据」")
         self.redraw()
         QTimer.singleShot(0, self.start_saved_mcp)
@@ -270,8 +278,12 @@ class MainWindow(QMainWindow):
 
     def _menu(self):
         settings_menu = self.menuBar().addMenu("设置")
+        self.settings_menu = settings_menu
         settings_menu.addAction("MCP · AI 连接…", self.show_mcp_settings)
         settings_menu.addAction("云盘 · WebDAV…", lambda: self.show_cloud())
+        settings_menu.addAction("分享渠道…", self.show_sharing_settings)
+        from .ui_size import add_size_menu
+        self.ui_size_menu = add_size_menu(self, settings_menu)
         filemenu = self.menuBar().addMenu("文件")
         actions = [
             ("导入数据…", self.open_files, "Ctrl+O"),
@@ -314,6 +326,7 @@ class MainWindow(QMainWindow):
         header.addWidget(button("打开会话", self.open_session))
         header.addWidget(button("保存会话", self.save))
         header.addWidget(button("＋ 导入数据", self.open_files, True))
+        header.addWidget(button("分享", self.show_share))
         layout.addLayout(header)
         split = QSplitter(Qt.Orientation.Horizontal)
         split.setChildrenCollapsible(False)
@@ -525,19 +538,35 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"已排队 {len(self._pending_import_paths)} 个文件…")
             return
         self.worker = ImportWorker(paths)
-        self.worker.completed.connect(self.finish_import)
-        self.worker.finished.connect(self.worker_finished)
-        self.worker.progress.connect(self.statusBar().showMessage)
-        self.worker.mass_ready.connect(self.import_mass_ready)
+        self.worker.completed.connect(self.receive_import, Qt.ConnectionType.QueuedConnection)
+        self.worker.finished.connect(self.worker_finished, Qt.ConnectionType.QueuedConnection)
+        self.worker.progress.connect(self.import_progress, Qt.ConnectionType.QueuedConnection)
+        self.worker.mass_ready.connect(self.import_mass_ready, Qt.ConnectionType.QueuedConnection)
         self.worker.start()
         self.statusBar().showMessage(f"正在解析 {len(paths)} 个文件…")
 
+    @Slot(object, object)
+    def receive_import(self, datasets, failures):
+        if QThread.currentThread() != QApplication.instance().thread():
+            raise RuntimeError('Import results must be applied on the GUI thread')
+        from .diagnostics import record_event
+        record_event('import.gui.apply', files=len(datasets), failures=len(failures))
+        self.finish_import(datasets, failures)
+
+    @Slot(str)
+    def import_progress(self, message):
+        self.statusBar().showMessage(message)
+
+    @Slot()
     def worker_finished(self):
+        if self.sender() is not self.worker: return
         self.worker.deleteLater()
         self.worker = None
         queued = getattr(self, '_pending_import_paths', [])
         self._pending_import_paths = []
-        if queued: QTimer.singleShot(0, lambda: self.import_files(queued, batch_results=False))
+        # Start the queued worker before exposing an idle state. Otherwise a
+        # fast batch/close action can observe worker=None with files still queued.
+        if queued: self.import_files(queued, batch_results=False)
 
     def show_batch_analysis(self, paths=None, popup=True):
         from .batch_dialog import BatchDialog
@@ -610,6 +639,7 @@ class MainWindow(QMainWindow):
         else: self.log.appendPlainText(f"  m：{result.message}")
         return result
 
+    @Slot(str, str, str, object)
     def import_mass_ready(self, ticket, sample, source, result):
         from .mass_lookup import configured_source
         key = getattr(self, '_import_mass_targets', {}).pop(ticket, None)
@@ -623,13 +653,62 @@ class MainWindow(QMainWindow):
         if result.value is not None or previous:
             self.touch(); self.rebuild_files()
 
-    def refresh_mass_lookup(self):
-        seen = set(); matched = 0
+    def refresh_mass_lookup(self, initial_matches=None):
+        from .mass_jobs import MassLookupJob
+        from .mass_lookup import configured_source
+        previous = getattr(self, '_mass_refresh_job', None)
+        if previous is not None: previous.cancel(); previous.deleteLater()
+        self._mass_refresh_job = None
+        self._mass_refresh_targets = {}; self._mass_refresh_matches = 0
+        self._mass_refresh_changed = False
+        try: source = configured_source()
+        except (OSError, ValueError) as exc:
+            self.statusBar().showMessage(f"设置已保存，m 配置未读取：{exc}"); return
         for curve in self.curves:
-            if id(curve.dataset) in seen: continue
-            seen.add(id(curve.dataset)); matched += self.update_curve_mass(curve).value is not None
-        if seen: self.touch(); self.rebuild_files()
-        self.statusBar().showMessage(f"m 数据源已更新：{matched}/{len(seen)} 个样品匹配成功")
+            key = str(id(curve.dataset))
+            if key in self._mass_refresh_targets: continue
+            self._mass_refresh_targets[key] = (curve.dataset, curve.sample_name)
+            if initial_matches and curve.sample_name in initial_matches:
+                self.update_curve_mass(curve, initial_matches[curve.sample_name])
+                self._mass_refresh_changed = True
+        targets = self._mass_refresh_targets
+        if not targets:
+            self.statusBar().showMessage("路径设置已保存"); return
+        # A refresh supersedes any old import-time weight requests, including
+        # requests for the same path whose workbook changed in the meantime.
+        keys = {dataset.document_key for dataset, sample in targets.values()}
+        tickets = getattr(self, '_import_mass_targets', {})
+        for ticket in list(tickets):
+            if tickets[ticket] in keys: tickets.pop(ticket, None)
+        if self._mass_refresh_changed: self.touch(); self.rebuild_files()
+        self._mass_refresh_job = job = MassLookupJob([(key, sample) for key, (_, sample) in targets.items()], source, self)
+        job.row_ready.connect(self.mass_refresh_ready); job.finished.connect(self.mass_refresh_finished)
+        self.statusBar().showMessage(f"路径设置已保存，正在后台刷新 {len(targets)} 个样品的 m…")
+        job.start()
+
+    @Slot(str, object)
+    def mass_refresh_ready(self, key, result):
+        job = getattr(self, '_mass_refresh_job', None)
+        if self.sender() is not job or key not in self._mass_refresh_targets: return
+        from .mass_lookup import configured_source
+        try:
+            if configured_source() != job.source: return
+        except (ValueError, OSError): return
+        dataset, sample = self._mass_refresh_targets[key]
+        curve = next((c for c in self.curves if c.dataset is dataset and c.sample_name == sample), None)
+        if curve is None: return
+        self.update_curve_mass(curve, result)
+        self._mass_refresh_matches += result.value is not None
+        self._mass_refresh_changed = True
+
+    @Slot()
+    def mass_refresh_finished(self):
+        job = getattr(self, '_mass_refresh_job', None)
+        if self.sender() is not job: return
+        self._mass_refresh_job = None; job.deleteLater()
+        if self._mass_refresh_changed: self.touch(); self.rebuild_files()
+        self.statusBar().showMessage(f"m 后台刷新完成：{self._mass_refresh_matches}/{len(self._mass_refresh_targets)} 个样品匹配成功")
+        self._mass_refresh_targets = {}
 
     def rebuild_files(self):
         previous = self.selected()
@@ -870,6 +949,17 @@ class MainWindow(QMainWindow):
                         continue
                     vals = result["values"]
                     options = result.get("annotation", {})
+                    if result['kind']=='interval_area':
+                        profile=vals['area_profile'];xx=np.asarray(profile['x'])+dx;yy=np.asarray(profile['signal']);baseline=np.asarray(profile['baseline'])
+                        axis.plot(xx,baseline,'--',color=c.color,lw=.7)
+                        axis.fill_between(xx,yy,baseline,where=yy>=baseline,color='#6db6a1',alpha=.16,interpolate=True)
+                        axis.fill_between(xx,yy,baseline,where=yy<baseline,color='#d78fab',alpha=.16,interpolate=True)
+                        peak=int(np.argmax(abs(yy-baseline)))
+                        from .measurement import ResultAnnotation,split_result_lines
+                        text=f"净面积 {vals['net_area']:.6g} {vals['area_unit']}\n绝对面积 {vals['absolute_area']:.6g} {vals['area_unit']}"
+                        annotation=ResultAnnotation(text,(xx[peak],yy[peak]),xytext=options.get('offset',(12,18)),textcoords='offset points',fontsize=10,color=c.color)
+                        axis.add_artist(annotation);self._result_annotations.append((result,annotation))
+                        self._result_annotations.extend((result,t) for t in split_result_lines(annotation,result,[],c.color))
                     if result["kind"] == "note":
                         annotation = axis.annotate(vals["text"], (vals["x"]+dx, vals["y"]), xytext=options.get("offset", (0, 0)), textcoords="offset points", fontsize=10, color=c.color)
                         self._result_annotations.append((result, annotation))
@@ -1126,7 +1216,7 @@ class MainWindow(QMainWindow):
         self.result_table.setRowCount(len(self.results))
         for row, entry in enumerate(self.results):
             values = "; ".join(f"{k}={v:.7g}" if isinstance(v, (float, int)) else f"{k}={v}" for k, v in entry["values"].items())
-            title = {"signal_max": "信号最大", "signal_change": "信号变化", "dimension_change": "尺寸变化", "height_change": "高度差", "note": "批注","curve_value":"曲线值于X轴","curve_value_y":"曲线值于Y轴","alpha_at_x":"Alpha于X","alpha_secant":"Alpha X1至X2","alpha_fit":"拟合Alpha X1至X2","step_transition":"步阶转变","glass_transition":"玻璃化转变","peak_max":"峰最大","onset_point":"始点","peak_linear":"线性峰值积分","peak_sigmoid":"水平S形峰值积分"}.get(entry["kind"], entry["kind"])
+            title = {"signal_max": "信号最大", "signal_change": "信号变化", "dimension_change": "尺寸变化", "height_change": "高度差", "note": "批注","curve_value":"曲线值于X轴","curve_value_y":"曲线值于Y轴","alpha_at_x":"Alpha于X","alpha_secant":"Alpha X1至X2","alpha_fit":"拟合Alpha X1至X2","step_transition":"步阶转变","glass_transition":"玻璃化转变","peak_max":"峰最大","onset_point":"始点","peak_linear":"线性峰值积分","peak_sigmoid":"水平S形峰值积分","interval_area":"独立区间面积"}.get(entry["kind"], entry["kind"])
             cols = [entry["file"], title, f"{entry['lo']:.5g} → {entry['hi']:.5g}", values, entry["signal"] + " / " + " → ".join(entry["operations"])]
             for col, value in enumerate(cols):
                 item = QTableWidgetItem(value)
@@ -1425,11 +1515,8 @@ class MainWindow(QMainWindow):
 
     def export_plot(self, preferred=None):
         self.touch_cloud_usage()
-        visible = self.visible_curves()
-        curve = self.selected()
-        if curve not in visible: curve = visible[0] if visible else None
         extension = "pdf" if preferred == "pdf" else "png"
-        default = (curve.dataset.path.stem if curve else "TMA") + "." + extension
+        default = self.default_plot_filename(extension)
         filters = "PDF (*.pdf)" if extension == "pdf" else "PNG (*.png);;SVG (*.svg);;PDF (*.pdf);;TIFF (*.tif)"
         path, _ = QFileDialog.getSaveFileName(self, "导出图像", default, filters)
         if path:
@@ -1439,6 +1526,42 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage(f"图像已导出：{path}")
             except Exception as exc:
                 self.warn(str(exc))
+
+    def default_plot_filename(self, extension="png"):
+        visible = self.visible_curves()
+        curve = self.selected()
+        if curve not in visible: curve = visible[0] if visible else None
+        return (curve.dataset.path.stem if curve else "TMA") + "." + extension
+
+    def show_share(self):
+        if not self.visible_curves():
+            self.statusBar().showMessage("请先打开需要分享的图像")
+            return
+        existing = getattr(self, "share_dialog", None)
+        if existing is not None and existing.isVisible():
+            existing.raise_(); existing.activateWindow(); return existing
+        from .share_dialog import ShareDialog
+        try:
+            dialog = ShareDialog(self)
+        except (ValueError, OSError) as exc:
+            self.warn(str(exc)); return
+        if existing is not None: existing.deleteLater()
+        self.share_dialog = dialog
+        dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        dialog.show(); return dialog
+
+    def show_sharing_settings(self):
+        from .share_dialog import SharingSettingsDialog
+        existing = getattr(self, "sharing_settings_dialog", None)
+        if existing is not None and existing.isVisible():
+            existing.raise_(); return existing
+        try:
+            dialog = SharingSettingsDialog(self)
+        except (ValueError, OSError) as exc:
+            self.warn(str(exc)); return
+        if existing is not None: existing.deleteLater()
+        self.sharing_settings_dialog = dialog
+        dialog.setModal(True); dialog.show(); return dialog
 
     def write_plot(self, path):
         self.protect_output(path)
@@ -1530,10 +1653,20 @@ class MainWindow(QMainWindow):
             self.import_files(paths)
 
     def closeEvent(self, event):
-        if self.worker is not None:
+        share = getattr(self, "share_dialog", None)
+        if share is not None and share.busy:
+            self.statusBar().showMessage("正在分享图片，请等待本次请求完成后关闭。")
+            event.ignore()
+        elif self.worker is not None:
             self.warn("正在导入文件，请等待完成后关闭。")
             event.ignore()
         elif self.confirm_discard():
+            mass_job = getattr(self, '_mass_refresh_job', None)
+            if mass_job is not None:
+                mass_job.cancel(); mass_job.deleteLater(); self._mass_refresh_job = None
+            for dialog in self.findChildren(QDialog):
+                stop_test = getattr(dialog, 'stop_mass_test', None)
+                if stop_test is not None: stop_test()
             batch = getattr(self, "batch_dialog", None)
             if batch is not None:
                 batch.prepare_shutdown()
@@ -1550,13 +1683,26 @@ class MainWindow(QMainWindow):
 
 
 def main():
+    edited_area_verify = len(sys.argv)>2 and sys.argv[1]=='--verify-edited-area'
+    printing_verify = len(sys.argv)>2 and sys.argv[1] in ('--verify-printing', '--verify-print-settings-restart')
+    settings_storage_verify = len(sys.argv)>2 and sys.argv[1] in ('--verify-path-settings', '--verify-path-settings-restart')
+    overlay_user_verify = len(sys.argv)>2 and sys.argv[1] in ('--verify-overlay-user','--verify-user-state')
+    ui_menu_cold_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-ui-menu-cold"
+    ui_menu_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-ui-menu"
+    ui_size_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-ui-size"
+    cache_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-cache"
+    mass_settings_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-mass-settings"
+    sharing_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-sharing"
+    batch_live_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-batch-live"
+    batch_stress_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-batch-stress"
     mass_normalization_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-mass-normalization"
     recommendation_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-recommendation"
     cloud_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-cloud"
     mcp_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-mcp"
     batch_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-batch"
     report_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-report"
-    verify_mode = len(sys.argv) > 2 and sys.argv[1] in ("--verify-launch", "--verify-batch", "--verify-report", "--verify-mcp", "--verify-cloud", "--verify-recommendation", "--verify-mass-normalization")
+    verify_mode = len(sys.argv) > 2 and sys.argv[1] in ("--verify-overlay-user", "--verify-user-state", "--verify-launch", "--verify-ui-menu", "--verify-ui-size", "--verify-cache", "--verify-mass-settings", "--verify-sharing", "--verify-batch", "--verify-batch-stress", "--verify-batch-live", "--verify-report", "--verify-mcp", "--verify-cloud", "--verify-recommendation", "--verify-mass-normalization")
+    verify_mode = verify_mode or settings_storage_verify or printing_verify or edited_area_verify
     if verify_mode:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     application = QApplication(sys.argv)
@@ -1572,10 +1718,58 @@ def main():
         from .classic import ClassicMainWindow, CLASSIC_STYLE
         application.setStyleSheet(CLASSIC_STYLE)
         window = ClassicMainWindow()
-    if "--modern" not in sys.argv and not verify_mode:
+    if "--modern" not in sys.argv and (not verify_mode or batch_live_verify or ui_size_verify or ui_menu_verify or overlay_user_verify or printing_verify or edited_area_verify):
         window.showMaximized()
     else:
         window.show()
+    if edited_area_verify:
+        from .edited_area_qa import verify
+        verify(window,Path(sys.argv[2]),[Path(arg).absolute() for arg in sys.argv[3:]])
+        return
+    if printing_verify:
+        from .printing_qa import verify
+        verify(window, Path(sys.argv[2]), [Path(arg).absolute() for arg in sys.argv[3:]], restart=sys.argv[1]=='--verify-print-settings-restart')
+        return
+    if settings_storage_verify:
+        from .settings_storage_qa import verify
+        verify(window, Path(sys.argv[2]), restart=sys.argv[1]=='--verify-path-settings-restart')
+        return
+    if overlay_user_verify:
+        from .overlay_user_qa import verify
+        verify(window,Path(sys.argv[2]),[Path(arg).absolute() for arg in sys.argv[3:]],restart=sys.argv[1]=='--verify-user-state')
+        return
+    if ui_menu_cold_verify:
+        from .ui_menu_cold_qa import start
+        start(window, application, Path(sys.argv[2]))
+        sys.exit(application.exec())
+    if ui_menu_verify:
+        from .ui_menu_qa import verify
+        verify(window, Path(sys.argv[2]), [Path(arg).absolute() for arg in sys.argv[3:]])
+        return
+    if ui_size_verify:
+        from .ui_size_qa import verify
+        verify(window, Path(sys.argv[2]), [Path(arg).absolute() for arg in sys.argv[3:]])
+        return
+    if cache_verify:
+        from .cache_qa import verify
+        verify(window, Path(sys.argv[2]), [Path(arg).absolute() for arg in sys.argv[3:]])
+        return
+    if mass_settings_verify:
+        from .mass_settings_qa import verify
+        verify(window, Path(sys.argv[2]), [Path(arg).absolute() for arg in sys.argv[3:]])
+        return
+    if sharing_verify:
+        from .share_qa import verify
+        verify(window, Path(sys.argv[2]), [Path(arg).absolute() for arg in sys.argv[3:]])
+        return
+    if batch_live_verify:
+        from .batch_live_qa import start
+        start(window, application, Path(sys.argv[2]), [Path(arg).absolute() for arg in sys.argv[3:]])
+        sys.exit(application.exec())
+    if batch_stress_verify:
+        from .batch_stress_qa import verify
+        verify(window, Path(sys.argv[2]), [Path(arg).absolute() for arg in sys.argv[3:]])
+        return
     if mass_normalization_verify:
         from .mass_normalization_qa import verify
         verify(window, Path(sys.argv[2]), [Path(arg).absolute() for arg in sys.argv[3:]])

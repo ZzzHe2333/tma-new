@@ -246,8 +246,9 @@ class RescaleDialog(QDialog):
 
 class AddCurvesDialog(QDialog):
     """Select files and a compatible named signal, without changing the workspace."""
-    def __init__(self, parent, curves, axis):
+    def __init__(self, parent, curves, axis, *, empty_selection=False):
         super().__init__(parent)
+        self.empty_selection = empty_selection
         self.setWindowTitle("添加曲线")
         self.source_curves=list(curves)
         self.resize(630, 349)
@@ -285,7 +286,7 @@ class AddCurvesDialog(QDialog):
         self.files.blockSignals(True); self.files.clear()
         for ds in self.datasets:
             item = QListWidgetItem(ds.display_name)
-            item.setToolTip(str(ds.path)); item.setCheckState(Qt.CheckState.Checked)
+            item.setToolTip(str(ds.path)); item.setCheckState(Qt.CheckState.Unchecked if self.empty_selection else Qt.CheckState.Checked)
             self.files.addItem(item)
         self.files.blockSignals(False); self.refresh_signals()
 
@@ -300,12 +301,21 @@ class AddCurvesDialog(QDialog):
 
     def refresh_signals(self, *_):
         old = self.signals.currentItem().text() if self.signals.currentItem() else None
-        labels = sorted({s.label for ds in self.checked_datasets() for s in ds.signals})
+        datasets = self.checked_datasets()
+        labels = sorted({s.label for ds in datasets for s in ds.signals})
         if self.compatible.isChecked() and self.reference:
             labels = [label for label in labels if all(any(s.label == label and Curve(ds, y_index=i).result_unit == self.reference for i, s in enumerate(ds.signals)) for ds in self.checked_datasets())]
         self.signals.clear(); self.signals.addItems(labels)
         if labels:
-            self.signals.setCurrentRow(labels.index(old) if old in labels else 0)
+            # Files still start unchecked. Once files are chosen, suggest the
+            # acquired dimension-change signal; retain an explicit user choice
+            # while the checked files or compatibility filter are refreshed.
+            preferred = next((s.label for ds in datasets for s in ds.signals
+                if ''.join(s.name.casefold().replace('_', ' ').replace('-', ' ').split())
+                in ('dimensionchange', 'lengthchange', '尺寸变化', '长度变化', '变化量')
+                and s.label in labels), None)
+            selected = old if old in labels else preferred
+            self.signals.setCurrentRow(labels.index(selected) if selected in labels else -1 if self.empty_selection else 0)
 
     def open_files(self):
         from .path_settings import import_folder
@@ -343,8 +353,9 @@ class AddCurvesDialog(QDialog):
 
 class OverlayOptionsDialog(QDialog):
     """Ten slots per axis; six working tabs; OK/Cancel apply atomically."""
-    def __init__(self, owner, key=None):
+    def __init__(self, owner, key=None, *, blank=False):
         super().__init__(owner)
+        self.blank_start = blank
         key=key or owner._overlay_key_for_edit()
         self.owner, self.key, self.axis = owner, key, 0
         source=list(owner.curves)
@@ -352,12 +363,14 @@ class OverlayOptionsDialog(QDialog):
             order=owner.documents[key].curve_uids;lookup={c.uid:c for c in source}
             source=[lookup[uid] for uid in order if uid in lookup]+[c for c in source if c.uid not in order]
         self.draft = [replace(c, operations=list(c.operations), history=list(c.history)) for c in source]
-        for curve in self.draft: curve.activate_view(key)
+        for curve in self.draft:
+            curve.activate_view(key)
+            if blank: curve.overlay_enabled = False
         base = default_plot_options(); base.update(owner.user_defaults("overlay")["options"])
         self.options = deepcopy(owner.plot_options.get(key, validate_plot_options(base)))
         if key not in owner.documents: owner.apply_default_appearance([c for c in self.draft if c.overlay_enabled], owner.user_defaults("overlay"))
         self.setObjectName("OverlayOptionsForm")
-        self.setWindowTitle("叠加绘图选项")
+        self.setWindowTitle("新建叠图 · 手动配置" if blank else "编辑叠图 · 绘图选项")
         # Native client640x420, with20px reserved for inline validation.
         self.setFixedSize(640,440)
         self.tabs=QTabWidget(self);self.tabs.setObjectName("PageControl");self.tabs.setGeometry(1,0,638,381)
@@ -480,7 +493,7 @@ class OverlayOptionsDialog(QDialog):
             self.error.setText(str(exc))
 
     def add_curves(self):
-        dialog = AddCurvesDialog(self, self.draft, self.axis)
+        dialog = AddCurvesDialog(self, self.draft, self.axis, empty_selection=self.blank_start)
         if dialog.exec() != QDialog.DialogCode.Accepted: return
         selected = dialog.selected_curves
         additions = []
@@ -650,6 +663,8 @@ class OverlayOptionsDialog(QDialog):
 
     def apply(self):
         try:
+            if self.blank_start and not any(c.overlay_enabled for c in self.draft):
+                raise ValueError('请先点击“添加曲线”，手动选择要叠加的文件和信号。')
             options = self.collect_options()
             for axis in range(4):
                 curves = [c for c in self.draft if c.overlay_enabled and c.axis == axis]

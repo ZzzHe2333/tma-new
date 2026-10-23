@@ -46,28 +46,35 @@ def optimize_axis_labels(curves):
 
 
 class AutoConfigureDialog(QDialog):
-    def __init__(self, owner):
+    def __init__(self, owner, *, blank=False):
         super().__init__(owner)
         self.owner = owner
+        self.blank_start = blank
         base = default_plot_options(); base.update(owner.user_defaults("overlay")["options"])
-        self.key = owner._overlay_key_for_edit() if hasattr(owner, "_overlay_key_for_edit") else "__overlay__"
+        self.key = owner._next_overlay_key() if blank else owner._overlay_key_for_edit() if hasattr(owner, "_overlay_key_for_edit") else "__overlay__"
         self.options = validate_plot_options(owner.plot_options.get(self.key, base))
         self.sources = list({c.dataset.document_key: c.dataset for c in owner.curves}.values())
-        self.setObjectName("AutoConfigureForm"); self.setWindowTitle("叠图自动配置")
+        self.setObjectName("AutoConfigureForm"); self.setWindowTitle("新建叠图 · 自动配置" if blank else "叠图自动配置")
         self.setFixedSize(631, 355); self.setModal(True)
-        files_group = QGroupBox("文件", self); files_group.setGeometry(10, 8, 299, 189)
+        files_group = QGroupBox("选择要叠加的曲线（默认不选）" if blank else "文件", self); files_group.setGeometry(10, 8, 299, 189)
         self.files = QListWidget(files_group); self.files.setGeometry(8, 17, 283, 164)
         self.file_items = []
+        self.curve_items = {}
+        normal = [replace(c, operations=list(c.operations), history=list(c.history)) for c in owner.curves]
+        for curve in normal: curve.activate_view(None)
         selected = {c.dataset.document_key for c in owner.visible_curves()}
-        for source in self.sources:
-            item = QListWidgetItem(source.display_name); item.setToolTip(str(source.path)); item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(Qt.CheckState.Checked if source.document_key in selected else Qt.CheckState.Unchecked)
+        choices = [c for c in normal if c.visible and c.normal_enabled] if blank else self.sources
+        for source in choices:
+            label = f'{source.dataset.display_name} · {source.result_label} · Y{source.axis+1}' if blank else source.display_name
+            item = QListWidgetItem(label); item.setToolTip(str(source.dataset.path if blank else source.path)+'\n'+label); item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Unchecked if blank else Qt.CheckState.Checked if source.document_key in selected else Qt.CheckState.Unchecked)
+            if blank: self.curve_items[source.uid] = item
             self.files.addItem(item); self.file_items.append(item)
         signals = QGroupBox("信号", self); signals.setGeometry(317, 8, 60, 189)
         self.signal_boxes = []
         for axis in range(4):
             box = QCheckBox(f"Y{axis+1}", signals); box.setGeometry(10, 28+40*axis, 43, 20)
-            box.setEnabled(any(c.visible and c.axis == axis for c in owner.curves)); self.signal_boxes.append(box)
+            box.setEnabled(any(c.visible and c.axis == axis for c in (normal if blank else owner.curves))); self.signal_boxes.append(box)
         group = QGroupBox("自动", self); group.setGeometry(385, 8, 236, 189)
         self.auto_boxes, self.mode_groups = {}, {}
         for row, (key, caption) in enumerate((("line", "线条"), ("symbol", "符号"), ("color", "颜色"))):
@@ -77,9 +84,9 @@ class AutoConfigureDialog(QDialog):
                 button = QRadioButton(text, group); button.setGeometry(86+68*index, 28+32*row, 65, 20)
                 button.setProperty("mode", mode); buttons.addButton(button, index)
             box.toggled.connect(lambda checked, buttons=buttons: [b.setEnabled(checked) for b in buttons.buttons()])
-        for key, caption, x, y in (("offset", "曲线偏移", 18, 124), ("axis", "坐标轴", 128, 124), ("file_selection", "文件选择", 18, 156), ("legend", "图例", 128, 156)):
+        for key, caption, x, y in (("offset", "曲线偏移", 18, 124), ("axis", "坐标轴", 128, 124), ("file_selection", "全选曲线" if blank else "文件选择", 18, 156), ("legend", "图例", 128, 156)):
             box = QCheckBox(caption, group); box.setGeometry(x, y, 105, 20); self.auto_boxes[key] = box
-        self.auto_boxes["file_selection"].toggled.connect(lambda checked: self.select_all_files() if checked else None)
+        self.auto_boxes["file_selection"].toggled.connect(lambda checked: self.select_all_files(checked) if blank or checked else None)
         heading = QGroupBox("绘图标题", self); heading.setGeometry(10, 208, 611, 85)
         self.heading = QPlainTextEdit(heading); self.heading.setGeometry(8, 17, 595, 60)
         self.heading.setToolTip("只用于打印和导出")
@@ -89,11 +96,12 @@ class AutoConfigureDialog(QDialog):
             if caption == "确定": button.setDefault(True)
         self.load(self.options["overlay_configure"])
 
-    def select_all_files(self):
-        for item in self.file_items: item.setCheckState(Qt.CheckState.Checked)
+    def select_all_files(self, checked=True):
+        for item in self.file_items: item.setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
 
     def load(self, value):
         value = validate_auto_configure(value)
+        if self.blank_start: value['file_selection'] = False
         for axis, box in enumerate(self.signal_boxes): box.setChecked(box.isEnabled() and value["signals"][axis])
         for key, box in self.auto_boxes.items(): box.setChecked(value[key])
         for key, group in self.mode_groups.items():
@@ -113,6 +121,9 @@ class AutoConfigureDialog(QDialog):
         try:
             config = self.collect()
             selected = {source.document_key for source, item in zip(self.sources, self.file_items) if item.checkState() == Qt.CheckState.Checked}
+            selected_uids = {uid for uid,item in self.curve_items.items() if item.checkState()==Qt.CheckState.Checked}
+            if self.blank_start:
+                selected = {c.dataset.document_key for c in self.owner.curves if c.uid in selected_uids}
             if not selected: raise ValueError("请选择要叠加的文件")
             draft = [replace(c, operations=list(c.operations), history=list(c.history)) for c in self.owner.curves]
             for curve in draft:
@@ -126,7 +137,8 @@ class AutoConfigureDialog(QDialog):
             curves, used = [], set()
             for curve in draft:
                 identity = (curve.dataset.document_key, curve.y_index, curve.result_unit, curve.uid if curve.derived is not None else None)
-                included = curve.dataset.document_key in selected and config["signals"][curve.axis] and curve.visible and curve.normal_enabled and identity not in used
+                chosen = curve.uid in selected_uids if self.blank_start else curve.dataset.document_key in selected
+                included = chosen and config["signals"][curve.axis] and curve.visible and curve.normal_enabled and identity not in used
                 curve.overlay_enabled = included
                 if included: curves.append(curve); used.add(identity)
             if not curves: raise ValueError("所选文件没有勾选的已绘制信号")

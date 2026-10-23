@@ -2,7 +2,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from PySide6.QtCore import QRectF, Qt
+from PySide6.QtCore import QRectF, Qt, QSize
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPalette, QPixmap, QBrush
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QApplication, QMdiArea
@@ -179,7 +179,7 @@ class PastelMdiArea(QMdiArea):
         painter = QPainter(self.viewport())
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         center = self.viewport().rect().center()
-        icon = app_icon().pixmap(128, 128)
+        icon = app_icon().pixmap(QSize(128, 128), self.devicePixelRatioF())
         painter.drawPixmap(center.x() - 64, center.y() - 115, icon)
         painter.setPen(QColor("#765d86"))
         painter.setFont(QFont("Tahoma", 20))

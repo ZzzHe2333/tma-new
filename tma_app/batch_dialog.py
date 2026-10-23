@@ -5,80 +5,53 @@ from copy import deepcopy
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import threading
+import queue
 import uuid
 
-from PySide6.QtCore import QObject, Qt, Signal, Slot
-from PySide6.QtGui import QColor, QKeySequence
+from PySide6.QtCore import QObject, Qt, Signal, Slot, QTimer, QSignalBlocker
 from PySide6.QtWidgets import (QApplication, QAbstractItemView, QComboBox, QDialog, QFileDialog,
-    QHeaderView, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTableWidget,
-    QTableWidgetItem, QVBoxLayout)
+    QHeaderView, QHBoxLayout, QLabel, QProgressBar, QPushButton, QVBoxLayout)
 
 from . import batch_analysis as backend
 from .path_settings import import_folder, mass_source
 from .theme import app_icon
+from .batch_jobs import run_batch_job
+from .batch_table import ResultsTable
+from .diagnostics import record_event
 
 
 class BatchJob(QObject):
     row_ready = Signal(str, object)
     finished = Signal()
 
-    def __init__(self, action, requests, source=""):
+    def __init__(self, action, requests, source="", directory=""):
         super().__init__()
         self.action, self.requests, self.source = action, requests, source
+        self.directory = directory
         self.cancelled = threading.Event()
+        self.events = queue.Queue()
+        self.timer = QTimer(self)
+        self.timer.setInterval(25)
+        self.timer.timeout.connect(self.drain)
 
     def start(self):
-        # A daemon prevents a stalled network share from blocking application exit.
-        # Only signals cross into Qt; this thread never reads or edits widgets.
-        self.thread = threading.Thread(target=self.run, name="TMA-batch-" + self.action, daemon=True)
-        self.thread.start()
+        # The worker target is a module function with plain arguments. It has
+        # no reference to this QObject and never calls the Qt bindings.
+        self.worker_thread = threading.Thread(target=run_batch_job,
+            args=(self.action, self.requests, self.source, self.directory, self.cancelled, self.events),
+            name="TMA-batch-" + self.action, daemon=True)
+        self.timer.start()
+        self.worker_thread.start()
 
-    def emit_result(self, key, result):
-        try:
-            self.row_ready.emit(key, result)
-        except RuntimeError:
-            self.cancelled.set()  # Qt has already shut down.
-
-    def run(self):
-        try:
-            for key, request in self.requests:
-                if self.cancelled.is_set():
-                    break
-                try:
-                    if self.action == "calculate":
-                        result = backend.calculate_file(request)
-                        self.emit_result(key, result)
-                        if not self.cancelled.is_set() and not result.get('error'):
-                            try:
-                                matched=backend.match_mass(result, self.source)
-                            except Exception as exc:
-                                matched=dict(M=None,warning=f'M 未匹配：{exc}',state='M 未匹配',mass_source='',mass_config=self.source)
-                            # A late M reply must not erase an independently exported PNG.
-                            self.emit_result(key,{k:v for k,v in matched.items() if k in ('M','warning','state','mass_source','mass_config')})
-                    elif self.action == "plot":
-                        row, path = request
-                        self.emit_result(key, {"png": backend.write_plot(row, path), "export_error": ""})
-                    elif self.action == "xlsx":
-                        rows, path = request
-                        self.emit_result(key, {"xlsx": backend.write_xlsx(rows, path)})
-                except Exception as exc:
-                    self.emit_result(key, {"error": str(exc), "state":"读取失败"} if self.action=='calculate' else {"export_error":str(exc)})
-        finally:
-            try:
-                self.finished.emit()
-            except RuntimeError:
-                pass
-
-
-class ResultsTable(QTableWidget):
-    copy_requested = Signal()
-
-    def keyPressEvent(self, event):
-        if event.matches(QKeySequence.StandardKey.Copy):
-            self.copy_requested.emit()
-            event.accept()
-        else:
-            super().keyPressEvent(event)
+    @Slot()
+    def drain(self):
+        # Limit each GUI turn so a large batch cannot starve painting/input.
+        for _ in range(32):
+            try: kind, key, value = self.events.get_nowait()
+            except queue.Empty: return
+            if kind == 'row': self.row_ready.emit(key, value)
+            else:
+                self.timer.stop(); self.finished.emit(); return
 
 
 class BatchDialog(QDialog):
@@ -105,7 +78,7 @@ class BatchDialog(QDialog):
         self.resize(940, 570)
         self.setMinimumSize(760, 450)
         layout = QVBoxLayout(self)
-        self.hint = QLabel("导入即计算 · V233 算法 · 批次仅保留到本次应用关闭\n温度单位 °C；M 单位 mg；H 单位 µm。M 未匹配时留空，已算出的结果仍可出图、导出和复制。")
+        self.hint = QLabel("导入即计算 · V233 算法 · 批次仅保留到本次应用关闭\n先显示全部 T1 / T2 / H，再匹配 M（mg）；M 未匹配时留空，已算出的结果仍可出图、导出和复制。")
         self.hint.setWordWrap(True)
         layout.addWidget(self.hint)
         filters = QHBoxLayout()
@@ -132,9 +105,8 @@ class BatchDialog(QDialog):
         self.count_label = QLabel("0 条")
         filters.addWidget(self.count_label)
         layout.addLayout(filters)
-        self.table = ResultsTable(0, 4)
+        self.table = ResultsTable(self)
         self.table.setObjectName("BatchResultsTable")
-        self.table.setHorizontalHeaderLabels(backend.HEADERS)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
         self.table.verticalHeader().setDefaultSectionSize(30)
@@ -145,7 +117,7 @@ class BatchDialog(QDialog):
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setAlternatingRowColors(True)
         self.table.copy_requested.connect(self.copy_selection)
-        self.table.itemSelectionChanged.connect(self.selection_changed)
+        self.table.selectionModel().selectionChanged.connect(self.selection_changed)
         layout.addWidget(self.table, 1)
         self.progress = QProgressBar()
         self.progress.setFixedHeight(16)
@@ -257,10 +229,9 @@ class BatchDialog(QDialog):
         if self.issue_button.isChecked():
             rows = [row for row in rows if row.get("error") or row.get("warning") or row.get("export_error") or row["state"] in ("未完成", "已取消")]
         self.view_rows = rows
-        self.table.setRowCount(0)
-        self.table.setRowCount(len(rows))
-        for index in range(len(rows)):
-            self.render_row(index)
+        blocker = QSignalBlocker(self.table.selectionModel())
+        self.table.result_model.set_rows(rows)
+        del blocker
         self.latest_button.setChecked(self.view_mode == "latest")
         self.all_button.setChecked(self.view_mode == "all")
         self.count_label.setText(f"{len(rows)} / {len(self.rows)} 条")
@@ -284,8 +255,8 @@ class BatchDialog(QDialog):
         self.job = job
         self._job_total = len(job.requests)
         self._job_completed = set()
-        job.row_ready.connect(self.row_ready)
-        job.finished.connect(self.job_finished)
+        job.row_ready.connect(self.row_ready, Qt.ConnectionType.QueuedConnection)
+        job.finished.connect(self.job_finished, Qt.ConnectionType.QueuedConnection)
         self.update_progress()
         self.update_buttons()
         job.start()
@@ -295,8 +266,8 @@ class BatchDialog(QDialog):
         self.export_job=job
         self._export_total=len(job.requests)
         self._export_completed=set()
-        job.row_ready.connect(self.row_ready)
-        job.finished.connect(self.job_finished)
+        job.row_ready.connect(self.row_ready, Qt.ConnectionType.QueuedConnection)
+        job.finished.connect(self.job_finished, Qt.ConnectionType.QueuedConnection)
         self.update_progress();self.update_buttons()
         job.start()
 
@@ -306,6 +277,9 @@ class BatchDialog(QDialog):
         elif self.job is not None:
             total,done=self._job_total,len(self._job_completed)
         else:self.progress.hide();return
+        if self.export_job is not None:self.progress.setFormat("导出 %v / %m")
+        elif done == total:self.progress.setFormat("已计算 %v / %m · 正在匹配 M")
+        else:self.progress.setFormat("已计算 %v / %m")
         self.progress.setRange(0,total);self.progress.setValue(done);self.progress.show()
 
     @Slot(str, object)
@@ -328,8 +302,9 @@ class BatchDialog(QDialog):
                 if visible is not None:
                     self.render_row(visible)
             if job.action == "plot":self._export_completed.add(key)
-            elif result.get("state") in ("完成", "M 未匹配", "读取失败"):self._job_completed.add(key)
+            elif result.get("T1") is not None or result.get("error"):self._job_completed.add(key)
         self.update_progress();self.update_buttons()
+        record_event('batch.gui.row', row=key, action=job.action)
 
     @Slot()
     def job_finished(self):
@@ -353,26 +328,10 @@ class BatchDialog(QDialog):
         self.update_progress();self.update_buttons()
 
     def render_row(self, index):
-        row = self.view_rows[index]
-        tooltip = f"{row['batch_label']}\n{row['file']}\n{row['state']}"
-        for key in ("error", "warning", "mass_source", "export_error", "png"):
-            if row.get(key):
-                tooltip += "\n" + str(row[key])
-        header = QTableWidgetItem(f"{index+1}  {row['name']}")
-        header.setToolTip(tooltip)
-        if row.get("error"):
-            header.setForeground(QColor("#ad526c"))
-        self.table.setVerticalHeaderItem(index, header)
-        for column, key in enumerate(backend.KEYS):
-            item = QTableWidgetItem(backend.display_value(row, key))
-            item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            item.setToolTip(tooltip)
-            if row.get("error") or (key == "M" and row.get("warning")):
-                item.setBackground(QColor("#fff0e6"))
-            self.table.setItem(index, column, item)
+        self.table.result_model.refresh_row(index)
 
     def selected_rows(self):
-        indices = sorted({item.row() for item in self.table.selectedIndexes()})
+        indices = sorted({item.row() for item in self.table.selectedIndexes() if 0 <= item.row() < len(self.view_rows)})
         return [self.view_rows[i] for i in indices] if indices else list(self.view_rows)
 
     def selection_changed(self):
@@ -428,22 +387,10 @@ class BatchDialog(QDialog):
             self.start_plot_job(rows, directory)
 
     def start_plot_job(self, rows, directory):
-        # Existence checks on a user-selected output share run in the background.
-        class PlotJob(BatchJob):
-            def run(job):
-                try:
-                    paths = backend.plot_paths(rows, directory)
-                    job.requests = [(row["id"], (dict(row), path)) for row, path in zip(rows, paths)]
-                except Exception as exc:
-                    for row in rows:
-                        job.emit_result(row["id"], {"export_error": str(exc)})
-                    job.finished.emit()
-                    return
-                super().run()
         keys={row['id'] for row in rows}
         for row in self.rows:
             if row['id'] in keys:row.pop("export_error",None)
-        self.start_export_job(PlotJob("plot", [(row["id"], None) for row in rows]))
+        self.start_export_job(BatchJob("plot", [(row["id"], dict(row)) for row in rows], directory=directory))
 
     def cancel_processing(self):
         for job in (self.job,self.export_job):

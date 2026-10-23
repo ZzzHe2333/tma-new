@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QDialog, QDialogButtonBox, QMdiArea, QMdiSubWindow, QToolBar,
     QGroupBox, QCheckBox, QMessageBox, QMenu, QInputDialog, QStyle,
-    QFileDialog,
+    QFileDialog, QSizePolicy,
 )
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
@@ -174,7 +174,8 @@ class ClassicMainWindow(MainWindow):
             "ExportPlot1": self.export_plot, "ExportPDFFile1": lambda: self.export_plot("pdf"),
             "FileSignalsOnly1": self.export_data, "PlotSignalsOnly1": self.export_data,
             "FileAndPlotSignals1": self.export_data, "Exit1": self.close,
-            "Print1": self.print_plot, "Annotate1": self.add_note,
+            "Print1": self.print_plot, "PrintSetup1": self.show_print_settings,
+            "PrintPreview1": self.show_print_preview, "Annotate1": self.add_note,
             "MainOptions1": self.show_options, "EditParamBlock1": lambda: self.show_view("metadata"),
             "Copy3": self.copy_plot, "FileInformation1": self.show_file_information,
             "SelectAll1": lambda: self.set_all_visible(True),
@@ -195,7 +196,7 @@ class ClassicMainWindow(MainWindow):
             "XTime1": lambda: self.domain_box.setCurrentIndex(1),
             "XTemp1": lambda: self.domain_box.setCurrentIndex(0),
             "XSignal1": lambda: self.domain_box.setCurrentIndex(2),
-            "AutoConfigure1": self.auto_configure_overlay, "ManualSetup1": self.show_overlay_options,
+            "AutoConfigure1": lambda:self.auto_configure_overlay(new=True), "ManualSetup1": lambda:self.show_overlay_options(new=True),
             "Edit4": self.show_overlay_options, "Copy4": lambda:self.copy_overlay(),
             "ShowOverlayPlot1": self.show_overlay, "ShowNormalPlot1": self.show_normal,
             "GraphOptions1": self.show_curve_options, "Plotlegend1": self.toggle_legend,
@@ -208,6 +209,7 @@ class ClassicMainWindow(MainWindow):
             "Linear1": lambda:self.start_peak_integration('peak_linear'),
             "SigHorizontal1":lambda:self.start_peak_integration('peak_sigmoid'),
             "PeakRunningIntegral1":self.start_running_integral,
+            "RunningIntegral1":self.show_area_calculation,
             "DeletePeak1":self.start_delete_peak,
             "PeakMax1": lambda: self.start_peak_onset("peak_max"), "SignalMax1": lambda: self.start_point_measurement("signal_max"),
             "SignalChange1": lambda: self.start_point_measurement("signal_change"),
@@ -237,13 +239,22 @@ class ClassicMainWindow(MainWindow):
         self.ui_model = json.loads(model_path.read_text(encoding="utf-8")) if model_path.exists() else {"menus": [], "buttons": []}
         callbacks = self._callbacks()
         settings_menu = self.menuBar().addMenu("设置")
+        self.settings_menu = settings_menu
+        self.classic_menus = {'Settings': settings_menu}
         settings_menu.addAction("数据路径…", self.show_path_settings).setObjectName("PathSettings1")
         settings_menu.addAction("批量窗口设置…", self.show_path_settings).setObjectName("BatchWindowSettings1")
         settings_menu.addAction("MCP · AI 连接…", self.show_mcp_settings).setObjectName("McpSettings1")
         settings_menu.addAction("云盘 · WebDAV…", lambda: self.show_cloud()).setObjectName("CloudSettings1")
+        settings_menu.addAction("分享渠道…", self.show_sharing_settings).setObjectName("SharingSettings1")
+        from .ui_size import add_size_menu
+        self.ui_size_menu = add_size_menu(self, settings_menu)
 
         def append(parent, item):
             caption, name = item["caption"], item["name"]
+            if name == 'LoginLogout1': return
+            if name == 'AutoConfigure1': caption = '新建叠图 · 自动配置…'
+            if name == 'ManualSetup1': caption = '新建叠图 · 手动配置…'
+            if name == 'RunningIntegral1': caption = '区间面积计算与公式…'
             if name == "AboutUniversalAnalysis1":
                 caption = f"关于 {APP_NAME}"
             if caption == "-":
@@ -251,6 +262,10 @@ class ClassicMainWindow(MainWindow):
                 return
             if item.get("children"):
                 submenu = parent.addMenu(caption)
+                self.classic_menus[name] = submenu
+                from .ui_help import describe_action
+                submenu.menuAction().setToolTip(describe_action(name, caption))
+                submenu.menuAction().setStatusTip(submenu.menuAction().toolTip())
                 self.classic_actions[name] = submenu.menuAction()
                 for child in item["children"]:
                     append(submenu, child)
@@ -258,7 +273,8 @@ class ClassicMainWindow(MainWindow):
             action = QAction(caption, self)
             self.classic_actions[name] = action
             action.setObjectName(name)
-            action.setStatusTip(caption)
+            from .ui_help import describe_action
+            action.setToolTip(describe_action(name, caption)); action.setStatusTip(action.toolTip())
             if name in callbacks:
                 action.triggered.connect(callbacks[name])
             else:
@@ -271,6 +287,7 @@ class ClassicMainWindow(MainWindow):
 
         for menu in self.ui_model["menus"]:
             parent = self.menuBar().addMenu(menu["caption"])
+            self.classic_menus[menu['name']] = parent
             for item in menu.get("children", []):
                 append(parent, item)
             if menu["name"] == "Window1":
@@ -319,6 +336,7 @@ class ClassicMainWindow(MainWindow):
                 action=self.classic_actions.get(f"C{i}")
                 if action is not None:action.triggered.connect(lambda checked=False,action=action:self.copy_overlay(action.data()))
             self.update_overlay_copy_menu()
+        for menu in self.findChildren(QMenu): menu.setToolTipsVisible(True)
 
     def _build(self):
         MainWindow._build(self)
@@ -367,8 +385,10 @@ class ClassicMainWindow(MainWindow):
             action.setData(index)
             if target is not None and target.isEnabled():
                 action.triggered.connect(target.trigger)
+                action.setToolTip(target.toolTip()); action.setStatusTip(target.statusTip())
             else:
-                action.setToolTip(info["caption"] + "（功能待实现）")
+                from .ui_help import describe_action
+                action.setToolTip(describe_action(info.get('menu'), info['caption']) + "（功能待实现）")
                 action.triggered.connect(lambda checked=False, title=info["caption"]: QMessageBox.information(self, title, "此功能的界面入口已保留，分析方法尚未实现。"))
             if index in (34, 39, 49):
                 action.setEnabled(False)
@@ -378,20 +398,40 @@ class ClassicMainWindow(MainWindow):
             toolbar.addAction(action)
             toolbar.widgetForAction(action).setFixedSize(24, 24)
         toolbar.addSeparator()
+        from .ui_size import factor
+        if factor() > 1 and self.screen().availableGeometry().width() < 1200:
+            self.addToolBarBreak()
+            commands = QToolBar('常用操作', self); commands.setObjectName('LargeUiCommands')
+            commands.setMovable(False); commands.setFixedHeight(26); self.addToolBar(commands)
+            self.command_toolbar = commands
+        else:
+            commands = toolbar
         self.batch_processing_button = QPushButton("批量处理", self)
         self.batch_processing_button.setObjectName("BatchProcessingButton")
         self.batch_processing_button.setIcon(action_icon("Signals1"))
         self.batch_processing_button.setFixedSize(112, 24)
         self.batch_processing_button.setAutoDefault(False)
+        self.batch_processing_button.setToolTip('批量处理 TMA 文件：选择多个数据文件，提取 T1、T2、M、H，查看本次或全部批次，并导出图片、XLSX 或复制表格。')
         self.batch_processing_button.clicked.connect(self.show_batch_analysis)
-        toolbar.addWidget(self.batch_processing_button)
+        commands.addWidget(self.batch_processing_button)
         self.single_report_button = QPushButton("单样品报告", self)
         self.single_report_button.setObjectName("SingleReportButton")
         self.single_report_button.setIcon(action_icon("AnalysisOptions1"))
         self.single_report_button.setFixedSize(112, 24)
         self.single_report_button.setAutoDefault(False)
+        self.single_report_button.setToolTip('单样品报告：选择 TMA 文件和粒径数据，核对编号、温度、质量等信息后生成 PDF；可选用 PDF 模板。')
         self.single_report_button.clicked.connect(self.show_single_report)
-        toolbar.addWidget(self.single_report_button)
+        commands.addWidget(self.single_report_button)
+        spacer = QWidget(self)
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        commands.addWidget(spacer)
+        self.share_button = QPushButton("分享", self)
+        self.share_button.setObjectName("ShareButton")
+        self.share_button.setFixedSize(96, 24)
+        self.share_button.setAutoDefault(False)
+        self.share_button.setToolTip("分享当前活动图像，包括叠图：预览后发送到已配置的 WebDAV 或企业微信。可先在设置中配置分享渠道。")
+        self.share_button.clicked.connect(self.show_share)
+        commands.addWidget(self.share_button)
         self.classic_toolbar = toolbar
 
     @staticmethod
@@ -750,7 +790,11 @@ class ClassicMainWindow(MainWindow):
         # Measured reference paper: 1920x951, frame (217,97)-(1800,856).
         # Normalize the paper geometry so window resizing and exports agree.
         used = {c.axis for c in curves}
-        self.figure.subplots_adjust(left=.20 if 3 in used else 217/1920, right=.78 if 2 in used else (.85 if 1 in used else .9375), top=1-97/951, bottom=95/951)
+        from .ui_size import factor
+        enlargement = factor()
+        self.figure.subplots_adjust(left=min(.30, (.20 if 3 in used else 217/1920)*enlargement),
+            right=max(.66, 1-(1-(.78 if 2 in used else (.85 if 1 in used else .9375)))*enlargement),
+            top=1-min(.22,97/951*enlargement), bottom=min(.24,95/951*enlargement))
         scale = max(.25, self.figure.bbox.width / 1920)
         base = self.axes[0]
         base.set_title("", loc="left")
@@ -980,7 +1024,8 @@ class ClassicMainWindow(MainWindow):
     def show_plot_context_menu(self, doc, point):
         if self.active_document() is not doc:
             self.mdi.setActiveSubWindow(doc); self.document_activated(doc)
-        self._context_point = (point.x(), doc.canvas.height() - point.y())
+        from .ui_size import canvas_point
+        self._context_point = canvas_point(doc.canvas, point)
         if self.current_measurement() is not None:
             for editor in self._measurement_artists:
                 if editor.entry is self._pending_measurement:
@@ -1167,17 +1212,19 @@ class ClassicMainWindow(MainWindow):
         self.touch(); self.refresh_results(); self.redraw()
 
     def print_plot(self):
-        if not self.visible_curves(): return
-        from PySide6.QtPrintSupport import QPrinter, QPrintDialog
-        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
-        dialog = QPrintDialog(printer, self)
-        if dialog.exec() != QDialog.DialogCode.Accepted: return
-        pixmap = self.output_pixmap()
-        painter = QPainter(printer)
-        viewport = painter.viewport()
-        size = pixmap.size(); size.scale(viewport.size(), Qt.AspectRatioMode.KeepAspectRatio)
-        painter.setViewport(viewport.x(), viewport.y(), size.width(), size.height())
-        painter.setWindow(pixmap.rect()); painter.drawPixmap(0, 0, pixmap); painter.end()
+        from .printing import controller
+        try: return controller(self).print_plot()
+        except (ValueError, OSError) as exc: self.warn(str(exc))
+
+    def show_print_settings(self):
+        from .printing import controller
+        try: return controller(self).show_settings()
+        except (ValueError, OSError) as exc: self.warn(str(exc))
+
+    def show_print_preview(self):
+        from .printing import controller
+        try: return controller(self).preview()
+        except (ValueError, OSError) as exc: self.warn(str(exc))
 
     def full_scale(self):
         doc = self.active_document()
@@ -1513,6 +1560,13 @@ class ClassicMainWindow(MainWindow):
             except (ValueError,OSError):value=None
         return defaults() if value is None else validate(value)
 
+    def show_area_calculation(self):
+        from .area_dialog import AreaDialog
+        old=self.dialogs.get('area_calculation')
+        if old is not None and old.isVisible():old.raise_();return old
+        if old is not None:old.deleteLater()
+        dialog=AreaDialog(self);self.dialogs['area_calculation']=dialog;dialog.show();return dialog
+
     def sigmoid_iterations(self):
         value=self.plot_options.get('__settings__',{}).get('sigmoid_iterations')
         if value is None:
@@ -1742,7 +1796,7 @@ class ClassicMainWindow(MainWindow):
         if old and old.isVisible(): old.raise_(); return old
         dialog = SignalsDialog(self); self.dialogs["signals"] = dialog; dialog.show(); return dialog
 
-    def show_overlay_options(self):
+    def show_overlay_options(self, *, new=False):
         from .classic_dialogs import OverlayOptionsDialog
         if not self.curves:
             self.statusBar().showMessage("请先打开数据文件，再设置叠图。")
@@ -1750,19 +1804,19 @@ class ClassicMainWindow(MainWindow):
         old = self.dialogs.get("overlay_options")
         if old and old.isVisible():
             old.raise_(); return old
-        try:key=self._overlay_key_for_edit()
+        try:key=self._next_overlay_key() if new else self._overlay_key_for_edit()
         except ValueError as exc:self.statusBar().showMessage(str(exc),6000);return
-        dialog = OverlayOptionsDialog(self, key=key)
+        dialog = OverlayOptionsDialog(self, key=key, blank=new)
         self.dialogs["overlay_options"] = dialog
         dialog.setModal(True); dialog.show()
         return dialog
 
-    def auto_configure_overlay(self):
+    def auto_configure_overlay(self, *, new=False):
         if not self.curves: return
         from .auto_configure import AutoConfigureDialog
         old = self.dialogs.get("auto_configure")
         if old and old.isVisible(): old.raise_(); return old
-        try:dialog=AutoConfigureDialog(self)
+        try:dialog=AutoConfigureDialog(self, blank=new)
         except ValueError as exc:self.statusBar().showMessage(str(exc),6000);return
         self.dialogs["auto_configure"] = dialog
         dialog.show(); return dialog
@@ -1979,9 +2033,9 @@ class ClassicMainWindow(MainWindow):
     def write_plot(self, path):
         with self.output_heading(): MainWindow.write_plot(self, path)
 
-    def output_pixmap(self):
+    def output_pixmap(self, *, dpi=150):
         buffer = BytesIO()
-        with self.output_heading(): self.figure.savefig(buffer, format="png", dpi=150, facecolor="white", bbox_inches=self.figure.bbox_inches.padded(0.25))
+        with self.output_heading(): self.figure.savefig(buffer, format="png", dpi=dpi, facecolor="white", bbox_inches=self.figure.bbox_inches.padded(0.25))
         return QPixmap.fromImage(QImage.fromData(buffer.getvalue()))
 
     def toggle_legend(self):

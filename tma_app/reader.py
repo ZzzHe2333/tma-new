@@ -12,8 +12,14 @@ import hashlib
 from pathlib import Path
 import re
 import unicodedata
+from collections import OrderedDict
+from copy import deepcopy
+import threading
 
 import numpy as np
+
+_DATASET_CACHE = OrderedDict()
+_DATASET_LOCK = threading.RLock()
 
 
 class ParseError(ValueError):
@@ -100,7 +106,7 @@ def _field(metadata: dict[str, list[str]], name: str, default: str = "") -> str:
     return next((v[0] for k, v in metadata.items() if k.casefold() == name.casefold()), default)
 
 
-def _signals(metadata: dict[str, list[str]]) -> list[Signal]:
+def _signals(metadata: dict[str, list[str]], *, allow_missing_tail=False) -> list[Signal]:
     try:
         count = int(_field(metadata, "Nsig"))
     except ValueError as exc:
@@ -111,6 +117,13 @@ def _signals(metadata: dict[str, list[str]]) -> list[Signal]:
     for i in range(1, count + 1):
         label = _field(metadata, f"Sig{i}").strip()
         if not label:
+            # Historical edited StartOfData exports can keep Nsig and all data
+            # columns while omitting trailing Sig definitions. Preserve those
+            # numeric columns with explicit unknown identities; do not infer a
+            # gas channel or shift later columns into missing definitions.
+            if allow_missing_tail and result and not any(_field(metadata, f'Sig{j}').strip() for j in range(i+1, count+1)):
+                result.extend(Signal(f'Unnamed Signal {j}') for j in range(i, count+1))
+                break
             raise ParseError(f"缺少 Sig{i} 信号定义")
         match = re.fullmatch(r"(.+?)\s*\((.*)\)\s*", label)
         result.append(Signal(match[1].strip(), match[2].strip()) if match else Signal(label))
@@ -134,9 +147,13 @@ def _read_text(buf: bytes, encoding: str):
     if not match:
         raise ParseError("不是支持的 TA StartOfData 文本或 Q400 TMA 二进制文件")
     metadata = _metadata(text[:match.start()])
-    signals = _signals(metadata)
+    signals = _signals(metadata, allow_missing_tail=True)
     rows = []
     warnings = []
+    missing = [str(i) for i in range(1, len(signals)+1) if not _field(metadata, f'Sig{i}').strip()]
+    if missing:
+        metadata['_undefined_signals'] = missing
+        warnings.append('文本头缺少 ' + '、'.join('Sig'+i for i in missing) + ' 定义；对应数据列完整保留为未命名信号，单位未知，未推断其含义。')
     for line_number, line in enumerate(text[match.end():].splitlines(),
                                        text[:match.end()].count("\n") + 1):
         line = line.strip()
@@ -265,6 +282,13 @@ def read_dataset(path: str | Path) -> Dataset:
     """
     from .cloud_storage import resolve_source
     path = resolve_source(path)
+    stat = path.stat()
+    key = (str(path.absolute()), stat.st_mtime_ns, stat.st_size, stat.st_ino, stat.st_ctime_ns)
+    with _DATASET_LOCK:
+        cached = _DATASET_CACHE.get(key)
+        if cached is not None:
+            _DATASET_CACHE.move_to_end(key)
+            return deepcopy(cached)
     buf = path.read_bytes()
     if not buf:
         raise ParseError("文件为空")
@@ -278,4 +302,16 @@ def read_dataset(path: str | Path) -> Dataset:
         signals, values, metadata, warnings = _read_binary(buf)
     else:
         raise ParseError("未知文件格式；支持已验证的 Q400 TMA 二进制或含 Nsig/Sig/StartOfData 的 TA 文本")
-    return Dataset(path, signals, values, metadata, warnings, hashlib.sha256(buf).hexdigest())
+    dataset = Dataset(path, signals, values, metadata, warnings, hashlib.sha256(buf).hexdigest())
+    after = path.stat()
+    if (after.st_mtime_ns, after.st_size, after.st_ino, after.st_ctime_ns) != key[1:]:
+        raise ParseError('数据文件在读取期间发生变化，请重试')
+    with _DATASET_LOCK:
+        for old in list(_DATASET_CACHE):
+            if old[0] == key[0]:_DATASET_CACHE.pop(old,None)
+        # Cache independent originals only; opening twice still gets separate
+        # arrays, metadata, analysis state and document identities.
+        if dataset.values.nbytes <= 64*1024*1024:_DATASET_CACHE[key] = deepcopy(dataset)
+        while len(_DATASET_CACHE)>8 or sum(c.values.nbytes for c in _DATASET_CACHE.values())>128*1024*1024:
+            _DATASET_CACHE.popitem(last=False)
+    return dataset

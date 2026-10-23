@@ -20,6 +20,12 @@ def validate_mass(value):
 
 def known_mass_mg(curve):
     """Only real read values; never use the annotation's 0.50 mg fallback."""
+    from .mass_cache import peek
+    try:
+        cached = peek(curve.sample_name)
+        value = match_mass_mg(cached)
+        if value is not None: return value
+    except (ValueError, OSError): pass
     metadata=curve.dataset.metadata
     keys=['LookupMass','Mass']
     sample=metadata.get('LookupMassSample')
@@ -36,6 +42,12 @@ def known_mass_mg(curve):
         try:return validate_mass(float(match.group(1))*(1000. if unit=='g' else 1.))
         except ValueError:continue
     return None
+
+
+def match_mass_mg(match):
+    if match is None or match.value is None or match.unit not in ('', 'mg', 'g'): return None
+    try: return validate_mass(match.value * (1000. if match.unit == 'g' else 1.))
+    except ValueError: return None
 
 
 def members(owner,document):

@@ -1,22 +1,37 @@
 """Local named paths and read-only weighing-sheet lookup settings."""
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer, Slot
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTableWidget,
-    QTableWidgetItem, QPushButton, QFileDialog, QDialogButtonBox, QCheckBox)
-from .path_settings import ensure_config, load_paths, save_paths, batch_popup_enabled, save_batch_popup
+    QTableWidgetItem, QPushButton, QFileDialog, QDialogButtonBox, QCheckBox, QDoubleSpinBox, QComboBox)
+from .path_settings import ensure_config, load_paths, save_settings, batch_popup_enabled
 
 
 class SettingsDialog(QDialog):
     def __init__(self, owner):
         super().__init__(owner); self.owner = owner
+        self.mass_job = None; self.tested_mass = None; self.test_request = None
         self.setWindowTitle("设置 · 数据路径"); self.setObjectName("PathSettingsDialog"); self.resize(760, 390)
         layout = QVBoxLayout(self)
         self.location = QLabel(f"配置文件：{ensure_config()}"); self.location.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.location.setWordWrap(True); layout.addWidget(self.location)
         hint = QLabel("默认打开文件夹：导入数据时首先打开此文件夹，重启后仍生效。\nm：选择称量表或其所在文件夹，支持 CSV、XLSX、XLS。优先识别样品名与重量表头；无表头时读取 B 列名称、C 列重量。")
         hint.setWordWrap(True); layout.addWidget(hint)
+        from .ui_size import PRESETS, saved_size
+        size_row = QHBoxLayout(); size_row.addWidget(QLabel('字体与界面大小'))
+        self.ui_size = QComboBox(); self.ui_size.setObjectName('UiSizePreset')
+        for key, label, _ in PRESETS: self.ui_size.addItem(label, key)
+        self.ui_size.setCurrentIndex(self.ui_size.findData(saved_size())); size_row.addWidget(self.ui_size)
+        self.original_ui_size = self.ui_size.currentData()
+        size_row.addWidget(QLabel('字体、图标、预览整体放大，重启后生效'), 1); layout.addLayout(size_row)
         self.batch_popup = QCheckBox("批量导入后自动弹出结果窗口（关闭后仍会后台计算，可从文件菜单查看）")
         self.batch_popup.setObjectName("BatchPopupSetting")
         self.batch_popup.setChecked(batch_popup_enabled()); layout.addWidget(self.batch_popup)
+        from .mass_cache import refresh_hours
+        cache_row = QHBoxLayout(); cache_row.addWidget(QLabel('m 缓存有效期'))
+        self.cache_hours = QDoubleSpinBox(); self.cache_hours.setRange(1, 720); self.cache_hours.setSuffix(' 小时')
+        self.cache_hours.setValue(refresh_hours()); cache_row.addWidget(self.cache_hours)
+        cache_row.addWidget(QLabel('优先复用，重启后保留'), 1)
+        self.refresh_button = QPushButton('强制刷新 m'); self.refresh_button.clicked.connect(lambda: self.test_mass(force=True))
+        cache_row.addWidget(self.refresh_button); layout.addLayout(cache_row)
         self.paths = QTableWidget(0, 2); self.paths.setHorizontalHeaderLabels(["路径名称", "文件或文件夹路径"])
         self.paths.setColumnWidth(0, 140); self.paths.horizontalHeader().setStretchLastSection(True); layout.addWidget(self.paths)
         self.original_paths = load_paths()
@@ -27,6 +42,7 @@ class SettingsDialog(QDialog):
         row = QHBoxLayout()
         for caption, callback in (("选择文件…", self.choose_file), ("云盘文件…", self.choose_cloud_file), ("选择文件夹…", self.choose_folder), ("新增路径", self.add_path), ("删除路径", self.remove_path), ("测试 m 匹配", self.test_mass)):
             button = QPushButton(caption); button.clicked.connect(callback); row.addWidget(button)
+            if caption == "测试 m 匹配": self.test_button = button
         layout.addLayout(row)
         self.feedback = QLabel(); self.feedback.setWordWrap(True); self.feedback.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse); layout.addWidget(self.feedback)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
@@ -34,6 +50,9 @@ class SettingsDialog(QDialog):
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
         buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject); layout.addWidget(buttons)
         self.paths.setCurrentCell(0, 1)
+        self.paths.itemChanged.connect(self.path_changed)
+        self.slow_timer = QTimer(self); self.slow_timer.setSingleShot(True)
+        self.slow_timer.timeout.connect(lambda: self.feedback.setText("m 数据源响应较慢，仍在后台读取；可以继续保存设置或关闭窗口。"))
 
     def add_row(self, name, path):
         index = self.paths.rowCount(); self.paths.insertRow(index)
@@ -83,22 +102,72 @@ class SettingsDialog(QDialog):
             result[name] = path
         return result
 
-    def test_mass(self):
-        from .mass_lookup import lookup_record
+    def stop_mass_test(self):
+        self.slow_timer.stop()
+        if self.mass_job is not None:
+            self.mass_job.cancel(); self.mass_job.deleteLater(); self.mass_job = None
+        self.test_button.setEnabled(True)
+        self.refresh_button.setEnabled(True)
+
+    def path_changed(self, item):
+        if self.test_request is None: return
+        try: changed = self.values().get('m', '') != self.test_request[1]
+        except ValueError: changed = True
+        if changed:
+            self.stop_mass_test(); self.tested_mass = None; self.test_request = None
+            self.feedback.setText("m 路径已修改，请重新测试；可以直接保存，样品重量将在后台刷新。")
+
+    def test_mass(self, *, force=False):
+        from .mass_jobs import MassLookupJob
         curve = self.owner.selected()
         if curve is None: self.feedback.setText("请先导入一个样品，再测试 m 匹配。"); return
-        try: result = lookup_record(curve.sample_name, self.values()["m"])
+        try: source = self.values()["m"]
         except ValueError as exc: self.feedback.setText(str(exc)); return
-        self.feedback.setText(f"样品：{curve.sample_name}\n" + (f"m = {result.value:g} {result.unit}\n来源：{result.source}" if result.value is not None else result.message))
+        if self.mass_job is not None: return
+        self.test_request = (curve.sample_name, source); self.tested_mass = None
+        self.mass_job = MassLookupJob([('test', curve.sample_name)], source, self, force=force)
+        self.mass_job.row_ready.connect(self.mass_test_ready)
+        self.mass_job.finished.connect(self.mass_test_finished)
+        self.test_button.setEnabled(False)
+        self.refresh_button.setEnabled(False)
+        self.feedback.setText(f"样品：{curve.sample_name}\n正在后台测试 m 匹配，可以继续编辑或保存设置…")
+        self.slow_timer.start(10000); self.mass_job.start()
+
+    @Slot(str, object)
+    def mass_test_ready(self, key, result):
+        if self.sender() is not self.mass_job or self.test_request is None: return
+        sample, source = self.test_request
+        try:
+            if self.values()['m'] != source: return
+        except ValueError: return
+        self.tested_mass = (sample, source, result)
+        self.feedback.setText(f"样品：{sample}\n" + (f"m = {result.value:g} {result.unit}\n来源：{result.source}" if result.value is not None else result.message))
+        if result.value is not None and '暂不可用' in result.message:
+            self.feedback.setText(self.feedback.text()+'\n'+result.message)
+
+    @Slot()
+    def mass_test_finished(self):
+        if self.sender() is not self.mass_job: return
+        self.stop_mass_test()
 
     def accept(self):
-        from .mass_lookup import clear_cache
         try:
             paths = self.values()
-            save_paths(paths)
-            save_batch_popup(self.batch_popup.isChecked())
+            saved = save_settings(paths, batch_popup=self.batch_popup.isChecked(), cache_hours=self.cache_hours.value())
         except (ValueError, OSError) as exc: self.feedback.setText(str(exc)); return
-        if paths.get('m', '') != self.original_paths.get('m', ''):
-            clear_cache(); self.owner.refresh_mass_lookup()
-        else: self.owner.statusBar().showMessage("路径设置已保存")
+        tested = self.tested_mass
+        self.stop_mass_test()
+        if paths.get('m', '') != self.original_paths.get('m', '') or tested is not None:
+            seed = {tested[0]: tested[2]} if tested is not None and tested[1] == paths.get('m', '') else None
+            self.owner.refresh_mass_lookup(initial_matches=seed)
+        else: self.owner.statusBar().showMessage(f"路径设置已保存：{saved}")
+        if self.ui_size.currentData() != self.original_ui_size:
+            from .ui_size import change_from_menu
+            change_from_menu(self.owner, self.ui_size.currentData())
         super().accept()
+
+    def reject(self):
+        self.stop_mass_test(); super().reject()
+
+    def closeEvent(self, event):
+        self.stop_mass_test(); super().closeEvent(event)

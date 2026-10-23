@@ -13,8 +13,6 @@ from __future__ import annotations
 import math
 
 import numpy as np
-from scipy.integrate import trapezoid
-from scipy.signal import savgol_filter
 
 
 def _xy(x, y, minimum=2):
@@ -153,6 +151,9 @@ def analyze(x, y, kind: str, lo: float, hi: float,
                       min_x=xa[minimum], min_y=ya[minimum],
                       algorithm="Sampled maximum and minimum; first acquired point wins ties")
     elif kind == "integral":
+        # Keep optional scientific modules off the empty-window startup path.
+        # Use the same implementation when the corresponding method is used.
+        from scipy.integrate import trapezoid
         with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
             baseline = ya[0] + (ya[-1] - ya[0]) * ((xa - xa[0]) / (xa[-1] - xa[0]))
             area = trapezoid(ya - baseline, xa)
@@ -218,6 +219,7 @@ def process_signal(x, y, kind, parameter=11) -> np.ndarray:
         window = int(value)
         if window > len(ya):
             raise ValueError("平滑窗口不能超过数据点数")
+        from scipy.signal import savgol_filter
         output = savgol_filter(ya, window, polyorder=min(3, window - 1))
     elif kind == "derivative":
         _monotonic(xa)

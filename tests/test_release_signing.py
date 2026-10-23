@@ -144,3 +144,57 @@ def test_failure_leaves_original_and_removes_only_temporary_copy(config, package
     assert sentinel.read_text() == "keep"
     assert not list(package.glob(".signing-*"))
     assert not (package / "release-security.json").exists()
+
+
+def run_local_ps(code, ok=True):
+    return run_ps(". " + quote(ROOT / "tools/local_windows_signing.ps1") + "; " + code, ok=ok)
+
+
+@pytest.mark.parametrize("changes", [
+    {"enabled": False}, {"enabled": True, "store_location": "LocalMachine"},
+    {"enabled": True, "certificate_thumbprint": ""},
+])
+def test_local_requires_its_enabled_user_certificate(config, changes):
+    data = json.loads(config.read_text())
+    data.update(changes)
+    config.write_text(json.dumps(data))
+    result = run_local_ps("Get-TmaLocalSigningPlan " + quote(config), ok=False)
+    assert "Local test signing requires" in result.stderr
+
+
+def test_local_cannot_satisfy_public_release_requirement(tmp_path):
+    target = tmp_path / "must-not-build"
+    result = subprocess.run([PS, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ROOT / "tools/build_windows.ps1"),
+                             "-DistPath", str(target), "-LocalTestSigning", "-RequireSignature"],
+                            capture_output=True, timeout=30, env=windows_ps_env())
+    assert result.returncode != 0
+    assert b"cannot satisfy the public release" in result.stderr
+    assert not target.exists()
+
+
+@pytest.mark.parametrize("mode", ["tool_failure", "signature_failure"])
+def test_local_failure_keeps_original(config, package, mode):
+    exe = package / "ZzzHe TMA Analysis.exe"
+    original = exe.read_bytes()
+    mock = "function Get-TmaLocalSigningPlan { [pscustomobject]@{Config=(Read-TmaSigningConfig " + quote(config) + ");Certificate=[pscustomobject]@{Thumbprint=('A'*40)};Tool='mock'} }; "
+    if mode == "tool_failure":
+        mock += "function Invoke-TmaSignTool { throw 'simulated signing failure' }; "
+    else:
+        mock += "function Invoke-TmaSignTool {}; function Test-TmaLocalFileSignature { throw 'simulated verification failure' }; "
+    result = run_local_ps(mock + "Invoke-TmaLocalReleaseSigning -PackagePath " + quote(package), ok=False)
+    assert "simulated" in result.stderr
+    assert exe.read_bytes() == original
+    assert not list(package.glob(".signing-*"))
+    assert not (package / "release-security.json").exists()
+
+
+@pytest.mark.parametrize("mode", ["wrong_publisher", "unsigned", "missing_timestamp"])
+def test_local_rejects_unpinned_signer_or_missing_timestamp(mode):
+    if mode == "unsigned":
+        signer = "$null"
+    else:
+        signer = "[pscustomobject]@{Thumbprint=('A'*40)}"
+    expected = "B" * 40 if mode == "wrong_publisher" else "A" * 40
+    mock = "function Get-AuthenticodeSignature { [pscustomobject]@{SignerCertificate=" + signer + ";TimeStamperCertificate=$null} }; "
+    result = run_local_ps(mock + "Test-TmaLocalFileSignature 'unused.exe' '" + expected + "'", ok=False)
+    assert "does not match" in result.stderr or "timestamp is missing" in result.stderr

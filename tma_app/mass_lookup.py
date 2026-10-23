@@ -28,11 +28,14 @@ from pathlib import Path
 import csv
 from io import StringIO
 from dataclasses import dataclass
+import threading
 
 MASS_XLSX = os.environ.get("TMA_MASS_XLSX", "//192.168.0.105/TMA称量数据.xlsx")
 
 _unavailable = False
 _table_cache = {}
+_table_locks = {}
+_table_locks_guard = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -145,9 +148,11 @@ def configured_source():
     return mass_source()
 
 
-def clear_cache():
+def clear_cache(*, disk=True):
     global _unavailable
     _table_cache.clear(); _unavailable = False
+    from .mass_cache import clear
+    clear(disk=disk)
 
 
 def _rows(path):
@@ -180,14 +185,29 @@ def _header(text):
     return re.sub(r'[\s_()（）\[\]：:/\\-]', '', str(text)).casefold().lstrip('\ufeff')
 
 
-def _records(path):
+def _records(path, *, force=False):
+    # Curve import and the batch table can request the same workbook together.
+    # Read each revision once; unrelated sources never wait on this file's I/O.
+    key = os.path.normcase(str(path.absolute()))
+    with _table_locks_guard:
+        lock = _table_locks.setdefault(key, threading.Lock())
+    with lock:
+        if force:
+            for cached in list(_table_cache):
+                if os.path.normcase(cached[0]) == key: _table_cache.pop(cached, None)
+        return _read_records(path)
+
+
+def _read_records(path):
     stamp = path.stat()
     cache_key = (str(path.resolve()), stamp.st_mtime_ns, stamp.st_size)
-    if cache_key in _table_cache: return _table_cache[cache_key]
+    cached = _table_cache.get(cache_key)
+    if cached is not None: return cached
     names = {'样品', '样品名', '样品名称', '样本名', '批次', '批次号', '批号', '编号', 'samplename', 'sample', 'batch', 'batchnumber', '批次编号'}
     masses = {'m', '重量', '质量', '称量重量', '样品重量', '样品质量', 'mass', 'weight'}
     records = []
     for sheet_name, rows in _rows(path):
+        origin = cache_key[0] + (f' [{sheet_name}]' if sheet_name else '')
         name_col, mass_col, start, unit = 1, 2, 0, ''
         for index, row in enumerate(rows[:20]):
             headers = [_header(v) for v in row]
@@ -204,37 +224,32 @@ def _records(path):
             if value is None or not math.isfinite(value) or value <= 0: continue
             raw_unit = re.search(r'\b(mg|g)\s*$', str(row[mass_col]), re.I)
             record_unit = raw_unit.group(1).lower() if raw_unit else unit
-            records.append((row[name_col], value, record_unit, str(path.resolve()) + (f' [{sheet_name}]' if sheet_name else '')))
+            records.append((row[name_col], value, record_unit, origin))
     # Keep only the current revision of this file in memory.
     for key in list(_table_cache):
-        if key[0] == cache_key[0]: del _table_cache[key]
+        if key[0] == cache_key[0]: _table_cache.pop(key, None)
     _table_cache[cache_key] = records
     return records
 
 
-def lookup_record(sample, source=None):
+def _load_source_records(source, *, force=False):
+    from .cloud_storage import resolve_source
+    path = resolve_source(source)
+    files = sorted((p for p in path.iterdir() if p.is_file() and p.suffix.lower() in ('.csv','.cvs','.xlsx','.xls') and not p.name.startswith('~$')), key=lambda p:p.name.casefold()) if path.is_dir() else [path]
+    if not files: raise ValueError('文件夹中未找到称量表')
+    return [(_normalize(batch), value, unit, origin) for file in files
+            for batch, value, unit, origin in _records(file, force=force)]
+
+
+def lookup_record(sample, source=None, *, force=False):
     global _unavailable
     try:
         source = configured_source() if source is None else str(source).strip()
         if not source: return MassMatch(message='未配置 m 数据源')
-        from .cloud_storage import resolve_source
-        path = resolve_source(source)
-        files = sorted((p for p in path.iterdir() if p.is_file() and p.suffix.lower() in ('.csv','.cvs','.xlsx','.xls') and not p.name.startswith('~$')), key=lambda p:p.name.casefold()) if path.is_dir() else [path]
-        if not files: return MassMatch(source=source, message='文件夹中未找到 CSV、XLSX 或 XLS 文件')
-        raw = {_normalize(c) for c in _batch_candidates(str(sample))}
-        keys = set().union(*(_batch_keys(c) for c in raw)) if raw else set()
-        found = []
-        for file in files:
-            for batch, value, unit, origin in _records(file):
-                rank = 0 if _normalize(batch) in raw else 1 if keys & _batch_keys(batch) else None
-                if rank is not None: found.append((rank, value, unit, origin))
-        _unavailable = False
-        if not found: return MassMatch(source=source, message=f'未找到样品“{sample}”的有效重量')
-        rank = min(row[0] for row in found); found = [row for row in found if row[0] == rank]
-        if len({(row[1], row[2]) for row in found}) != 1:
-            return MassMatch(source=source, message=f'样品“{sample}”存在不同重量或单位，未自动选取')
-        _, value, unit, origin = found[0]
-        return MassMatch(value, origin, unit, '匹配成功')
+        from .mass_cache import lookup
+        result = lookup(sample, source, force=force)
+        _unavailable = '暂不可用' in result.message
+        return result
     except Exception as exc:
         _unavailable = True
         return MassMatch(source=str(source or ''), message=f'm 数据源未读取：{exc}')

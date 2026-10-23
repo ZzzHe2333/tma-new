@@ -2,6 +2,12 @@ import os
 from pathlib import Path
 import sys
 
+from tma_app.diagnostics import install as install_diagnostics
+install_diagnostics()
+
+from tma_app.ui_size import configure_environment
+configure_environment()
+
 # A windowed Windows executable has no console streams. Some scientific
 # dependencies write import diagnostics even before the Qt application starts.
 if sys.stdout is None:
@@ -28,5 +34,9 @@ if __name__ == "__main__":
         from tma_app.cloud_storage import cleanup_main
         sys.exit(cleanup_main())
     else:
+        # PyInstaller otherwise recreates the font catalogue on every launch.
+        # Configure before app.py imports any Matplotlib module.
+        from tma_app.startup_cache import configure as configure_plot_cache
+        configure_plot_cache()
         from tma_app.app import main
         main()

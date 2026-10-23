@@ -74,6 +74,27 @@ def test_unknown_binary_rejected(tmp_path):
         read_dataset(path)
 
 
+@pytest.mark.parametrize('path',sorted((Path(__file__).resolve().parents[1]/'测试文件').glob('*.007')),ids=lambda p:p.name)
+def test_real_edited_text_preserves_all_columns_exactly(path):
+    before=path.read_bytes();text=before.decode('utf-16')
+    expected=np.array([[float(v) for v in line.split()] for line in text.split('StartOfData',1)[1].splitlines() if line.strip()])
+    ds=read_dataset(path)
+    assert ds.values.shape==(1140,5) and ds.signals[-1]==Signal('Unnamed Signal 5')
+    np.testing.assert_array_equal(ds.values,expected)
+    assert ds.metadata['_undefined_signals']==['5'] and len(ds.warnings)==1
+    assert path.read_bytes()==before and ds.sha256==hashlib.sha256(before).hexdigest()
+
+
+def test_missing_tail_text_supported_by_content_but_interior_missing_and_binary_rejected(tmp_path):
+    missing=HEADER.replace('Sig5 Sample Purge Flow (mL/min)\r\n','')
+    path=tmp_path/'edited.txt';path.write_text(missing+'StartOfData\n0 60 1 .06 50\n1 61 2 .06 50',encoding='utf-8')
+    ds=read_dataset(path);assert ds.values.shape==(2,5) and ds.signals[-1].unit==''
+    path.write_text(HEADER.replace('Sig2 Temperature (°C)\r\n','')+'StartOfData\n0 60 1 .06 50',encoding='utf-8')
+    with pytest.raises(ParseError,match='Sig2'):read_dataset(path)
+    path.write_bytes(binary().replace('Sig5 Sample Purge Flow (mL/min)\r\n'.encode('utf-16le'),b''))
+    with pytest.raises(ParseError,match='Sig5'):read_dataset(path)
+
+
 def test_other_binary_module_rejected(tmp_path):
     path = tmp_path / "DSC.001"
     path.write_bytes(binary().replace("TMA Standard".encode("utf-16le"),

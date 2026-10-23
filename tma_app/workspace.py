@@ -736,6 +736,9 @@ def load_session(path, include_plot_options=False):
             raise ValueError("会话分析结果格式无效")
         from .measurement import POINT_KINDS, point_values
         for result in results:
+            if 'area_profile' in result['values']:
+                from .area_calculation import validate_snapshot
+                validate_snapshot(result['values']['area_profile'],result['values'])
             if "interactive" not in result: continue
             state = result["interactive"]
             curve = next((c for c in curves if c.uid == result.get("curve_id")), None)

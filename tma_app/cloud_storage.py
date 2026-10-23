@@ -19,7 +19,6 @@ import threading
 import time
 from urllib.parse import quote, unquote, urljoin, urlsplit, urlunsplit
 
-import httpx
 from defusedxml import ElementTree as ET
 
 from .path_settings import config_path, _settings_data, _save_data
@@ -153,6 +152,7 @@ class WebDAV:
 
     @contextmanager
     def client(self):
+        import httpx
         password = protect_password(self.mount.get("password", ""), decrypt=True)
         auth = httpx.BasicAuth(self.mount.get("username", ""), password) if self.mount.get("username") or password else None
         with httpx.Client(auth=auth, verify=self.mount.get("verify_tls", True), follow_redirects=False,
@@ -204,6 +204,7 @@ class WebDAV:
         return remote_path(unquote(urlsplit(url).path)[len(prefix):])
 
     def list(self, directory="/"):
+        import httpx
         directory = remote_path(directory)
         url = self.url(directory).rstrip("/") + "/"
         body = b'<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:displayname/><d:resourcetype/><d:getcontentlength/><d:getlastmodified/><d:getetag/></d:prop></d:propfind>'
@@ -293,6 +294,7 @@ def checked_target(row):
 
 
 def fetch(mount_id, path, *, refresh=False, cancelled=None, progress=None):
+    import httpx
     mount = get_mount(mount_id)
     dav = WebDAV(mount); path = remote_path(path)
     origin = dav.base; target = target_path(mount_id, origin, path)

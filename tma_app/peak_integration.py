@@ -6,7 +6,6 @@ No heat-flow, sample-mass or instrument-specific normalization is inferred.
 """
 from copy import deepcopy
 import numpy as np
-from scipy.integrate import trapezoid
 from .transitions import _interval,_fit
 from .peak_onset import validate as validate_peak,_onset_windows
 
@@ -67,6 +66,7 @@ def profile(curve,entry,positions):return _profile(curve,entry,positions)[0]
 
 
 def values(curve,entry,positions):
+    from scipy.integrate import trapezoid
     parts,sigmoid=_profile(curve,entry,positions)
     config,x,y,positions,px,py,sp,pt,base,residual,slope=parts
     area=float(trapezoid(residual,pt));maximum=float(np.max(abs(residual)))
@@ -117,6 +117,10 @@ def values(curve,entry,positions):
             iteration_count=len(sigmoid['iterations']),signal_unit=curve.result_unit,
             onset_crossing_policy='nearest pre-peak acquired baseline/tangent crossing to final tangent start; first acquired tie; no extrapolation',
             algorithm='signed recorded-time trapezoids; initial endpoint linear baseline in displayed X; horizontal endpoint blend by preceding signed cumulative fraction;1% previous-area convergence,10iteration cap;128eps cancellation guard, no fraction clipping; original exact numeric policies unverified')
+    from .area_calculation import statistics,snapshot as area_snapshot
+    result.update(statistics(pt,py-base))
+    result['area_profile']=area_snapshot(px,py,pt,base,sp,coordinate='recorded_time',unit=result['area_unit'],
+        baseline_kind='sigmoid_horizontal' if sigmoid is not None else 'linear')
     if not np.isfinite([v for v in result.values() if isinstance(v,(int,float))]).all():raise ValueError('峰积分超出有限范围')
     return result
 

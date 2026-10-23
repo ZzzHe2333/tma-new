@@ -11,6 +11,8 @@ from pathlib import Path
 import tempfile
 import threading
 from functools import wraps
+from collections import OrderedDict
+from copy import deepcopy
 
 import numpy as np
 from . import piliang_core as original
@@ -20,6 +22,7 @@ KEYS = ("T1", "T2", "M", "H")
 HEADERS = ("T1 (°C)", "T2 (°C)", "M (mg)", "H (µm)")
 LOGGER = logging.getLogger(__name__)
 _BATCH_LOCK = threading.RLock()
+_CALC_CACHE = OrderedDict()
 
 
 def serialized(function):
@@ -48,6 +51,12 @@ def calculate_file(path):
         from .cloud_storage import resolve_source
         path = resolve_source(path)
         result.update(file=str(path), name=path.name)
+        stat = path.stat()
+        key = (str(path.absolute()), stat.st_mtime_ns, stat.st_size, stat.st_ino, stat.st_ctime_ns,
+               original.ALGORITHM_VERSION, original.SOURCE_SHA256)
+        if key in _CALC_CACHE:
+            _CALC_CACHE.move_to_end(key)
+            return deepcopy(_CALC_CACHE[key][1])
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
         text, read_meta = original.load_text_prefer_tajm(str(path), LOGGER)
         xs, ys, _ = original.extract_xy_from_file(original.parse_lines(text), LOGGER)
@@ -62,6 +71,16 @@ def calculate_file(path):
                       sha256=digest, details=details, algorithm=original.ALGORITHM_VERSION,
                       algorithm_source_sha256=original.SOURCE_SHA256, reader=read_meta.get("used"),
                       state="匹配 M…")
+        after = path.stat()
+        if (after.st_mtime_ns, after.st_size, after.st_ino, after.st_ctime_ns) != key[1:5]:
+            raise ValueError('数据文件在计算期间发生变化，请重试')
+        vector_bytes = sum(np.asarray(vector).nbytes * (4 if isinstance(vector, list) else 1) for vector in (xs, ys))
+        if vector_bytes <= 32*1024*1024:
+            for old in list(_CALC_CACHE):
+                if old[0] == key[0]: _CALC_CACHE.pop(old, None)
+            _CALC_CACHE[key] = (vector_bytes, deepcopy(result))
+            while len(_CALC_CACHE)>8 or sum(size for size, _ in _CALC_CACHE.values())>64*1024*1024:
+                _CALC_CACHE.popitem(last=False)
     except Exception as exc:
         result.update(error=str(exc), state="读取失败")
     return result

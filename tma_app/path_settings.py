@@ -1,9 +1,9 @@
 """Named data-source paths kept separately from sessions and raw instruments."""
 from __future__ import annotations
 import json
+import math
 import os
 from pathlib import Path
-import tempfile
 
 
 def config_path():
@@ -11,9 +11,7 @@ def config_path():
 
 
 def load_paths():
-    path = config_path()
-    if not path.exists(): return {"m": ""}
-    data = json.loads(path.read_text(encoding="utf-8-sig"))
+    data = _settings_data()
     paths = data.get("paths") if isinstance(data, dict) else None
     if not isinstance(paths, dict) or any(not isinstance(k, str) or not k.strip() or not isinstance(v, str) for k, v in paths.items()):
         raise ValueError("路径配置文件格式无效")
@@ -29,20 +27,57 @@ def save_paths(paths):
 
 
 def _settings_data():
-    path = config_path()
-    return json.loads(path.read_text(encoding="utf-8-sig")) if path.exists() else {"version": 1, "paths": {"m": ""}}
+    return _read_settings()[1]
+
+
+def _read_settings():
+    # Keep config_path() as the logical profile identity: caches, appearance,
+    # user activation and scheduled cleanup all derive their own paths from it.
+    from .ui_size import fallback_paths
+    candidates = list(dict.fromkeys([config_path(), *fallback_paths(config_path())]))
+    existing, errors = [], []
+    for path in candidates:
+        try: existing.append((path.stat().st_mtime_ns, path))
+        except FileNotFoundError: continue
+        except OSError as exc: errors.append(exc)
+    for _, path in sorted(existing, key=lambda item: item[0], reverse=True):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
+            if not isinstance(data, dict): raise ValueError("配置文件格式无效")
+            return path, data
+        except (OSError, ValueError) as exc: errors.append(exc)
+    if errors: raise errors[0]
+    return None, {"version": 1, "paths": {"m": ""}}
 
 
 def _save_data(data):
-    path = config_path(); path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary = tempfile.mkstemp(prefix="settings-", suffix=".tmp", dir=path.parent)
+    from .atomic_files import write_json
+    from .ui_size import fallback_path
+    primary = config_path()
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            json.dump(data, handle, ensure_ascii=False, indent=2)
-            handle.write("\n")
-        os.replace(temporary, path)
-    finally:
-        if Path(temporary).exists(): Path(temporary).unlink()
+        write_json(primary, data)
+        return primary
+    except OSError as exc:
+        backup = fallback_path(primary)
+        if backup is None or backup == primary: raise
+        try: write_json(backup, data)
+        except OSError as backup_exc:
+            raise OSError(f"配置保存失败。用户目录：{exc}；备用目录：{backup_exc}") from backup_exc
+        return backup
+
+
+def save_settings(paths, *, batch_popup, cache_hours):
+    """Save the data-path dialog as one transaction, retaining other sections."""
+    if not isinstance(paths, dict) or any(not isinstance(k, str) or not k.strip() or not isinstance(v, str) for k, v in paths.items()):
+        raise ValueError("路径名称和路径必须为文字")
+    if type(batch_popup) is not bool: raise ValueError("批量窗口设置必须为开或关")
+    if type(cache_hours) not in (int, float) or not math.isfinite(cache_hours) or not 1 <= cache_hours <= 720:
+        raise ValueError("m 缓存有效期须为 1–720 小时")
+    data = _settings_data()
+    data.update(version=1, paths={"m": "", **paths})
+    data['ui'] = {**data.get('ui', {}), 'batch_popup': batch_popup}
+    data['mass_cache'] = {**data.get('mass_cache', {}), 'refresh_hours': float(cache_hours)}
+    return _save_data(data)
 
 
 def batch_popup_enabled():
@@ -61,8 +96,8 @@ def save_batch_popup(enabled):
 
 
 def ensure_config():
-    if not config_path().exists(): save_paths({"m": ""})
-    return config_path()
+    path, data = _read_settings()
+    return path if path is not None else _save_data(data)
 
 
 def mass_source():
