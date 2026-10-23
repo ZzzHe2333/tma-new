@@ -48,18 +48,21 @@ class BatchJob(QObject):
                     if self.action == "calculate":
                         result = backend.calculate_file(request)
                         self.emit_result(key, result)
-                        if not self.cancelled.is_set():
-                            self.emit_result(key, backend.match_mass(result, self.source))
+                        if not self.cancelled.is_set() and not result.get('error'):
+                            try:
+                                matched=backend.match_mass(result, self.source)
+                            except Exception as exc:
+                                matched=dict(M=None,warning=f'M 未匹配：{exc}',state='M 未匹配',mass_source='',mass_config=self.source)
+                            # A late M reply must not erase an independently exported PNG.
+                            self.emit_result(key,{k:v for k,v in matched.items() if k in ('M','warning','state','mass_source','mass_config')})
                     elif self.action == "plot":
                         row, path = request
                         self.emit_result(key, {"png": backend.write_plot(row, path), "export_error": ""})
                     elif self.action == "xlsx":
                         rows, path = request
                         self.emit_result(key, {"xlsx": backend.write_xlsx(rows, path)})
-                    elif self.action == "history":
-                        self.emit_result(key, {"history": backend.save_history(request)})
                 except Exception as exc:
-                    self.emit_result(key, {"export_error": str(exc)})
+                    self.emit_result(key, {"error": str(exc), "state":"读取失败"} if self.action=='calculate' else {"export_error":str(exc)})
         finally:
             try:
                 self.finished.emit()
@@ -82,12 +85,16 @@ class BatchDialog(QDialog):
     def __init__(self, owner):
         super().__init__(owner)
         self.owner = owner
-        self.rows = []
+        if not hasattr(owner,'_batch_session_rows'):owner._batch_session_rows=[]
+        self.rows = owner._batch_session_rows
         self.view_rows = []
         self.latest_batch_id = None
-        self.history_dirty = False
         self.view_mode = "latest"
         self.job = None
+        self.export_job = None
+        self._shutdown = False
+        self._export_completed = set()
+        self._export_total = 0
         self._job_total = 0
         self._job_completed = set()
         self.setObjectName("BatchAnalysisDialog")
@@ -98,12 +105,12 @@ class BatchDialog(QDialog):
         self.resize(940, 570)
         self.setMinimumSize(760, 450)
         layout = QVBoxLayout(self)
-        self.hint = QLabel("导入即计算 · V233 算法\n温度单位 °C；M 单位 mg；H 单位 µm。M 使用「设置 → 数据路径 → m」，未匹配则留空。")
+        self.hint = QLabel("导入即计算 · V233 算法 · 批次仅保留到本次应用关闭\n温度单位 °C；M 单位 mg；H 单位 µm。M 未匹配时留空，已算出的结果仍可出图、导出和复制。")
         self.hint.setWordWrap(True)
         layout.addWidget(self.hint)
         filters = QHBoxLayout()
         self.latest_button = QPushButton("本次导入")
-        self.all_button = QPushButton("全部记录")
+        self.all_button = QPushButton("本次运行全部")
         self.issue_button = QPushButton("仅看异常")
         for button in (self.latest_button, self.all_button, self.issue_button):
             button.setCheckable(True)
@@ -166,10 +173,6 @@ class BatchDialog(QDialog):
             buttons.addWidget(button)
             setattr(self, name, button)
         layout.addLayout(buttons)
-        try:
-            self.rows = backend.load_history()
-        except (OSError, ValueError) as exc:
-            self.feedback.setText(f"历史记录未载入：{exc}")
         if self.rows:
             self.latest_batch_id = self.rows[-1]["batch_id"]
         self.update_batch_filter()
@@ -189,6 +192,7 @@ class BatchDialog(QDialog):
         self.enqueue_files([ds.path for ds in datasets.values()])
 
     def enqueue_files(self, paths):
+        if self._shutdown:return
         paths = [str(Path(path).resolve()) for path in paths]
         if not paths:
             self.feedback.setText("请先导入文件。")
@@ -208,7 +212,6 @@ class BatchDialog(QDialog):
                        state="排队中", mass_config=source, error="", warning="",
                        batch_id=batch_id, batch_label=batch_label, imported_at=stamp)
             self.rows.append(row)
-        self.history_dirty = True
         self.update_batch_filter()
         self.show_latest()
         self.feedback.setText(f"已加入 {len(paths)} 个文件，按导入顺序处理；可继续追加文件。")
@@ -264,14 +267,10 @@ class BatchDialog(QDialog):
         self.update_buttons()
 
     def start_pending(self):
-        if self.job is not None:
+        if self._shutdown or self.job is not None:
             return
         pending = [row for row in self.rows if row["state"] == "排队中"]
         if not pending:
-            if self.history_dirty:
-                self.history_dirty = False
-                self.start_job(BatchJob("history", [("history", backend.history_snapshot(self.rows))]))
-                return
             self.update_buttons()
             return
         # Separate queues when the weighing source changes between imports.
@@ -287,55 +286,71 @@ class BatchDialog(QDialog):
         self._job_completed = set()
         job.row_ready.connect(self.row_ready)
         job.finished.connect(self.job_finished)
-        self.progress.setRange(0, self._job_total)
-        self.progress.setValue(0)
-        self.progress.show()
+        self.update_progress()
         self.update_buttons()
         job.start()
 
+    def start_export_job(self,job):
+        if self._shutdown or self.export_job is not None:return
+        self.export_job=job
+        self._export_total=len(job.requests)
+        self._export_completed=set()
+        job.row_ready.connect(self.row_ready)
+        job.finished.connect(self.job_finished)
+        self.update_progress();self.update_buttons()
+        job.start()
+
+    def update_progress(self):
+        if self.export_job is not None:
+            total,done=self._export_total,len(self._export_completed)
+        elif self.job is not None:
+            total,done=self._job_total,len(self._job_completed)
+        else:self.progress.hide();return
+        self.progress.setRange(0,total);self.progress.setValue(done);self.progress.show()
+
     @Slot(str, object)
     def row_ready(self, key, result):
-        if self.job is None or self.job.cancelled.is_set():
+        job=self.sender()
+        if self._shutdown or job not in (self.job,self.export_job) or job is None or job.cancelled.is_set():
             return
-        if self.job.action == "history":
-            if result.get("export_error"):
-                self.feedback.setText("历史记录未保存：" + result["export_error"])
-        elif self.job.action == "xlsx":
+        if job.action == "xlsx":
             self.feedback.setText("XLSX 已保存：" + result["xlsx"] if "xlsx" in result else "导出失败：" + result.get("export_error", ""))
-            self._job_completed.add(key)
+            self._export_completed.add(key)
         else:
             index = next((i for i, row in enumerate(self.rows) if row["id"] == key), None)
             if index is None:
                 return
             self.rows[index].update(result)
-            self.history_dirty = True
             if self.issue_button.isChecked():
                 self.refresh_view()
             else:
                 visible = next((i for i, row in enumerate(self.view_rows) if row["id"] == key), None)
                 if visible is not None:
                     self.render_row(visible)
-            if self.job.action == "plot" or result.get("state") in ("完成", "M 未匹配", "读取失败"):
-                self._job_completed.add(key)
-        self.progress.setValue(len(self._job_completed))
+            if job.action == "plot":self._export_completed.add(key)
+            elif result.get("state") in ("完成", "M 未匹配", "读取失败"):self._job_completed.add(key)
+        self.update_progress();self.update_buttons()
 
     @Slot()
     def job_finished(self):
-        job = self.job
-        self.job = None
-        if job is not None:
+        job=self.sender()
+        if job is None or job not in (self.job,self.export_job):return
+        if job is self.export_job:
+            self.export_job=None
             if job.action == "plot":
                 keys = {key for key, _ in job.requests}
                 failed = sum(bool(row.get("export_error")) for row in self.rows if row["id"] in keys)
-                self.feedback.setText(f"出图完成：{len(self._job_completed)-failed} 张；失败 {failed} 张。" if not job.cancelled.is_set() else "已取消出图。")
-            elif job.action == "calculate":
+                self.feedback.setText(f"出图完成：{len(self._export_completed)-failed} 张；失败 {failed} 张。" if not job.cancelled.is_set() else "已取消出图。")
+        elif job is self.job:
+            self.job=None
+            if not self._shutdown:
                 failed = sum(bool(row.get("error")) for row in self.rows)
                 missing = sum(row.get("state") == "M 未匹配" for row in self.rows)
-                self.feedback.setText(f"历史共 {len(self.rows)} 个文件；读取失败 {failed} 个；M 未匹配 {missing} 个。未选中行时，出图/导出/复制仅处理当前筛选结果。")
-            job.deleteLater()
-        self.progress.hide()
+                self.feedback.setText(f"本次运行共 {len(self.rows)} 个文件；读取失败 {failed} 个；M 未匹配 {missing} 个。未选中行时处理当前筛选结果；关闭应用后清空批次。")
+        else:return
+        job.deleteLater()
         self.start_pending()
-        self.update_buttons()
+        self.update_progress();self.update_buttons()
 
     def render_row(self, index):
         row = self.view_rows[index]
@@ -361,6 +376,7 @@ class BatchDialog(QDialog):
         return [self.view_rows[i] for i in indices] if indices else list(self.view_rows)
 
     def selection_changed(self):
+        self.update_buttons()
         indices = sorted({item.row() for item in self.table.selectedIndexes()})
         if not indices:
             return
@@ -371,32 +387,38 @@ class BatchDialog(QDialog):
                               ("\n" + str(row.get("error") or row.get("warning") or row.get("png") or row["file"])))
 
     def update_buttons(self):
-        ready = bool(self.view_rows) and self.job is None
-        for button in (self.ExportBatchPlots, self.ExportBatchXlsx, self.CopyBatch):
-            button.setEnabled(ready)
-        self.CancelBatch.setEnabled(self.job is not None and self.job.action != "history")
+        if not hasattr(self,'ExportBatchPlots'):return
+        rows=self.exportable_rows()
+        ready=bool(rows) and not self._shutdown
+        self.CopyBatch.setEnabled(ready)
+        self.ExportBatchXlsx.setEnabled(ready and self.export_job is None)
+        self.ExportBatchPlots.setEnabled(any(r.get('T1') is not None and not r.get('error') for r in rows) and not self._shutdown and self.export_job is None)
+        self.CancelBatch.setEnabled(not self._shutdown and (self.job is not None or self.export_job is not None))
+
+    def exportable_rows(self):
+        return [row for row in self.selected_rows() if row.get('T1') is not None or row.get('error')]
 
     def copy_selection(self):
-        if self.job is not None:
-            return
-        rows = self.selected_rows()
+        if self._shutdown:return
+        rows = self.exportable_rows()
         if rows:
             QApplication.clipboard().setText(backend.table_text(rows))
-            self.feedback.setText(f"已复制 {len(rows)} 行 × 4 列（含表头），可直接粘贴到 Excel / WPS。")
+            self.feedback.setText(f"已复制 {len(rows)} 行 × 4 列（含表头），可直接粘贴到 Excel / WPS。未匹配的 M 留空，尚未计算的行暂不包含。")
 
     def export_xlsx(self):
-        if self.job is not None or not self.rows:
+        if self._shutdown or self.export_job is not None or not self.exportable_rows():
             return
+        rows=deepcopy(backend.history_snapshot(self.exportable_rows()))
         path, _ = QFileDialog.getSaveFileName(self, "导出批量结果", "TMA批量结果.xlsx", "Excel 工作簿 (*.xlsx)")
         if path:
             if not path.lower().endswith(".xlsx"):
                 path += ".xlsx"
-            self.start_job(BatchJob("xlsx", [("xlsx", (deepcopy(self.selected_rows()), path))]))
+            self.start_export_job(BatchJob("xlsx", [("xlsx", (rows, path))]))
 
     def export_plots(self):
-        if self.job is not None:
+        if self._shutdown or self.export_job is not None:
             return
-        rows = [row for row in self.selected_rows() if row.get("T1") is not None and not row.get("error")]
+        rows = [dict(row) for row in self.exportable_rows() if row.get("T1") is not None and not row.get("error")]
         if not rows:
             self.feedback.setText("所选行没有可出图的结果。")
             return
@@ -418,26 +440,25 @@ class BatchDialog(QDialog):
                     job.finished.emit()
                     return
                 super().run()
-        for row in rows:
-            row.pop("export_error", None)
-        self.start_job(PlotJob("plot", [(row["id"], None) for row in rows]))
+        keys={row['id'] for row in rows}
+        for row in self.rows:
+            if row['id'] in keys:row.pop("export_error",None)
+        self.start_export_job(PlotJob("plot", [(row["id"], None) for row in rows]))
 
     def cancel_processing(self):
-        if self.job is not None and self.job.action != "history":
-            self.job.cancelled.set()
+        for job in (self.job,self.export_job):
+            if job is not None:job.cancelled.set()
         for row in self.rows:
             if row["state"] in ("排队中", "计算中", "匹配 M…"):
                 row["state"] = "已取消"
-                self.history_dirty = True
         self.refresh_view()
         self.feedback.setText("已取消，已完成结果保留；正在进行的文件读取返回后停止。")
 
     def prepare_shutdown(self):
+        self._shutdown=True
         self.cancel_processing()
-        try:
-            backend.save_history(self.rows)
-        except (OSError, ValueError):
-            pass
+        self.rows.clear();self.latest_batch_id=None
+        self.update_batch_filter();self.refresh_view()
 
     def reject(self):
         self.cancel_processing()

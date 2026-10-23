@@ -126,7 +126,7 @@ def ui(monkeypatch):
     dialog = getattr(window, "batch_dialog", None)
     if dialog:
         dialog.cancel_processing()
-        wait_until(lambda: dialog.job is None)
+        wait_until(lambda: dialog.job is None and dialog.export_job is None)
     if window.worker is not None:
         wait_until(lambda: window.worker is None)
     window.dirty = False
@@ -192,10 +192,10 @@ def test_bottom_xlsx_and_plot_actions_really_write_outputs(ui, samples, tmp_path
     monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **kw: (str(target), ""))
     monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *a, **kw: str(tmp_path))
     dialog.ExportBatchXlsx.click()
-    wait_until(lambda: dialog.job is None)
+    wait_until(lambda: dialog.export_job is None)
     assert target.exists()
     dialog.ExportBatchPlots.click()
-    wait_until(lambda: dialog.job is None)
+    wait_until(lambda: dialog.export_job is None)
     assert Path(dialog.rows[0]["png"]).is_file()
     assert not dialog.rows[0].get("export_error")
 
@@ -216,8 +216,9 @@ def test_latest_only_all_batches_filter_and_restart(ui, samples):
     assert len(QApplication.clipboard().text().splitlines()) == 3
     dialog.latest_button.click()
     assert len(dialog.view_rows) == 1
-    assert batch.history_path().is_file()
-    stored = batch.load_history()
+    from tma_app.path_settings import config_path
+    assert not (config_path().parent/'batch_history.json').exists()
+    stored = batch.history_snapshot(dialog.rows)
     assert len(stored) == 3 and "xs" not in stored[0] and "ys" not in stored[0]
     from tma_app.batch_dialog import BatchDialog
     reopened = BatchDialog(ui)
@@ -248,13 +249,12 @@ def test_popup_setting_persists_and_silent_import_still_calculates(ui, samples):
     assert batch_popup_enabled()
 
 
-def test_saved_history_can_plot_and_rejects_changed_source(samples, tmp_path):
+def test_compact_result_snapshot_can_plot_and_rejects_changed_source(samples, tmp_path):
     local = tmp_path / "local.001"
     local.write_bytes(samples[0].read_bytes())
     row = batch.calculate_file(local)
     row.update(id="row", batch_id="batch", batch_label="first")
-    batch.save_history([row])
-    stored = batch.load_history()[0]
+    stored = batch.history_snapshot([row])[0]
     assert "xs" not in stored
     batch.write_plot(stored, tmp_path / "history.png")
     assert (tmp_path / "history.png").is_file()

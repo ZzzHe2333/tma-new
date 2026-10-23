@@ -230,7 +230,7 @@ def create_http_app(settings, jobs, active):
         """查看应用版本、批量算法、已配置的 M 路径和服务状态，不访问桌面曲线。"""
         return {"app": APP_NAME, "version": __version__, "algorithm": "V233", "transport": "streamable-http",
                 "endpoint": endpoint(settings["port"]), "mass_source": path_settings.mass_source(),
-                "max_files_per_batch": 1000, "history": "服务内存中最近 20 个任务，与桌面批量历史独立"}
+                "max_files_per_batch": 1000, "history": "服务内存中最近 20 个任务，与桌面本次运行批次独立"}
 
     @server.tool(annotations=read)
     def tma_batch_analyze(files: list[str], mass_source: str | None = None) -> dict:

@@ -7,7 +7,6 @@ from io import StringIO
 import logging
 import math
 import os
-import json
 from pathlib import Path
 import tempfile
 import threading
@@ -32,50 +31,12 @@ def serialized(function):
     return wrapped
 
 
-def history_path():
-    from .path_settings import config_path
-    return config_path().parent / "batch_history.json"
-
-
 def history_snapshot(rows):
-    """Keep metrics/provenance, not raw arrays or temporary export errors."""
+    """Compact result snapshot for exports/MCP, without acquired arrays."""
     keys = {"id", "batch_id", "batch_label", "imported_at", "file", "name", "T1", "T2", "M", "H",
             "H1", "H2", "error", "warning", "mass_source", "mass_config", "state", "png", "sha256",
             "algorithm", "algorithm_source_sha256", "reader"}
     return [{key: value for key, value in row.items() if key in keys} for row in rows]
-
-
-def load_history():
-    path = history_path()
-    if not path.exists():
-        return []
-    data = json.loads(path.read_text(encoding="utf-8-sig"))
-    rows = data.get("rows") if isinstance(data, dict) else None
-    if not isinstance(rows, list):
-        raise ValueError("批量历史记录格式无效")
-    seen = set()
-    for row in rows:
-        if not isinstance(row, dict) or any(not isinstance(row.get(k), str) for k in ("id", "batch_id", "batch_label", "file", "name", "state")) or row["id"] in seen:
-            raise ValueError("批量历史记录内容无效")
-        seen.add(row["id"])
-        if any(row.get(key) is not None and (type(row[key]) not in (int, float) or not math.isfinite(row[key])) for key in (*KEYS, "H1", "H2")):
-            raise ValueError("批量历史数值无效")
-        if row["state"] in ("计算中", "排队中", "匹配 M…"):
-            row["state"] = "未完成"
-    return rows
-
-
-def save_history(rows):
-    path = history_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary = tempfile.mkstemp(prefix="batch-history-", suffix=".tmp", dir=path.parent)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            json.dump({"version": 1, "rows": history_snapshot(rows)}, handle, ensure_ascii=False, allow_nan=False)
-        os.replace(temporary, path)
-    finally:
-        Path(temporary).unlink(missing_ok=True)
-    return str(path)
 
 
 @serialized
@@ -106,9 +67,8 @@ def calculate_file(path):
     return result
 
 
-@serialized
 def match_mass(result, source):
-    """Retain file-name matching; configured sources support mg or explicit g."""
+    """External weighing I/O must not hold the algorithm/Matplotlib lock."""
     result = dict(result)
     if result.get("error"):
         return result
@@ -154,7 +114,6 @@ def protect_output(path, rows):
                 raise ValueError("输出不能覆盖原始数据或称量表")
 
 
-@serialized
 def write_xlsx(rows, path):
     """Four numeric columns; file identity/status is stored in cell comments."""
     from openpyxl import Workbook

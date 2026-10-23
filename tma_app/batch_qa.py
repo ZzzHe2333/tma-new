@@ -6,6 +6,7 @@ from pathlib import Path
 import os
 import traceback
 import uuid
+import threading
 
 from PySide6.QtCore import QEventLoop, QTimer
 from PySide6.QtWidgets import QApplication, QFileDialog
@@ -81,7 +82,7 @@ def verify_batch(window, output, paths):
             QFileDialog.getSaveFileName = staticmethod(lambda *a, **kw: (str(xlsx), ""))
             QFileDialog.getExistingDirectory = staticmethod(lambda *a, **kw: str(plot_folder))
             dialog.ExportBatchXlsx.click()
-            wait_until(lambda: dialog.job is None)
+            wait_until(lambda: dialog.export_job is None)
             from openpyxl import load_workbook
             workbook = load_workbook(xlsx, data_only=True)
             sheet_out = workbook.active
@@ -92,7 +93,7 @@ def verify_batch(window, output, paths):
                 assert row["file"] in sheet_out.cell(index, 1).comment.text
             workbook.close()
             dialog.ExportBatchPlots.click()
-            wait_until(lambda: dialog.job is None)
+            wait_until(lambda: dialog.export_job is None)
             from PIL import Image
             for row in dialog.view_rows:
                 assert row.get("png") and not row.get("export_error")
@@ -116,13 +117,53 @@ def verify_batch(window, output, paths):
         assert len(dialog.rows) == 5 and len(dialog.view_rows) == 2
         assert window.show_batch_analysis() is dialog and dialog.isVisible()
         report["checks"].append("popup_disabled_still_computes_and_menu_reopens")
+        # A weighing share can stall after T1/T2/H are already calculated.
+        # Exercise the actual buttons before allowing that lookup to return.
+        from .mass_lookup import MassMatch
+        entered,release=threading.Event(),threading.Event()
+        previous_lookup=backend.lookup_record
+        def slow_mass(*args,**kwargs):
+            entered.set();release.wait(45)
+            return MassMatch(.47,'QA controlled source','mg','matched')
+        pending_xlsx=output.with_suffix('.pending.xlsx')
+        pending_pngs=output.parent/(output.stem+'-pending-plots');pending_pngs.mkdir(exist_ok=True)
+        try:
+            backend.lookup_record=slow_mass
+            dialog.enqueue_files([paths[0]])
+            wait_until(lambda:entered.is_set() and dialog.view_rows[0].get('T1') is not None)
+            assert dialog.job is not None and all(button.isEnabled() for button in (dialog.CopyBatch,dialog.ExportBatchXlsx,dialog.ExportBatchPlots))
+            dialog.grab().save(str(output.with_suffix('.waiting-m.png')))
+            dialog.CopyBatch.click()
+            assert QApplication.clipboard().text().splitlines()[1].split('\t')[2]==''
+            QFileDialog.getSaveFileName=staticmethod(lambda *a,**kw:(str(pending_xlsx),''))
+            QFileDialog.getExistingDirectory=staticmethod(lambda *a,**kw:str(pending_pngs))
+            dialog.ExportBatchXlsx.click();wait_until(lambda:dialog.export_job is None)
+            book=load_workbook(pending_xlsx,data_only=True)
+            assert book.active.max_row==2 and book.active.cell(2,3).value is None
+            book.close()
+            dialog.ExportBatchPlots.click();wait_until(lambda:dialog.export_job is None)
+            pending_png=dialog.view_rows[0]['png'];assert Path(pending_png).is_file()
+            assert dialog.job is not None and not release.is_set()
+        finally:
+            release.set();backend.lookup_record=previous_lookup
+            QFileDialog.getSaveFileName=save_picker
+            QFileDialog.getExistingDirectory=folder_picker
+        wait_until(lambda:dialog.job is None)
+        assert dialog.view_rows[0]['M']==.47 and dialog.view_rows[0]['png']==pending_png
+        report['checks'].append('copy_xlsx_png_available_while_mass_is_blocked_and_late_mass_keeps_export')
         from .batch_dialog import BatchDialog
         restored = BatchDialog(window)
-        assert len(restored.rows) == 5 and len(restored.view_rows) == 2
+        assert len(restored.rows) == 6 and len(restored.view_rows) == 1
         restored.all_button.click()
-        assert len(restored.view_rows) == 5
+        assert len(restored.view_rows) == 6
         restored.close()
-        report["checks"].append("batch_history_restores_all_results_and_latest_filter")
+        from .classic import ClassicMainWindow
+        fresh=ClassicMainWindow()
+        try:assert fresh.show_batch_analysis().rows==[]
+        finally:fresh.dirty=False;fresh.close()
+        from .path_settings import config_path
+        assert not (config_path().parent/'batch_history.json').exists()
+        report["checks"].append("same_app_reopens_batches_new_app_empty_and_no_disk_history")
         assert all(hashlib.sha256(p.read_bytes()).hexdigest() == before[str(p)] for p in paths)
         report["checks"].append("source_inputs_unchanged")
         report.update(status="passed", rows=len(dialog.rows), batches=len({row["batch_id"] for row in dialog.rows}),
@@ -132,7 +173,7 @@ def verify_batch(window, output, paths):
         raise
     finally:
         output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-        # Close while the isolated config is still active: closing saves history.
+        # Close before restoring the environment; the application clears RAM rows.
         if window.worker is None:
             window.dirty = False
             window.close()

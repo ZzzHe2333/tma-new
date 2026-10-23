@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "enabled": false,
+  "store_location": "CurrentUser",
+  "certificate_thumbprint": "",
+  "timestamp_url": "http://timestamp.digicert.com",
+  "signtool_path": ""
+}
