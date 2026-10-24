@@ -230,8 +230,9 @@ class ClassicMainWindow(MainWindow):
             "AnalysisLog1": lambda: self.show_view("log"), "Spreadsheet1": lambda: self.show_view("data"),
             "Tile1": lambda: self.mdi.tileSubWindows(), "Cascade1": lambda: self.mdi.cascadeSubWindows(),
             "StayOnTop1": self.toggle_topmost, "MoreWindows1": self.show_file_list,
-            "AboutUniversalAnalysis1": self.about, "GettingStartedGuide1": self.about,
-            "HelpTopics1": self.about,
+            "AboutUniversalAnalysis1": self.about, "GettingStartedGuide1": self.show_help_topics,
+            "HelpTopics1": self.show_help_topics,
+            "HowTo1": lambda:self.show_help_topics('right_click'),
         }
 
     def _menu(self):
@@ -255,6 +256,7 @@ class ClassicMainWindow(MainWindow):
             if name == 'AutoConfigure1': caption = '新建叠图 · 自动配置…'
             if name == 'ManualSetup1': caption = '新建叠图 · 手动配置…'
             if name == 'RunningIntegral1': caption = '区间面积计算与公式…'
+            if name == 'SaveSession1': caption = '保存分析文件…'
             if name == "AboutUniversalAnalysis1":
                 caption = f"关于 {APP_NAME}"
             if caption == "-":
@@ -281,6 +283,7 @@ class ClassicMainWindow(MainWindow):
                 action.setEnabled(False)
                 action.setToolTip(caption + " — 尚未实现")
             shortcut = item.get("shortcut")
+            if name == 'HelpTopics1': shortcut = 'F1'
             if shortcut:
                 action.setShortcut(shortcut)
             parent.addAction(action)
@@ -1325,7 +1328,7 @@ class ClassicMainWindow(MainWindow):
 
     def touch(self):
         self.dirty = True
-        self.setWindowTitle(f"{APP_NAME} {__version__} *")
+        self.setWindowTitle(f"{APP_NAME} {__version__}")
 
     def _update_measurement_controls(self):
         MainWindow._update_measurement_controls(self)
@@ -1755,11 +1758,15 @@ class ClassicMainWindow(MainWindow):
         self.touch();self.refresh_results();self.selection_changed()
 
     def show_file_information(self):
-        if self.current_data_curve() is None:return
+        if self.current_data_curve() is None:return self.show_help_topics('file_information')
         from .file_info_dialog import FileInfoDialog
         old=self.dialogs.get('file_information')
         if old and old.isVisible():old.raise_();return old
         dialog=FileInfoDialog(self);self.dialogs['file_information']=dialog;dialog.show();return dialog
+
+    def show_help_topics(self, topic='start'):
+        from .help_topics import show
+        return show(self, topic if isinstance(topic,str) else 'start')
 
     def apply_file_information(self,curve,changes,size_changed=False,size=None):
         from .file_information import prepare_edit

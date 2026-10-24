@@ -20,6 +20,7 @@ class CloudJob(QObject):
         super().__init__(); self.function = function; self.cancelled = threading.Event()
 
     def notify(self, text):
+        if self.cancelled.is_set(): return
         try: self.progress.emit(text)
         except RuntimeError: self.cancelled.set()
 
@@ -30,7 +31,8 @@ class CloudJob(QObject):
     def run(self):
         try: value = {"value": self.function(self)}
         except Exception as exc: value = {"error": str(exc)}
-        try: self.done.emit(value)
+        try:
+            if not self.cancelled.is_set(): self.done.emit(value)
         except RuntimeError: pass
 
 

@@ -1,20 +1,31 @@
 # Windows 发布签名配置
 
-自 0.35.2 起提供本地测试签名，当前新版为 0.36.4，使用独立的自签名证书；本机尚无公开受信任的正式代码签名证书。构建流程不改变 Windows 的 SmartScreen、Defender 或证书信任设置，旧版 EXE 保持不变。
+自 0.35.2 起提供本地测试签名，当前新版为 1.0.0，使用既有的 ZzzHe 自签名证书；本机尚无公开受信任的正式代码签名证书。构建流程不改变 Windows 的 SmartScreen、Defender 或证书信任设置，旧版 EXE 保持不变。
 
-## 本地签名测试版
+## 作者署名（0.37.7）
 
-本地配置：`%LOCALAPPDATA%\ZzzHeTMA\local-signing.json`，与下面的正式证书配置独立。证书主题为 `CN=ZzzHe Local Test`，RSA 3072 位，代码签名用途，有效期三年。私钥为不可导出，只保存在 `Cert:\CurrentUser\My` 中；程序包里的 `ZzzHe-Local-Test.cer` 仅含公钥。请不要将该证书当作公开可信发行者证明。
+作者配置为 `%LOCALAPPDATA%/ZzzHeTMA/local-author-signing.json`，存在时构建脚本优先使用，证书主题为 `CN=ZzzHe`。旧 `local-signing.json` 与 `CN=ZzzHe Local Test` 证书均保留，不覆盖。新签名公钥及证书链内嵌在 EXE 的 Authenticode 签名中，也提供仅含公钥的 `ZzzHe-Publisher.cer` 供查看；这不是自动建立信任的安装包。
+
+查看：右键 EXE → 属性 → 数字签名，签名者名称为 ZzzHe；详细信息／关于窗口也含作者信息。自签名不能保证 UAC 或 SmartScreen 显示已验证发布者。请勿将私钥内置程序或向用户分发；启动程序不会导入证书。
+
+```powershell
+# 独立创建作者签名配置；已有相同身份会复用
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/sign_windows_local.ps1 -InitializeCertificate -PublisherName ZzzHe -ConfigPath "$env:LOCALAPPDATA/ZzzHeTMA/local-author-signing.json"
+```
+
+## 本地签名与旧配置兼容
+
+作者配置优先使用 `local-author-signing.json`，旧 `local-signing.json` 仍可通过 `-ConfigPath` 显式使用。两者均与下面的正式证书配置独立。新证书主题为 `CN=ZzzHe`，旧证书主题为 `CN=ZzzHe Local Test`；均为 RSA 3072 位、代码签名用途。私钥不可导出，只保存在 `Cert:\CurrentUser\My` 中。新包提供 `ZzzHe-Publisher.cer`，旧包的 `ZzzHe-Local-Test.cer` 保持不变，两者仅含公钥，均不代表公开可信发行者证明。
 
 ```powershell
 # 第一次创建本地证书；已有配置会复用，不反复生成证书
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\sign_windows_local.ps1 -InitializeCertificate
 
 # 打包并附加本地签名及 RFC3161 时间戳
-powershell -NoProfile -ExecutionPolicy Bypass -File tools\build_windows.ps1 -DistPath dist-0.37.5 -LocalTestSigning
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\build_windows.ps1 -DistPath dist-1.0.0 -LocalTestSigning
 
 # 只检查已有包，不重新签名
-powershell -NoProfile -ExecutionPolicy Bypass -File tools\sign_windows_local.ps1 -PackagePath "dist-0.37.5\ZzzHe TMA Analysis" -CheckOnly
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\sign_windows_local.ps1 -PackagePath "dist-1.0.0\ZzzHe TMA Analysis" -CheckOnly
 ```
 
 脚本只写当前用户的个人证书库，不向 Root 或 TrustedPublisher 添加证书。签名后检查嵌入的签名者指纹、时间戳及 Windows Authenticode 文件校验结果。本地流程单独记录 `local_test_signed_timestamped`；预期 Windows 返回 `CERT_E_UNTRUSTEDROOT`（0x800B0109），这表示证书不受信任，不是 Windows 信任校验通过。PowerShell 的签名状态可能显示 `UnknownError`，实际原因可在 `release-security.json` 的 `winverifytrust_code` 中查看。文件摘要损坏、签名者错误或无时间戳均拒绝发布。

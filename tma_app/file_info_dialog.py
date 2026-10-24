@@ -68,4 +68,5 @@ class FileInfoDialog(QDialog):
         except ValueError as exc:self.error.setText(str(exc))
 
     def help(self):
-        QMessageBox.information(self,'文件信息','样品名最多32字，操作者25字，备注64字。只修改文字会保留当前处理和分析。\n修改尺寸会重新读取同一源文件，清除该文件的处理及分析；图形显示样式和数据范围保留。输入0表示未指定尺寸，下次Alpha分析会再次要求非零实测尺寸。\n修改只随本应用会话保存，不写入原始文件。池常数重算和放热方向尚未接入。')
+        from .help_topics import show
+        show(self.owner, 'file_information', parent=self)

@@ -46,6 +46,8 @@ def verify(package, output, inputs, trust_before=None):
                            " -PackagePath " + ps_quote(package) + " -CheckOnly")
     assert signature["sha256"] == before and signature["timestamp_present"]
     assert signature["signing_mode"] == "local_self_signed"
+    public_file = signature.get('public_certificate_file', 'ZzzHe-Local-Test.cer')
+    assert public_file in ('ZzzHe-Local-Test.cer', 'ZzzHe-Publisher.cer')
     checks = ["pinned_local_signature_rfc3161_timestamp_and_exe_hash"]
 
     with tempfile.TemporaryDirectory(prefix="signature-tamper-", dir=output) as private:
@@ -67,14 +69,15 @@ def verify(package, output, inputs, trust_before=None):
 
     certificate = powershell(
         ". " + ps_quote(ROOT / "tools/local_windows_signing.ps1") + "; $plan=Get-TmaLocalSigningPlan; "
-        "$pub=New-Object Security.Cryptography.X509Certificates.X509Certificate2 " + ps_quote(package / "ZzzHe-Local-Test.cer") + "; "
+        "$pub=New-Object Security.Cryptography.X509Certificates.X509Certificate2 " + ps_quote(package / public_file) + "; "
         "$key=[Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($plan.Certificate); "
         "try { $policy=[string]$key.Key.ExportPolicy } finally { $key.Dispose() }; "
         "$formalRejected=$false; try { Get-TmaSigningCertificate $plan.Config | Out-Null } catch { if ($_.Exception.Message -match 'Self-signed') {$formalRejected=$true} else {throw} }; "
-        "[pscustomobject]@{public_certificate_thumbprint=$pub.Thumbprint;public_file_has_private_key=$pub.HasPrivateKey;private_key_export_policy=$policy;formal_release_rejects_local_cert=$formalRejected} | ConvertTo-Json"
+        "[pscustomobject]@{public_certificate_thumbprint=$pub.Thumbprint;publisher=$pub.Subject;public_file_has_private_key=$pub.HasPrivateKey;private_key_export_policy=$policy;formal_release_rejects_local_cert=$formalRejected} | ConvertTo-Json"
     )
     assert not certificate["public_file_has_private_key"]
     assert certificate["public_certificate_thumbprint"] == signature["certificate_thumbprint"]
+    assert certificate['publisher'] == signature['publisher']
     assert certificate["private_key_export_policy"] == "None"
     assert certificate["formal_release_rejects_local_cert"]
     checks.append("nonexportable_private_key_public_only_certificate_and_public_release_separation")

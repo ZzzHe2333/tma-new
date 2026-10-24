@@ -352,17 +352,17 @@ class McpService:
             if self.state != "error":
                 self.state = "stopped"
 
-    def stop(self):
+    def stop(self, *, wait=True):
         self.active.clear()
         if self.jobs:
             self.jobs.shutdown()
-            if self.jobs.worker and self.jobs.worker.is_alive():
+            if wait and self.jobs.worker and self.jobs.worker.is_alive():
                 self.jobs.worker.join(timeout=.3)
         if self.server:
             self.server.should_exit = True
         if self.thread and self.thread.is_alive():
             self.state = "stopping"
-            self.thread.join(timeout=2)
+            if wait:self.thread.join(timeout=2)
         if not self.thread or not self.thread.is_alive():
             self.state = "stopped"
 

@@ -39,6 +39,7 @@ from .point_labels import CURVE_VALUE_KINDS
 from .peak_integration import KINDS as INTEGRATION_KINDS
 from .legacy_t1_t2_h import format_plot_temp_c
 from .graph_options import render_style
+from .import_jobs import ImportWorker
 
 
 STYLE = CUTE_STYLE
@@ -101,40 +102,6 @@ class DataModel(QAbstractTableModel):
             return labels[section]
 
 
-class ImportWorker(QThread):
-    completed = QtSignal(object, object)
-    progress = QtSignal(str)
-    mass_ready = QtSignal(str, str, str, object)
-
-    def __init__(self, paths):
-        super().__init__()
-        self.paths = paths
-
-    def run(self):
-        datasets, failures = [], []
-        from .mass_lookup import lookup_record, MassMatch, configured_source
-        cache = {}
-        for path in self.paths:
-            try:
-                self.progress.emit(f"正在读取 {Path(path).name}…")
-                key = os.path.normcase(os.path.abspath(path))
-                if key not in cache: cache[key] = read_dataset(path)
-                dataset = deepcopy(cache[key])
-                dataset._import_ticket = uuid.uuid4().hex
-                dataset._mass_match = MassMatch(message='m 正在后台匹配')
-                datasets.append(dataset)
-            except Exception as exc:
-                failures.append(f"{Path(path).name}: {exc}")
-        requests = [(ds._import_ticket, ds.name) for ds in datasets]
-        self.completed.emit(datasets, failures)
-        # Display curves before opening a potentially slow/network weighing table.
-        for ticket, sample in requests:
-            self.progress.emit(f"正在后台匹配 {sample} 的 m…")
-            try: source = configured_source()
-            except (ValueError, OSError): source = ''
-            self.mass_ready.emit(ticket, sample, source, lookup_record(sample, source))
-
-
 class MainWindow(QMainWindow):
     def __init__(self):
         from .ui_help import install as install_help
@@ -162,6 +129,7 @@ class MainWindow(QMainWindow):
         self.dirty = False
         self.session_path = None
         self.worker = None
+        self._closing = False
         self._updating = False
         self._plot_artists = []
         self._result_annotations = []
@@ -502,7 +470,7 @@ class MainWindow(QMainWindow):
 
     def touch(self):
         self.dirty = True
-        self.setWindowTitle(f"ZzzHe TMA Analysis {__version__}  • 未保存")
+        self.setWindowTitle(f"ZzzHe TMA Analysis {__version__}")
 
     def protect_output(self, *paths):
         sources = {str(c.dataset.path.resolve()).casefold() for c in self.curves}
@@ -517,6 +485,7 @@ class MainWindow(QMainWindow):
             self.import_files(paths)
 
     def import_files(self, paths, synchronous=False, *, batch_results=True):
+        if self._closing: return
         paths = [str(p) for p in paths]
         if not paths:
             return
@@ -537,16 +506,18 @@ class MainWindow(QMainWindow):
             self._pending_import_paths = getattr(self, '_pending_import_paths', []) + paths
             self.statusBar().showMessage(f"已排队 {len(self._pending_import_paths)} 个文件…")
             return
-        self.worker = ImportWorker(paths)
-        self.worker.completed.connect(self.receive_import, Qt.ConnectionType.QueuedConnection)
-        self.worker.finished.connect(self.worker_finished, Qt.ConnectionType.QueuedConnection)
-        self.worker.progress.connect(self.import_progress, Qt.ConnectionType.QueuedConnection)
-        self.worker.mass_ready.connect(self.import_mass_ready, Qt.ConnectionType.QueuedConnection)
+        self.worker = ImportWorker(paths, read_dataset, self)
+        # The job drains its pure-Python queue on the GUI thread.
+        self.worker.completed.connect(self.receive_import)
+        self.worker.finished.connect(self.worker_finished)
+        self.worker.progress.connect(self.import_progress)
+        self.worker.mass_ready.connect(self.import_mass_ready)
         self.worker.start()
         self.statusBar().showMessage(f"正在解析 {len(paths)} 个文件…")
 
     @Slot(object, object)
     def receive_import(self, datasets, failures):
+        if self._closing: return
         if QThread.currentThread() != QApplication.instance().thread():
             raise RuntimeError('Import results must be applied on the GUI thread')
         from .diagnostics import record_event
@@ -555,10 +526,12 @@ class MainWindow(QMainWindow):
 
     @Slot(str)
     def import_progress(self, message):
+        if self._closing: return
         self.statusBar().showMessage(message)
 
     @Slot()
     def worker_finished(self):
+        if self._closing: return
         if self.sender() is not self.worker: return
         self.worker.deleteLater()
         self.worker = None
@@ -641,6 +614,7 @@ class MainWindow(QMainWindow):
 
     @Slot(str, str, str, object)
     def import_mass_ready(self, ticket, sample, source, result):
+        if self._closing: return
         from .mass_lookup import configured_source
         key = getattr(self, '_import_mass_targets', {}).pop(ticket, None)
         curve = next((c for c in self.curves if c.dataset.document_key == key and c.sample_name == sample), None)
@@ -1476,12 +1450,8 @@ class MainWindow(QMainWindow):
             return False
 
     def confirm_discard(self):
-        if not self.dirty:
-            return True
-        answer = QMessageBox.question(self, "保存当前会话", "当前工作尚未保存。是否先保存会话？", QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel, QMessageBox.StandardButton.Save)
-        if answer == QMessageBox.StandardButton.Save:
-            return self.save()
-        return answer == QMessageBox.StandardButton.Discard
+        # Loading another analysis is an explicit user action; saving is opt-in.
+        return True
 
     def open_session(self):
         if self.worker is not None:
@@ -1641,7 +1611,7 @@ class MainWindow(QMainWindow):
                 self.warn(str(exc))
 
     def about(self):
-        QMessageBox.information(self, "关于 ZzzHe TMA Analysis", f"ZzzHe TMA Analysis {__version__}\nPython + PySide6 (Qt) + Matplotlib\n\n独立实现的热分析工作台。支持已验证的 TA TMA 二进制与 StartOfData 文本。\n保留原始采集顺序；区间拟合/求导不自动排序升降温分支。\n\n斜率：最小二乘直线拟合。\n积分：支持直线／水平S形基线；原生峰积分使用记录时间，不直接作为焓。\nCTE：斜率(µm/°C) / 长度(mm) × 1000 ppm/K。\nOnset：区间前段基线与最大绝对斜率附近切线交点，需人工核对。\n\n尚未实现原 UA 的专用 DSC/TGA/DMA 分析、旧会话/宏兼容。")
+        QMessageBox.information(self, "关于 ZzzHe TMA Analysis", f"ZzzHe TMA Analysis {__version__}\n作者：ZzzHe\nPython + PySide6 (Qt) + Matplotlib\n\n独立实现的热分析工作台。支持已验证的 TA TMA 二进制与 StartOfData 文本。\n保留原始采集顺序；区间拟合/求导不自动排序升降温分支。\n\n斜率：最小二乘直线拟合。\n积分：支持直线／水平S形基线；原生峰积分使用记录时间，不直接作为焓。\nCTE：斜率(µm/°C) / 长度(mm) × 1000 ppm/K。\nOnset：区间前段基线与最大绝对斜率附近切线交点，需人工核对。\n\n尚未实现原 UA 的专用 DSC/TGA/DMA 分析、旧会话/宏兼容。")
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -1653,36 +1623,38 @@ class MainWindow(QMainWindow):
             self.import_files(paths)
 
     def closeEvent(self, event):
-        share = getattr(self, "share_dialog", None)
-        if share is not None and share.busy:
-            self.statusBar().showMessage("正在分享图片，请等待本次请求完成后关闭。")
-            event.ignore()
-        elif self.worker is not None:
-            self.warn("正在导入文件，请等待完成后关闭。")
-            event.ignore()
-        elif self.confirm_discard():
-            mass_job = getattr(self, '_mass_refresh_job', None)
-            if mass_job is not None:
-                mass_job.cancel(); mass_job.deleteLater(); self._mass_refresh_job = None
-            for dialog in self.findChildren(QDialog):
-                stop_test = getattr(dialog, 'stop_mass_test', None)
-                if stop_test is not None: stop_test()
-            batch = getattr(self, "batch_dialog", None)
-            if batch is not None:
-                batch.prepare_shutdown()
-            report = getattr(self, "single_report_dialog", None)
-            if report is not None:
-                report.shutdown()
-            self._mcp_closed = True
-            self.cloud_timer.stop()
-            for dialog in getattr(self, "cloud_dialogs", []): dialog.close()
-            self.mcp_service.stop()
-            event.accept()
-        else:
-            event.ignore()
+        if self._closing:
+            event.accept(); return
+        self._closing = True
+        self._mcp_closed = True
+        self._pending_import_paths = []
+        if self.worker is not None:
+            self.worker.cancel();self.worker.deleteLater();self.worker=None
+        mass_job = getattr(self, '_mass_refresh_job', None)
+        if mass_job is not None:
+            mass_job.cancel();mass_job.deleteLater();self._mass_refresh_job=None
+        batch=getattr(self,'batch_dialog',None)
+        if batch is not None:batch.prepare_shutdown()
+        report=getattr(self,'single_report_dialog',None)
+        if report is not None:report.shutdown()
+        for job in (self.cloud_maintenance,self.cloud_touch_job):
+            if job is not None:job.cancelled.set()
+        for dialog in self.findChildren(QDialog):
+            stop_test=getattr(dialog,'stop_mass_test',None)
+            if stop_test is not None:stop_test()
+            job=getattr(dialog,'job',None)
+            if job is not None and hasattr(job,'cancelled'):job.cancelled.set()
+            # Busy child dialogs may veto close(); application exit must not.
+            dialog.hide()
+        for timer in self.findChildren(QTimer):timer.stop()
+        share=getattr(self,'share_dialog',None)
+        if share is not None:share.timer.stop()
+        self.mcp_service.stop(wait=False)
+        event.accept()
 
 
 def main():
+    help_verify = len(sys.argv)>2 and sys.argv[1]=='--verify-help-topics'
     edited_area_verify = len(sys.argv)>2 and sys.argv[1]=='--verify-edited-area'
     printing_verify = len(sys.argv)>2 and sys.argv[1] in ('--verify-printing', '--verify-print-settings-restart')
     settings_storage_verify = len(sys.argv)>2 and sys.argv[1] in ('--verify-path-settings', '--verify-path-settings-restart')
@@ -1702,7 +1674,7 @@ def main():
     batch_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-batch"
     report_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-report"
     verify_mode = len(sys.argv) > 2 and sys.argv[1] in ("--verify-overlay-user", "--verify-user-state", "--verify-launch", "--verify-ui-menu", "--verify-ui-size", "--verify-cache", "--verify-mass-settings", "--verify-sharing", "--verify-batch", "--verify-batch-stress", "--verify-batch-live", "--verify-report", "--verify-mcp", "--verify-cloud", "--verify-recommendation", "--verify-mass-normalization")
-    verify_mode = verify_mode or settings_storage_verify or printing_verify or edited_area_verify
+    verify_mode = verify_mode or settings_storage_verify or printing_verify or edited_area_verify or help_verify
     if verify_mode:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     application = QApplication(sys.argv)
@@ -1722,6 +1694,10 @@ def main():
         window.showMaximized()
     else:
         window.show()
+    if help_verify:
+        from .help_topics_qa import verify
+        verify(window,Path(sys.argv[2]),[Path(arg).absolute() for arg in sys.argv[3:]])
+        return
     if edited_area_verify:
         from .edited_area_qa import verify
         verify(window,Path(sys.argv[2]),[Path(arg).absolute() for arg in sys.argv[3:]])

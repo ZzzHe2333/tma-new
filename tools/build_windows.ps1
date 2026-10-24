@@ -30,6 +30,13 @@ try {
     $docsDestination = Join-Path $packagePath 'docs'
     New-Item -ItemType Directory -Force -Path $docsDestination | Out-Null
     Copy-Item -LiteralPath (Join-Path $projectPath 'docs\windows-release-signing.md') -Destination $docsDestination
+    $appVersion = & $pythonExecutable -c 'from tma_app import __version__; print(__version__)'
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to read release version' }
+    $releaseNotes = Join-Path $projectPath "docs\release-$appVersion.md"
+    if (Test-Path -LiteralPath $releaseNotes -PathType Leaf) {
+        Copy-Item -LiteralPath $releaseNotes -Destination $docsDestination
+        Copy-Item -LiteralPath $releaseNotes -Destination (Join-Path $packagePath 'RELEASE_NOTES.md')
+    }
     $powerDestination = Join-Path $packagePath 'power'
     New-Item -ItemType Directory -Force -Path $powerDestination | Out-Null
     foreach ($sourceName in @('piliang_tma_v14.py', 'one_BG_neibuban.py', 'one_BG_claude_v6.py')) {

@@ -2,7 +2,10 @@
 . (Join-Path $PSScriptRoot 'windows_signing.ps1')
 
 function Get-TmaLocalSigningConfigPath {
-    return Join-Path (Split-Path -Parent (Get-TmaSigningConfigPath)) 'local-signing.json'
+    $folder = Split-Path -Parent (Get-TmaSigningConfigPath)
+    $author = Join-Path $folder 'local-author-signing.json'
+    if (Test-Path -LiteralPath $author -PathType Leaf) { return $author }
+    return Join-Path $folder 'local-signing.json'
 }
 
 function Get-TmaLocalSigningCertificate {
@@ -12,8 +15,8 @@ function Get-TmaLocalSigningCertificate {
     }
     $cert = Get-Item -LiteralPath ('Cert:\CurrentUser\My\' + $Config.certificate_thumbprint) -ErrorAction Stop
     $now = Get-Date
-    if ($cert.Subject -ne 'CN=ZzzHe Local Test' -or $cert.Subject -ne $cert.Issuer -or -not $cert.HasPrivateKey -or $cert.NotBefore -gt $now -or $cert.NotAfter -le $now) {
-        throw 'Expected a valid ZzzHe Local Test self-signed certificate with its private key.'
+    if ($cert.Subject -notin @('CN=ZzzHe Local Test','CN=ZzzHe') -or $cert.Subject -ne $cert.Issuer -or -not $cert.HasPrivateKey -or $cert.NotBefore -gt $now -or $cert.NotAfter -le $now) {
+        throw 'Expected a valid pinned ZzzHe self-signed code-signing certificate with its private key.'
     }
     $usage = @($cert.Extensions | Where-Object { $_ -is [Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension] } | ForEach-Object { $_.EnhancedKeyUsages } | ForEach-Object { $_.Value })
     if ('1.3.6.1.5.5.7.3.3' -notin $usage) { throw 'Local certificate must have the Code Signing extended key usage.' }
@@ -21,17 +24,21 @@ function Get-TmaLocalSigningCertificate {
 }
 
 function Initialize-TmaLocalSigningCertificate {
-    param([string]$ConfigPath = (Get-TmaLocalSigningConfigPath))
+    param([string]$ConfigPath = (Get-TmaLocalSigningConfigPath),
+          [ValidateSet('ZzzHe','ZzzHe Local Test')][string]$PublisherName = 'ZzzHe')
     if (Test-Path -LiteralPath $ConfigPath) {
-        Get-TmaLocalSigningCertificate (Read-TmaSigningConfig $ConfigPath) | Out-Null
+        $existing = Get-TmaLocalSigningCertificate (Read-TmaSigningConfig $ConfigPath)
+        if ($PSBoundParameters.ContainsKey('PublisherName') -and $existing.Subject -ne ('CN=' + $PublisherName)) {
+            throw 'Existing signing identity differs. Use a separate configuration path; do not overwrite the old key or configuration.'
+        }
         return $ConfigPath
     }
     $tool = Find-TmaSignTool
     if (-not $tool) { throw 'Windows SDK SignTool is required.' }
     # A non-exportable private key stays in the current user's key store.
     # The public .cer file later shipped in the package contains no private key.
-    $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=ZzzHe Local Test' `
-        -FriendlyName 'ZzzHe TMA Analysis Local Test Signing' -CertStoreLocation 'Cert:\CurrentUser\My' `
+    $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject ('CN=' + $PublisherName) `
+        -FriendlyName 'ZzzHe TMA Analysis Self-Signed Publisher' -CertStoreLocation 'Cert:\CurrentUser\My' `
         -KeyAlgorithm RSA -KeyLength 3072 -HashAlgorithm SHA256 -KeyExportPolicy NonExportable `
         -NotAfter (Get-Date).AddYears(3) -ErrorAction Stop
     $config = [pscustomobject][ordered]@{
@@ -94,6 +101,7 @@ function Invoke-TmaLocalReleaseSigning {
         }
     }
     $verification = Test-TmaLocalFileSignature $executable $plan.Certificate.Thumbprint
+    $publicFile = if ($plan.Certificate.Subject -eq 'CN=ZzzHe') { 'ZzzHe-Publisher.cer' } else { 'ZzzHe-Local-Test.cer' }
     $hash = (Get-FileHash -LiteralPath $executable -Algorithm SHA256).Hash.ToLowerInvariant()
     $report = [pscustomobject][ordered]@{
         status='local_test_signed_timestamped'; signing_mode='local_self_signed'; check_only=[bool]$CheckOnly
@@ -101,13 +109,14 @@ function Invoke-TmaLocalReleaseSigning {
         winverifytrust_code=$verification.WinTrustCode; windows_trusted=$verification.WindowsTrusted
         public_ca_certificate=$false; root_certificate_installed_by_tool=$false
         publisher=$plan.Certificate.Subject; certificate_thumbprint=$plan.Certificate.Thumbprint
+        public_certificate_file=$publicFile; certificate_embedded_in_exe=$true
         certificate_expires=$plan.Certificate.NotAfter.ToString('o')
         timestamp_present=$true; timestamp_publisher=$verification.Signature.TimeStamperCertificate.Subject
         signtool_path=$plan.Tool; executable='ZzzHe TMA Analysis.exe'; sha256=$hash
         smartscreen_reputation='Local self-signed test certificate. No SmartScreen reputation or public publisher trust is claimed.'
     }
     if (-not $CheckOnly) {
-        Export-Certificate -Cert $plan.Certificate -FilePath (Join-Path $package 'ZzzHe-Local-Test.cer') -Type CERT -Force | Out-Null
+        Export-Certificate -Cert $plan.Certificate -FilePath (Join-Path $package $publicFile) -Type CERT -Force | Out-Null
         $report | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $package 'release-security.json') -Encoding UTF8
         "$hash  *ZzzHe TMA Analysis.exe" | Set-Content -LiteralPath (Join-Path $package 'SHA256SUMS.txt') -Encoding ASCII
         Write-Warning 'Local test signature only. Certificate was not installed as a trusted root; SmartScreen may still warn.'

@@ -150,6 +150,50 @@ def run_local_ps(code, ok=True):
     return run_ps(". " + quote(ROOT / "tools/local_windows_signing.ps1") + "; " + code, ok=ok)
 
 
+def test_author_config_preferred_without_replacing_legacy(tmp_path):
+    legacy = tmp_path/'ZzzHeTMA/local-signing.json'
+    author = legacy.with_name('local-author-signing.json')
+    legacy.parent.mkdir();legacy.write_text('legacy')
+    prefix = '$env:LOCALAPPDATA=' + quote(tmp_path) + '; '
+    result=run_local_ps(prefix+'Get-TmaLocalSigningConfigPath')
+    assert Path(result.stdout.strip())==legacy
+    author.write_text('author')
+    result=run_local_ps(prefix+'Get-TmaLocalSigningConfigPath')
+    assert Path(result.stdout.strip())==author and legacy.read_text()=='legacy'
+
+
+@pytest.mark.parametrize('subject', ['CN=ZzzHe','CN=ZzzHe Local Test','CN=Unexpected'])
+def test_local_pinned_author_subjects(config, subject):
+    data=json.loads(config.read_text());data.update(enabled=True,certificate_thumbprint='A'*40)
+    config.write_text(json.dumps(data))
+    mock=("$oids=New-Object Security.Cryptography.OidCollection; "
+          "$oids.Add((New-Object Security.Cryptography.Oid '1.3.6.1.5.5.7.3.3')) | Out-Null; "
+          "$eku=New-Object Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension($oids,$false); "
+          "$script:fake=[pscustomobject]@{Subject="+quote(subject)+";Issuer="+quote(subject)+";HasPrivateKey=$true;NotBefore=(Get-Date).AddDays(-1);NotAfter=(Get-Date).AddDays(1);Extensions=@($eku)}; "
+          "function Get-Item {param($LiteralPath) $script:fake}; ")
+    result=run_local_ps(mock+'(Get-TmaLocalSigningCertificate (Read-TmaSigningConfig '+quote(config)+')).Subject',ok=subject!='CN=Unexpected')
+    if subject!='CN=Unexpected':assert result.stdout.strip()==subject
+
+
+def test_new_author_certificate_is_nonexportable_user_my_only(tmp_path):
+    config=tmp_path/'author.json'
+    mock=("function Find-TmaSignTool {'mock-signtool'}; "
+          "function New-SelfSignedCertificate { param($Type,$Subject,$FriendlyName,$CertStoreLocation,$KeyAlgorithm,$KeyLength,$HashAlgorithm,$KeyExportPolicy,$NotAfter); "
+          "$script:observed=[pscustomobject]@{subject=$Subject;store=$CertStoreLocation;policy=$KeyExportPolicy;algorithm=$KeyAlgorithm;bits=$KeyLength;hash=$HashAlgorithm}; "
+          "[pscustomobject]@{Thumbprint=('A'*40)} }; ")
+    result=run_local_ps(mock+'Initialize-TmaLocalSigningCertificate '+quote(config)+' -PublisherName ZzzHe | Out-Null; $script:observed | ConvertTo-Json')
+    observed=json.loads(result.stdout)
+    assert observed=={'subject':'CN=ZzzHe','store':'Cert:\\CurrentUser\\My','policy':'NonExportable','algorithm':'RSA','bits':3072,'hash':'SHA256'}
+    assert json.loads(config.read_text(encoding='utf-8-sig'))['certificate_thumbprint']=='A'*40
+
+
+def test_existing_different_publisher_is_not_silently_replaced(config):
+    original=config.read_bytes()
+    mock="function Get-TmaLocalSigningCertificate { [pscustomobject]@{Subject='CN=ZzzHe Local Test'} }; "
+    result=run_local_ps(mock+'Initialize-TmaLocalSigningCertificate '+quote(config)+' -PublisherName ZzzHe',ok=False)
+    assert 'separate configuration path' in result.stderr and config.read_bytes()==original
+
+
 @pytest.mark.parametrize("changes", [
     {"enabled": False}, {"enabled": True, "store_location": "LocalMachine"},
     {"enabled": True, "certificate_thumbprint": ""},
