@@ -19,8 +19,9 @@ fontlist-*.json
 # 可再生成的解析中间产物（体积大，不入库）
 analysis/winua_strings.txt
 
-# 实验数据、截图、逆向分析资料与旧版脚本（不入库）
+# 实验数据、截图、逆向分析资料、旧版脚本与测试（不入库）
 测试文件/
 analysis/
 power/
+tests/
 /*.png
