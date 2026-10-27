@@ -291,6 +291,10 @@ def test_file_choosers_use_independent_saved_folders_and_settings_preserve_them(
         calls.append(args[2])
         return "", ""
     monkeypatch.setattr(QFileDialog, "getOpenFileName", choose)
+    from tma_app import data_file_dialog as picker
+    def choose_data(parent,*args,owner=None,**kwargs):
+        calls.append(picker.start_folder(owner or parent));return [],''
+    monkeypatch.setattr(picker,'get_data_files',choose_data)
     dialog.choose_tma()
     dialog.choose_particle()
     assert calls == [str(tma_folder), str(particle_dir)]

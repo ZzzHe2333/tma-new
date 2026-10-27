@@ -109,6 +109,7 @@ def verify_batch(window, output, paths):
         settings.batch_popup.setChecked(False)
         settings.grab().save(str(output.with_suffix(".settings.png")))
         settings.accept()
+        wait_until(lambda:not settings.saving)
         from .path_settings import batch_popup_enabled
         assert not batch_popup_enabled()
         window.import_files(paths[:2])

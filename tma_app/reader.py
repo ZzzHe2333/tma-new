@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+from io import BytesIO
 from pathlib import Path
 import re
 import unicodedata
@@ -138,6 +139,41 @@ def _text_encoding(buf: bytes) -> str:
     return "utf-8-sig"
 
 
+def _text_values(body, columns, first_line, warnings):
+    if len(body) >= 8192:
+        # Clean exports can be converted in bulk. Any malformed/non-finite
+        # data falls back to the exact line parser and its prefix warnings.
+        end = re.search(r'(?im)^[^\S\r\n]*EndOfData[^\S\r\n]*\r?$', body)
+        clean = body[:end.start()] if end is not None else body
+        if clean.strip():
+            try:
+                values = np.loadtxt(BytesIO(clean.replace('D', 'E').replace('d', 'e').encode('utf-8')),
+                                    dtype=np.float64, comments=None, ndmin=2, encoding='utf-8')
+                if values.shape[1] == columns and np.isfinite(values).all():
+                    return values
+                del values
+            except (ValueError, OverflowError):
+                pass
+    rows = []
+    for line_number, line in enumerate(body.splitlines(), first_line):
+        line = line.strip()
+        if not line:continue
+        if line.casefold() == 'endofdata':break
+        fields = line.split()
+        try:
+            if len(fields) != columns:
+                raise ValueError(f'需要 {columns} 列，实际 {len(fields)} 列')
+            row = [float(x.replace('D', 'E').replace('d', 'e')) for x in fields]
+            if not np.isfinite(row).all():raise ValueError('包含 NaN 或无穷值')
+        except ValueError as exc:
+            if not rows:raise ParseError(f'第 {line_number} 行数据无效：{exc}') from exc
+            warnings.append(f'数据不完整：第 {line_number} 行无效，已在该行前停止读取（{exc}）。')
+            break
+        rows.append(row)
+    if not rows:raise ParseError('StartOfData 后没有有效数据')
+    return np.asarray(rows, dtype=np.float64)
+
+
 def _read_text(buf: bytes, encoding: str):
     try:
         text = buf.decode(encoding)
@@ -148,35 +184,12 @@ def _read_text(buf: bytes, encoding: str):
         raise ParseError("不是支持的 TA StartOfData 文本或 Q400 TMA 二进制文件")
     metadata = _metadata(text[:match.start()])
     signals = _signals(metadata, allow_missing_tail=True)
-    rows = []
     warnings = []
     missing = [str(i) for i in range(1, len(signals)+1) if not _field(metadata, f'Sig{i}').strip()]
     if missing:
         metadata['_undefined_signals'] = missing
         warnings.append('文本头缺少 ' + '、'.join('Sig'+i for i in missing) + ' 定义；对应数据列完整保留为未命名信号，单位未知，未推断其含义。')
-    for line_number, line in enumerate(text[match.end():].splitlines(),
-                                       text[:match.end()].count("\n") + 1):
-        line = line.strip()
-        if not line:
-            continue
-        if line.casefold() == "endofdata":
-            break
-        fields = line.split()
-        try:
-            if len(fields) != len(signals):
-                raise ValueError(f"需要 {len(signals)} 列，实际 {len(fields)} 列")
-            row = [float(x.replace("D", "E").replace("d", "e")) for x in fields]
-            if not np.isfinite(row).all():
-                raise ValueError("包含 NaN 或无穷值")
-        except ValueError as exc:
-            if not rows:
-                raise ParseError(f"第 {line_number} 行数据无效：{exc}") from exc
-            warnings.append(f"数据不完整：第 {line_number} 行无效，已在该行前停止读取（{exc}）。")
-            break
-        rows.append(row)
-    if not rows:
-        raise ParseError("StartOfData 后没有有效数据")
-    values = np.asarray(rows, dtype=np.float64)
+    values = _text_values(text[match.end():], len(signals), text[:match.end()].count('\n') + 1, warnings)
     metadata["_format"] = ["TA StartOfData text"]
     time_index = next((i for i, s in enumerate(signals) if _fold(s.name) == "time"), None)
     if time_index is not None and np.any(np.diff(values[:, time_index]) < 0):
@@ -288,7 +301,9 @@ def read_dataset(path: str | Path) -> Dataset:
         cached = _DATASET_CACHE.get(key)
         if cached is not None:
             _DATASET_CACHE.move_to_end(key)
-            return deepcopy(cached)
+    # Cache templates are never handed to callers. Pin the template locally,
+    # then clone without blocking unrelated readers behind a large array copy.
+    if cached is not None:return deepcopy(cached)
     buf = path.read_bytes()
     if not buf:
         raise ParseError("文件为空")
@@ -306,12 +321,13 @@ def read_dataset(path: str | Path) -> Dataset:
     after = path.stat()
     if (after.st_mtime_ns, after.st_size, after.st_ino, after.st_ctime_ns) != key[1:]:
         raise ParseError('数据文件在读取期间发生变化，请重试')
+    snapshot = deepcopy(dataset) if dataset.values.nbytes <= 64*1024*1024 else None
     with _DATASET_LOCK:
         for old in list(_DATASET_CACHE):
             if old[0] == key[0]:_DATASET_CACHE.pop(old,None)
         # Cache independent originals only; opening twice still gets separate
         # arrays, metadata, analysis state and document identities.
-        if dataset.values.nbytes <= 64*1024*1024:_DATASET_CACHE[key] = deepcopy(dataset)
+        if snapshot is not None:_DATASET_CACHE[key] = snapshot
         while len(_DATASET_CACHE)>8 or sum(c.values.nbytes for c in _DATASET_CACHE.values())>128*1024*1024:
             _DATASET_CACHE.popitem(last=False)
     return dataset

@@ -16,13 +16,15 @@ such field is excluded from the original binary initialization file.
 from __future__ import annotations
 
 from copy import deepcopy
+from collections import OrderedDict
+from contextlib import contextmanager
+from functools import wraps
 import json
 import math
 import numbers
 import os
 from pathlib import Path
 import re
-import tempfile
 import threading
 
 from .workspace import default_plot_options, validate_plot_options
@@ -49,6 +51,37 @@ RESERVED_FIELDS = frozenset()
 STYLES = frozenset(("-", "--", "-.", ":", "None", "long_dash", "broken_dash", "broken_double_dash"))
 MARKERS = frozenset(("", "o", "s", "^", "v", "+", "x", ".", "D"))
 _LOCK = threading.RLock()
+_CACHE = OrderedDict()
+_BATCH = threading.local()
+_CACHE_ENTRIES = 16
+_CACHE_BYTES = 1024*1024
+
+
+def _identity(path):return os.path.normcase(os.path.abspath(path))
+
+
+def _fingerprint(path):
+    try:info=path.stat()
+    except FileNotFoundError:return None
+    return info.st_mtime_ns,info.st_ctime_ns,info.st_size,info.st_ino,info.st_dev
+
+
+@contextmanager
+def batch_defaults():
+    """Pin one independent preference version per path for this thread's batch."""
+    previous=getattr(_BATCH,'entries',None)
+    if previous is not None:
+        yield;return
+    _BATCH.entries={}
+    try:yield
+    finally:del _BATCH.entries
+
+
+def preference_batch(function):
+    @wraps(function)
+    def wrapped(*args,**kwargs):
+        with batch_defaults():return function(*args,**kwargs)
+    return wrapped
 
 
 def preferences_path():
@@ -171,32 +204,70 @@ def _curves(curves, scope, *, grouped=False, strict=False):
     return result
 
 
-def _read(path):
-    try:
-        text = path.read_text(encoding="utf-8-sig")
-    except FileNotFoundError:
-        return _empty()
-    try:
-        document = json.loads(text, object_pairs_hook=_pairs, parse_constant=_reject_constant)
-    except (ValueError, TypeError, RecursionError) as exc:
-        raise ValueError("默认设置文件无效，未覆盖已有文件") from exc
+def _validated_scopes(document):
     if (not isinstance(document, dict) or set(document) != {"format", "version", "scopes"}
             or document.get("format") != FORMAT or type(document.get("version")) is not int
             or document["version"] != VERSION or not isinstance(document.get("scopes"), dict)):
         raise ValueError("默认设置文件格式或版本无效")
+    scopes = {}
     for scope, pages in document["scopes"].items():
         _scope_page(scope)
         if not isinstance(pages, dict):
             raise ValueError("默认设置页面映射无效")
+        normalized = {}
         for page, state in pages.items():
             _scope_page(scope, page)
             allowed = {"options", "curves"} if page in ("graph", "curves") else {"options"}
             if not isinstance(state, dict) or set(state) != allowed:
                 raise ValueError("默认设置页面结构无效")
-            _options(scope, page, state["options"], strict=True)
+            normalized[page] = {"options": _options(scope, page, state["options"], strict=True)}
             if "curves" in state:
-                _curves(state["curves"], scope, grouped=True, strict=True)
-    return document
+                normalized[page]["curves"] = _curves(state["curves"], scope, grouped=True, strict=True)
+        result = {"options": {}, "curves": [[], [], [], []]}
+        for page in PAGE_FIELDS[scope]:
+            if page in normalized:
+                state=normalized[page];result["options"].update(state["options"])
+                if "curves" in state:result["curves"]=state["curves"]
+        scopes[scope]=result
+    return scopes
+
+
+def _snapshot(path, *, batch=False):
+    key=_identity(path)
+    entries=getattr(_BATCH,'entries',None) if batch else None
+    if entries is not None and key in entries:
+        value=entries[key]
+        if isinstance(value[0],type):raise value[0](*value[1])
+        return value
+    try:
+        with _LOCK:
+            fingerprint=_fingerprint(path)
+            cached=_CACHE.get(key)
+            if cached is not None and fingerprint==cached[0]:
+                _CACHE.move_to_end(key);snapshot=cached
+            else:
+                _CACHE.pop(key,None)
+                if fingerprint is None:snapshot=(None,_empty(),{})
+                else:
+                    text=path.read_text(encoding='utf-8-sig')
+                    try:document=json.loads(text,object_pairs_hook=_pairs,parse_constant=_reject_constant)
+                    except (ValueError,TypeError,RecursionError) as exc:
+                        raise ValueError('默认设置文件无效，未覆盖已有文件') from exc
+                    scopes=_validated_scopes(document)
+                    if _fingerprint(path)!=fingerprint:raise ValueError('默认设置在读取期间发生变化，请重试')
+                    snapshot=(fingerprint,document,scopes)
+                    if fingerprint[2]<=256*1024:
+                        _CACHE[key]=snapshot
+                        while len(_CACHE)>_CACHE_ENTRIES or sum(item[0][2] for item in _CACHE.values())>_CACHE_BYTES:
+                            _CACHE.popitem(last=False)
+    except (OSError,ValueError) as exc:
+        if entries is not None:entries[key]=(type(exc),exc.args)
+        raise
+    if entries is not None:entries[key]=snapshot
+    return snapshot
+
+
+def _read(path):return deepcopy(_snapshot(path)[1])
 
 
 def load_defaults(scope, *, path=None):
@@ -207,17 +278,8 @@ def load_defaults(scope, *, path=None):
     """
     _scope_page(scope)
     target = Path(path) if path is not None else preferences_path()
-    with _LOCK:
-        document = _read(target)
-    options, curves = {}, [[], [], [], []]
-    pages = document["scopes"].get(scope, {})
-    for page in PAGE_FIELDS[scope]:
-        state = pages.get(page)
-        if state is not None:
-            options.update(_options(scope, page, state["options"], strict=True))
-            if "curves" in state:
-                curves = _curves(state["curves"], scope, grouped=True, strict=True)
-    return {"options": options, "curves": curves}
+    snapshot=_snapshot(target,batch=True)
+    return deepcopy(snapshot[2].get(scope,{"options":{},"curves":[[],[],[],[]]}))
 
 
 def save_defaults(scope, page, options, curves=(), *, path=None):
@@ -235,20 +297,12 @@ def save_defaults(scope, page, options, curves=(), *, path=None):
     with _LOCK:
         document = _read(target)
         document["scopes"].setdefault(scope, {})[page] = state
-        target.parent.mkdir(parents=True, exist_ok=True)
-        temporary = None
-        try:
-            handle, name = tempfile.mkstemp(prefix=".preferences-", suffix=".tmp", dir=target.parent)
-            temporary = Path(name)
-            with os.fdopen(handle, "w", encoding="utf-8", newline="\n") as output:
-                json.dump(document, output, ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False)
-                output.write("\n"); output.flush(); os.fsync(output.fileno())
-            os.replace(temporary, target)
-            temporary = None
-        finally:
-            if temporary is not None:
-                try:
-                    temporary.unlink()
-                except FileNotFoundError:
-                    pass
+        from .atomic_files import write_json
+        write_json(target,document,sort_keys=True,allow_nan=False,durable=True)
+        # Repopulate from an actual, stable file fingerprint on the next read;
+        # publishing our document against an external replacement's stat would
+        # incorrectly hide that replacement.
+        key=_identity(target);_CACHE.pop(key,None)
+        entries=getattr(_BATCH,'entries',None)
+        if entries is not None:entries.pop(key,None)
     return target

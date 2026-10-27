@@ -4,6 +4,44 @@ import json
 import math
 import os
 from pathlib import Path
+from copy import deepcopy
+import threading
+
+# Snapshots are small local preferences, never instrument/table data. GUI
+# readers use these without stat/glob/read calls; disk readers publish updates.
+_snapshot_lock = threading.Lock()
+_snapshots = {}
+_refreshing = set()
+_revisions = {}
+
+
+def _publish(path, data, *, identity=None, expected=None, written=False):
+    key = str(config_path() if identity is None else identity)
+    with _snapshot_lock:
+        if expected is not None and _revisions.get(key,0)!=expected:return
+        if written:_revisions[key]=_revisions.get(key,0)+1
+        _snapshots[key] = (path, deepcopy(data))
+        while len(_snapshots) > 16: _snapshots.pop(next(iter(_snapshots)))
+
+
+def cached_settings():
+    """Return an independent in-memory copy, or None; no filesystem access."""
+    with _snapshot_lock:
+        value = _snapshots.get(str(config_path()))
+        return deepcopy(value) if value is not None else None
+
+
+def refresh_in_background():
+    key = str(config_path())
+    with _snapshot_lock:
+        if key in _refreshing: return
+        _refreshing.add(key)
+    def work():
+        try: _read_settings(primary=Path(key))
+        except (OSError, ValueError): pass
+        finally:
+            with _snapshot_lock: _refreshing.discard(key)
+    threading.Thread(target=work,name='TMA-config-read',daemon=True).start()
 
 
 def config_path():
@@ -30,11 +68,23 @@ def _settings_data():
     return _read_settings()[1]
 
 
-def _read_settings():
+def validate_dialog_settings(data):
+    """Reject malformed form sections before handing them to Qt widgets."""
+    for name in ('paths', 'ui', 'mass_cache'):
+        if not isinstance(data.get(name, {}), dict):
+            raise ValueError(f'配置中的 {name} 格式无效，应为对象')
+    if any(not isinstance(k,str) or not k.strip() or not isinstance(v,str)
+           for k,v in data.get('paths', {}).items()):
+        raise ValueError('路径名称和路径必须为文字')
+
+
+def _read_settings(*, primary=None):
     # Keep config_path() as the logical profile identity: caches, appearance,
     # user activation and scheduled cleanup all derive their own paths from it.
     from .ui_size import fallback_paths
-    candidates = list(dict.fromkeys([config_path(), *fallback_paths(config_path())]))
+    primary=config_path() if primary is None else Path(primary)
+    with _snapshot_lock:revision=_revisions.get(str(primary),0)
+    candidates = list(dict.fromkeys([primary, *fallback_paths(primary)]))
     existing, errors = [], []
     for path in candidates:
         try: existing.append((path.stat().st_mtime_ns, path))
@@ -44,10 +94,13 @@ def _read_settings():
         try:
             data = json.loads(path.read_text(encoding="utf-8-sig"))
             if not isinstance(data, dict): raise ValueError("配置文件格式无效")
+            _publish(path, data, identity=primary, expected=revision)
             return path, data
         except (OSError, ValueError) as exc: errors.append(exc)
     if errors: raise errors[0]
-    return None, {"version": 1, "paths": {"m": ""}}
+    data = {"version": 1, "paths": {"m": ""}}
+    _publish(None, data, identity=primary, expected=revision)
+    return None, data
 
 
 def _save_data(data):
@@ -56,6 +109,7 @@ def _save_data(data):
     primary = config_path()
     try:
         write_json(primary, data)
+        _publish(primary, data, written=True)
         return primary
     except OSError as exc:
         backup = fallback_path(primary)
@@ -63,6 +117,7 @@ def _save_data(data):
         try: write_json(backup, data)
         except OSError as backup_exc:
             raise OSError(f"配置保存失败。用户目录：{exc}；备用目录：{backup_exc}") from backup_exc
+        _publish(backup, data, written=True)
         return backup
 
 
@@ -74,6 +129,7 @@ def save_settings(paths, *, batch_popup, cache_hours):
     if type(cache_hours) not in (int, float) or not math.isfinite(cache_hours) or not 1 <= cache_hours <= 720:
         raise ValueError("m 缓存有效期须为 1–720 小时")
     data = _settings_data()
+    validate_dialog_settings(data)
     data.update(version=1, paths={"m": "", **paths})
     data['ui'] = {**data.get('ui', {}), 'batch_popup': batch_popup}
     data['mass_cache'] = {**data.get('mass_cache', {}), 'refresh_hours': float(cache_hours)}

@@ -152,8 +152,9 @@ class BatchDialog(QDialog):
         self.update_buttons()
 
     def choose_files(self):
-        paths, _ = QFileDialog.getOpenFileNames(self, "批量导入 TMA 文件", import_folder(),
-            "TMA 数据 (*.0?? *.1?? *.2?? *.3?? *.4?? *.5?? *.6?? *.7?? *.8?? *.9??);;所有文件 (*)")
+        from .data_file_dialog import get_data_files
+        paths, _ = get_data_files(self, "批量导入 TMA 文件",
+            "TMA 数据 (*.0?? *.1?? *.2?? *.3?? *.4?? *.5?? *.6?? *.7?? *.8?? *.9??);;所有文件 (*)",owner=self.owner)
         if paths:
             self.enqueue_files(paths)
 
@@ -288,12 +289,20 @@ class BatchDialog(QDialog):
         if self._shutdown or job not in (self.job,self.export_job) or job is None or job.cancelled.is_set():
             return
         if job.action == "xlsx":
+            if result.get('xlsx') and key not in self._export_completed:
+                from .achievement_ui import record
+                record(self.owner, 'tables')
             self.feedback.setText("XLSX 已保存：" + result["xlsx"] if "xlsx" in result else "导出失败：" + result.get("export_error", ""))
             self._export_completed.add(key)
         else:
             index = next((i for i, row in enumerate(self.rows) if row["id"] == key), None)
             if index is None:
                 return
+            from .achievement_ui import record
+            if job.action == 'plot' and result.get('png') and not result.get('export_error') and key not in self._export_completed:
+                record(self.owner, 'images')
+            if job.action == 'calculate' and all(result.get(k) is not None for k in ('T1','T2','H')) and not result.get('error') and key not in self._job_completed:
+                record(self.owner, 'batch')
             self.rows[index].update(result)
             if self.issue_button.isChecked():
                 self.refresh_view()
@@ -362,6 +371,8 @@ class BatchDialog(QDialog):
         rows = self.exportable_rows()
         if rows:
             QApplication.clipboard().setText(backend.table_text(rows))
+            from .achievement_ui import record
+            record(self.owner, 'tables')
             self.feedback.setText(f"已复制 {len(rows)} 行 × 4 列（含表头），可直接粘贴到 Excel / WPS。未匹配的 M 留空，尚未计算的行暂不包含。")
 
     def export_xlsx(self):

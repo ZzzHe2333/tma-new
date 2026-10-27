@@ -1,15 +1,15 @@
 """Signal selection based on the installed TSignalsForm DFM and local help."""
 from copy import deepcopy
-from dataclasses import replace
-import uuid
 from PySide6.QtWidgets import QDialog, QGroupBox, QLabel, QComboBox, QRadioButton, QButtonGroup, QCheckBox, QPushButton
-from .workspace import Curve, default_plot_options
-from .signal_processing import typed_signal, local_fit, factory_template, validate_template
+from .workspace import default_plot_options
+from .signal_processing import factory_template, validate_template
+from .signal_proposal import build_proposal, SUPPORTED
+from .calculation import BACKGROUND_POINTS, _same
+from .calculation_jobs import CalculationDialogMixin
 
 TYPES = [("正常", "normal"), ("对数", "log"), ("倒数", "inverse"), ("倒数×1000", "inverse1000"),
          ("一阶导数(时间)", "d_time"), ("一阶导数(温度)", "d_temperature"), ("对数导数(时间)", "log_time"),
          ("对数导数(温度)", "log_temperature"), ("二阶导数(时间)", "d2_time"), ("二阶导数(温度)", "d2_temperature")]
-SUPPORTED = {"normal", "d_time", "d_temperature", "d2_time", "d2_temperature"}
 
 
 def current_template(owner, dataset):
@@ -27,54 +27,9 @@ def current_template(owner, dataset):
     return template
 
 
-def build_proposal(curves, dataset, template):
-    """Return an independent full proposal. No live curve is modified on error."""
-    domain = template["x"]["domain"]
-    if domain not in ("temperature", "time", "signal"): raise ValueError("X信号无效")
-    draft = [replace(c, operations=list(c.operations), history=list(c.history)) for c in curves]
-    computed = [c for c in draft if c.dataset.document_key == dataset.document_key and c.derived is not None and c.normal_enabled]
-    source = [c for c in draft if c.dataset.document_key == dataset.document_key and c.derived is None]
-    originals = [c for c in source if c.normal_enabled]
-    for curve in source: curve.activate_appearance("normal"); curve.normal_enabled = False
-    def index(label):
-        matches = [i for i,s in enumerate(dataset.signals) if s.label == label]
-        if len(matches) != 1: raise ValueError(f"信号不存在或名称不唯一：{label}")
-        return matches[0]
-    xindex = index(template["x"]["signal"]) if template["x"]["signal"] is not None else None
-    xkind, xwidth = template["x"]["type"], template["x"]["width"]
-    if xkind not in SUPPORTED: raise ValueError("所选X类型的数学定义尚未确认")
-    if domain == "signal" and xindex is None: raise ValueError("请选择X信号")
-    for curve in source+[c for c in draft if c.dataset.document_key==dataset.document_key and c.derived is not None]: curve.x_signal_index, curve.x_signal_type, curve.x_smooth_width = xindex, xkind, xwidth
-    reference = source[0] if source else Curve(dataset)
-    x = reference.x_values(domain)
-    for axis, item in enumerate(template["y"]):
-        reserved=[c for c in computed if c.axis==axis]
-        if reserved:
-            if item['signal'] not in (None,reserved[0].signal_label):raise ValueError(f'Y{axis+1}已有派生积分，请先删除积分曲线再选择其它信号')
-            continue
-        if item["signal"] is None: continue
-        yi, kind, width = index(item["signal"]), item["type"], item["width"]
-        candidate = next((c for c in source if c.axis == axis and c.y_index == yi and c.y_type == kind and c.smooth_width == width), None)
-        if candidate is None:
-            if kind not in SUPPORTED: raise ValueError("当前处理只能保留在原曲线上；请选择已实现的信号类型")
-            base = next((c for c in originals if c.axis == axis), reference)
-            candidate = replace(base, uid=uuid.uuid4().hex, y_index=yi, axis=axis, scale=1., offset=0.,
-                                normal_enabled=True, overlay_enabled=False, y_type=kind, smooth_width=width,
-                                operations=[], history=[], normal_appearance=None, overlay_appearance=None,
-                                smooth_source=None,smooth_base_ops=[],smooth_reuse=False,smooth_domain=None,smooth_x_config=None,
-                                working_rows=None,smooth_source_rows=None)
-            from .data_limits import smoothed_state
-            for key,value in smoothed_state(candidate,domain,width).items():setattr(candidate,key,value)
-            draft.append(candidate); source.append(candidate)
-        elif candidate not in originals and candidate.y_type!="custom":
-            from .data_limits import smoothed_state
-            for key,value in smoothed_state(candidate,domain,width).items():setattr(candidate,key,value)
-        candidate.normal_enabled = True
-        candidate.xy(domain)
-    return draft
 
 
-class SignalsDialog(QDialog):
+class SignalsDialog(CalculationDialogMixin,QDialog):
     def __init__(self, owner):
         super().__init__(owner); self.owner=owner; self.dataset=owner.selected().dataset
         self.template = current_template(owner,self.dataset)
@@ -146,22 +101,55 @@ class SignalsDialog(QDialog):
                 "secondary":self.show_temperature.isChecked() if mode=="time" else (self.show_time.isChecked() if mode=="temperature" else False)}
 
     def accept(self):
+        if self.job is not None:return
         try:
-            value=self.collect();draft=build_proposal(self.owner.curves,self.dataset,value)
-            selected=self.owner.selected();uid=selected.uid if selected else None
-            enabled=[c for c in draft if c.dataset.document_key==self.dataset.document_key and c.normal_enabled]
-            if not any(c.uid==uid for c in enabled) and enabled:uid=enabled[0].uid
-            self.owner.cancel_measurement(redraw=False);self.owner.curves=draft
-            options=self.owner.plot_options.setdefault(self.dataset.document_key,default_plot_options())
-            options.update(x_domain=value["x"]["domain"],secondary_x=value["secondary"],x_limits=None,x_ticks=None,auto_x=True,
-                           y_limits=[None]*4,y_ticks=[None]*4,auto_y=[True]*4)
-            self.owner.sync_documents();self.owner.rebuild_files()
-            doc=self.owner._document(self.dataset.document_key);doc.plot_signature=None
-            self.owner.mdi.setActiveSubWindow(doc);self.owner.document_activated(doc)
-            index=next((i for i,c in enumerate(draft) if c.uid==uid),None)
-            if index is not None:self.owner.files.setCurrentItem(self.owner.files.topLevelItem(index))
-            self.owner.touch();self.owner.redraw();super().accept()
-        except ValueError as exc:self.error.setText(str(exc))
+            value=self.collect()
+            peers=[c for c in self.owner.curves if c.dataset.document_key==self.dataset.document_key]
+            if not peers:raise ValueError('文件已关闭')
+            self._calculation_template=deepcopy(value)
+            if any(c.sample_count>=BACKGROUND_POINTS for c in peers):
+                self.start_calculation(peers,dict(kind='signals',template=value),self.apply_proposal)
+                return
+            draft=build_proposal(self.owner.curves,self.dataset,value)
+            self.apply_proposal(draft)
+        except (ValueError,OverflowError) as exc:self.error.setText(str(exc))
+
+    def apply_proposal(self,draft):
+        value=self._calculation_template
+        # Merge only this document into the current list. Independent files
+        # may have been imported or edited while this calculation ran.
+        current={c.uid:c for c in self.owner.curves if c.dataset.document_key==self.dataset.document_key}
+        proposals={c.uid:c for c in draft if c.dataset.document_key==self.dataset.document_key}
+        for uid,candidate in proposals.items():
+            cache=candidate._x_cache
+            if cache is not None and cache[0][0]==id(candidate.dataset.values):
+                # The private worker buffer has been checked against the live
+                # buffer. Preserve this computed X vector across rebinding;
+                # otherwise the first GUI redraw would repeat its derivative.
+                candidate._x_cache=((id(self.dataset.values),*cache[0][1:]),cache[1])
+            candidate.dataset=self.dataset
+            if uid in current:
+                original=current[uid]
+                candidate.history=list(original.history)
+                # Unchanged signals retain their existing owned, writable
+                # buffers instead of keeping a read-only snapshot duplicate.
+                for name in ('working','smooth_source'):
+                    if _same(getattr(candidate,name),getattr(original,name)):
+                        setattr(candidate,name,getattr(original,name))
+        draft=[proposals.pop(c.uid) if c.uid in current else c for c in self.owner.curves]+list(proposals.values())
+        selected=self.owner.selected();uid=selected.uid if selected else None
+        enabled=[c for c in draft if c.dataset.document_key==self.dataset.document_key and c.normal_enabled]
+        if not any(c.uid==uid for c in enabled) and enabled:uid=enabled[0].uid
+        self.owner.cancel_measurement(redraw=False);self.owner.curves=draft
+        options=self.owner.plot_options.setdefault(self.dataset.document_key,default_plot_options())
+        options.update(x_domain=value["x"]["domain"],secondary_x=value["secondary"],x_limits=None,x_ticks=None,auto_x=True,
+                       y_limits=[None]*4,y_ticks=[None]*4,auto_y=[True]*4)
+        self.owner.sync_documents();self.owner.rebuild_files()
+        doc=self.owner._document(self.dataset.document_key);doc.plot_signature=None
+        self.owner.mdi.setActiveSubWindow(doc);self.owner.document_activated(doc)
+        index=next((i for i,c in enumerate(draft) if c.uid==uid),None)
+        if index is not None:self.owner.files.setCurrentItem(self.owner.files.topLevelItem(index))
+        self.owner.touch();self.owner.redraw();super().accept()
 
     def save(self):
         from .preferences import save_defaults

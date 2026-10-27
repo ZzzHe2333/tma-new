@@ -1,6 +1,6 @@
 # Windows 发布签名配置
 
-自 0.35.2 起提供本地测试签名，当前新版为 1.0.0，使用既有的 ZzzHe 自签名证书；本机尚无公开受信任的正式代码签名证书。构建流程不改变 Windows 的 SmartScreen、Defender 或证书信任设置，旧版 EXE 保持不变。
+自 0.35.2 起提供本地测试签名，当前新版为 1.1.6，使用既有的 ZzzHe 自签名证书；本机尚无公开受信任的正式代码签名证书。构建流程不改变 Windows 的 SmartScreen、Defender 或证书信任设置，旧版 EXE 保持不变。
 
 ## 作者署名（0.37.7）
 
@@ -22,10 +22,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/sign_windows_local.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\sign_windows_local.ps1 -InitializeCertificate
 
 # 打包并附加本地签名及 RFC3161 时间戳
-powershell -NoProfile -ExecutionPolicy Bypass -File tools\build_windows.ps1 -DistPath dist-1.0.0 -LocalTestSigning
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\build_windows.ps1 -DistPath dist-1.0.2 -LocalTestSigning
 
 # 只检查已有包，不重新签名
-powershell -NoProfile -ExecutionPolicy Bypass -File tools\sign_windows_local.ps1 -PackagePath "dist-1.0.0\ZzzHe TMA Analysis" -CheckOnly
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\sign_windows_local.ps1 -PackagePath "dist-1.0.2\ZzzHe TMA Analysis" -CheckOnly
 ```
 
 脚本只写当前用户的个人证书库，不向 Root 或 TrustedPublisher 添加证书。签名后检查嵌入的签名者指纹、时间戳及 Windows Authenticode 文件校验结果。本地流程单独记录 `local_test_signed_timestamped`；预期 Windows 返回 `CERT_E_UNTRUSTEDROOT`（0x800B0109），这表示证书不受信任，不是 Windows 信任校验通过。PowerShell 的签名状态可能显示 `UnknownError`，实际原因可在 `release-security.json` 的 `winverifytrust_code` 中查看。文件摘要损坏、签名者错误或无时间戳均拒绝发布。

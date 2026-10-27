@@ -179,7 +179,8 @@ class ShareDialog(QDialog):
             if not targets: raise ValueError('请选择至少一个分享渠道')
         except (ValueError, OSError) as exc:
             self.feedback.appendPlainText(str(exc)); return
-        self.busy = True; self.feedback.clear(); self.feedback.appendPlainText('正在分享，请稍候…')
+        self.busy = True; self._achievement_shared = False
+        self.feedback.clear(); self.feedback.appendPlainText('正在分享，请稍候…')
         for widget in (self.send_button, self.settings_button, self.filename, self.dav, self.wecom):
             widget.setEnabled(False)
         self.worker_thread = threading.Thread(target=sharing.share_job, args=(self.png, name, targets, self.events),
@@ -197,6 +198,9 @@ class ShareDialog(QDialog):
                     widget.setEnabled(True)
                 return
             channel = 'WebDAV' if value['channel'] == 'webdav' else '企业微信'
+            if value['ok'] and not getattr(self, '_achievement_shared', False):
+                from .achievement_ui import record
+                record(self.owner, 'shares'); self._achievement_shared = True
             self.feedback.appendPlainText(f"{'成功' if value['ok'] else '失败'} · {channel}：{value['message']}")
 
     def reject(self):

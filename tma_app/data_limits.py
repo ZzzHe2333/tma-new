@@ -4,6 +4,7 @@ from dataclasses import replace
 import math
 import numpy as np
 from .signal_processing import local_fit
+from .cancellation import check_cancelled
 
 
 def segments(rows):
@@ -105,8 +106,9 @@ def select_rows(dataset,spec):
     return None if len(selected)==n else selected.tolist()
 
 
-def smoothed_state(curve,domain,width,*,capture_custom=False,use_saved_x=True):
+def smoothed_state(curve,domain,width,*,capture_custom=False,use_saved_x=True,cancelled=None):
     """Compute a complete proposal before changing any live curve."""
+    check_cancelled(cancelled)
     width=finite(width,"平滑宽度")
     if width<0:raise ValueError("平滑宽度不能为负数")
     if curve.derived is not None or any("integral" in op.casefold() for op in curve.operations):raise ValueError("积分曲线不能平滑")
@@ -119,7 +121,7 @@ def smoothed_state(curve,domain,width,*,capture_custom=False,use_saved_x=True):
     if variable=="signal":
         config=curve.smooth_x_config if use_saved_x and curve.smooth_x_config is not None else {"index":curve.x_signal_index,"type":curve.x_signal_type,"width":curve.x_smooth_width}
         independent=replace(curve,x_signal_index=config["index"],x_signal_type=config["type"],x_smooth_width=config["width"])
-    x=independent.x_values(variable,canonical=True)
+    x=independent.x_values(variable,canonical=True,cancelled=cancelled)
     fit_width=width/independent.x_unit_factor(variable)
     source=curve.base_y.astype(float)
     base_ops=[]
@@ -135,7 +137,7 @@ def smoothed_state(curve,domain,width,*,capture_custom=False,use_saved_x=True):
     output=source.copy()
     order=2 if kind.startswith("d2_") else (1 if kind not in ("normal","custom") else 0)
     for section in segments(rows):
-        ids=rows[section];output[ids]=local_fit(x[section],source[ids],fit_width,order)
+        ids=rows[section];output[ids]=local_fit(x[section],source[ids],fit_width,order,cancelled=cancelled)
     if kind not in ("normal","custom"):
         index=curve.dataset.time_index if variable=="time" else curve.dataset.temperature_index
         operations=[f"derivative:{curve.dataset.signals[index].label}"]*order+[f"ls_window:{width}"]

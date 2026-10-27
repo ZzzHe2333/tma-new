@@ -5,7 +5,36 @@ exact original reference rectangle. This implementation explicitly uses the
 inner plotting axes, with lower-left origin, independent of data-axis units.
 """
 from matplotlib.lines import Line2D
+from matplotlib.legend import Legend
+from types import MethodType
 from .graph_options import render_style
+
+
+def _draw_cached(legend,renderer):
+    previous=legend._tma_draw_positions
+    legend._tma_draw_positions={}
+    try:return Legend.draw(legend,renderer)
+    finally:legend._tma_draw_positions=previous
+
+
+def _find_cached(legend,width,height,renderer,*args,**kwargs):
+    cache=legend._tma_draw_positions
+    # This cache exists only inside one Legend.draw call. Both layout queries
+    # there use the same unchanged axes, paths and renderer. Calls outside draw
+    # (including manual dragging/export layout) always perform a fresh search.
+    if cache is None or args or kwargs:return Legend._find_best_position(legend,width,height,renderer,*args,**kwargs)
+    key=(width,height,id(renderer))
+    if key not in cache:cache[key]=Legend._find_best_position(legend,width,height,renderer)
+    return cache[key]
+
+
+def cache_draw_positions(legend):
+    """Avoid repeated full-curve scans inside our own standard legends only."""
+    if type(legend) is Legend and not hasattr(legend,'_tma_draw_positions'):
+        legend._tma_draw_positions=None
+        legend.draw=MethodType(_draw_cached,legend)
+        legend._find_best_position=MethodType(_find_cached,legend)
+    return legend
 
 
 def location(anchor):
@@ -41,6 +70,7 @@ def render_legend(owner, base, options, fonts, scale):
     anchor = options["legend_anchor"]
     legend = base.legend(handles, captions, loc=location(anchor) if anchor else options["legend_location"],
                          frameon=options["legend_border"], prop={"family": fonts, "size": max(8, 14*scale)})
+    cache_draw_positions(legend)
     if anchor: apply_anchor(legend, base, anchor)
     legend.set_visible(len(owner._plot_artists) > 1 if options["legend"] is None else options["legend"])
     legend.set_gid("tma-legend")

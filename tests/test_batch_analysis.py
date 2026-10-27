@@ -233,6 +233,7 @@ def test_popup_setting_persists_and_silent_import_still_calculates(ui, samples):
     dialog = ui.show_path_settings()
     dialog.batch_popup.setChecked(False)
     dialog.accept()
+    wait_until(lambda:not dialog.saving)
     assert not batch_popup_enabled()
     save_paths({**load_paths(), "future": "future.csv"})
     assert not batch_popup_enabled()
@@ -246,6 +247,7 @@ def test_popup_setting_persists_and_silent_import_still_calculates(ui, samples):
     assert not setting.batch_popup.isChecked()
     setting.batch_popup.setChecked(True)
     setting.accept()
+    wait_until(lambda:not setting.saving)
     assert batch_popup_enabled()
 
 

@@ -74,6 +74,8 @@ class AreaDialog(QDialog):
                 signal=curve.result_label,operations=list(curve.operations),transform=deepcopy(curve.result_transform(self.owner.domain)),
                 values=values,annotation={})
             self.owner.results.append(result);self.owner.touch();self.owner.refresh_results();self.owner.redraw()
+            from .achievement_ui import record
+            record(self.owner, 'analysis')
             self.refresh();self.feedback.setText(f"已记录：净面积 {values['net_area']:.8g}，绝对面积 {values['absolute_area']:.8g} {values['area_unit']}")
         except (ValueError,OSError) as exc:self.feedback.setText(str(exc))
 
@@ -98,6 +100,8 @@ class AreaDialog(QDialog):
         rows=list(self.rows())
         if not rows:self.feedback.setText('暂无面积结果，请先计算。');return
         QApplication.clipboard().setText('\n'.join('\t'.join(map(str,row)) for row in [HEADERS,*rows]))
+        from .achievement_ui import record
+        record(self.owner, 'tables')
         self.feedback.setText('已复制面积表格，可粘贴到 Excel。旧结果未记录的分项面积留空，不重新计算或覆盖旧值。')
 
     def export(self):
@@ -117,4 +121,6 @@ class AreaDialog(QDialog):
             try:book.save(path)
             finally:book.close()
             self.feedback.setText(f'面积结果已导出：{path}')
+            from .achievement_ui import record
+            record(self.owner, 'tables')
         except (ValueError,OSError) as exc:self.feedback.setText(str(exc))

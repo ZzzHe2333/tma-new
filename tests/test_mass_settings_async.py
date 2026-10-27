@@ -44,6 +44,7 @@ def test_test_then_save_during_locked_network_read_keeps_gui_live(ui, tmp_path, 
         assert not dialog.test_button.isEnabled()
         started = time.monotonic(); dialog.accept()
         assert time.monotonic() - started < .5
+        wait_until(lambda:not dialog.saving)
         assert dialog.result() == QDialog.DialogCode.Accepted
         assert settings.load_paths()['m'] == source
         assert ui._mass_refresh_job is not None
@@ -67,6 +68,7 @@ def test_completed_test_save_reuses_table_revision_without_cache_clear(ui, tmp_p
     assert '0.47 mg' in dialog.feedback.text()
     assert 'LookupMass' not in ui.selected().dataset.metadata
     dialog.accept()
+    wait_until(lambda:not dialog.saving)
     assert ui.selected().dataset.metadata['LookupMass'] == ['0.47']
     wait_until(lambda: ui._mass_refresh_job is None)
     assert calls == [source]
@@ -84,7 +86,7 @@ def test_real_xlsx_test_and_save_read_workbook_once_off_gui(ui, tmp_path, monkey
     dialog = ui.show_path_settings(); dialog.paths.item(0, 1).setText(str(source)); dialog.test_button.click()
     wait_until(lambda: dialog.mass_job is None)
     assert '0.49 mg' in dialog.feedback.text()
-    dialog.accept(); wait_until(lambda: ui._mass_refresh_job is None)
+    dialog.accept();wait_until(lambda:not dialog.saving); wait_until(lambda: ui._mass_refresh_job is None)
     assert len(calls) == 1 and calls[0] != threading.get_ident()
     assert ui.selected().dataset.metadata['LookupMass'] == ['0.49']
 
@@ -122,7 +124,7 @@ def test_editing_m_discards_old_test_but_other_path_keeps_test(ui, tmp_path, mon
         assert dialog.mass_job is None and dialog.test_button.isEnabled()
         dialog.test_mass(); wait_until(lambda: dialog.mass_job is None)
         assert '0.58 mg' in dialog.feedback.text()
-        dialog.accept(); wait_until(lambda: ui._mass_refresh_job is None)
+        dialog.accept();wait_until(lambda:not dialog.saving); wait_until(lambda: ui._mass_refresh_job is None)
     finally: release.set()
     wait_until(lambda: not any(t.name == 'TMA-mass-lookup' and t.is_alive() for t in threading.enumerate()))
     QApplication.processEvents()
@@ -177,6 +179,7 @@ def test_folder_only_save_during_test_does_not_cancel_valid_request(ui, tmp_path
     source = table(tmp_path); settings.save_paths({'m': source})
     dialog = ui.show_path_settings(); dialog.test_mass(); wait_until(lambda: dialog.mass_job is None)
     dialog.paths.item(1, 1).setText(str(tmp_path)); dialog.accept()
+    wait_until(lambda:not dialog.saving)
     wait_until(lambda: ui._mass_refresh_job is None)
     assert settings.import_folder() == str(tmp_path)
     assert ui.selected().dataset.metadata['LookupMass'] == ['0.47']

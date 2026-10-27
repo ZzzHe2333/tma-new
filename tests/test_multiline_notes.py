@@ -46,6 +46,8 @@ def test_large_plain_text_note_accepts_newlines_and_roundtrips(ui,tmp_path,monke
     def accept(dialog):
         assert dialog.findChild(QPlainTextEdit) is not None
         assert dialog.width()>=680 and dialog.height()>=380
+        from tma_app.batch_qa import wait_until
+        wait_until(lambda:dialog.textValue().endswith('称取质量：0.47 mg'))
         assert dialog.textValue().endswith('称取质量：0.47 mg')
         dialog.setTextValue(dialog.textValue()+'\n备注：保留多行')
         return QInputDialog.DialogCode.Accepted

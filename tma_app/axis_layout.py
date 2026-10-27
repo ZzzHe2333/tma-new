@@ -28,7 +28,7 @@ def fit_y_gaps(owner,scale):
             overflow=max(0.,figure.bbox.x0+8*scale-min([b.x0 for b in labels]+[outer.x0]))
             outer_left=base_x+base_width*axes[3].spines['left'].get_position()[1]+overflow
             left_delta=max(overflow,outer_left+pad-inner.x0)
-    if not left_delta and not right_delta:return
+    if not left_delta and not right_delta:return renderer
     available=max(0.,(right-left-.28)*width)
     if left_delta+right_delta>available:
         ratio=available/(left_delta+right_delta);left_delta*=ratio;right_delta*=ratio
@@ -37,3 +37,4 @@ def fit_y_gaps(owner,scale):
     if outer_right is not None:axes[2].spines['right'].set_position(('axes',(outer_right-base_x)/base_width))
     if outer_left is not None:axes[3].spines['left'].set_position(('axes',(outer_left-base_x)/base_width))
     owner.canvas.draw()
+    return owner.canvas.get_renderer()

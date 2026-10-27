@@ -77,6 +77,7 @@ def test_settings_save_cancel_match_sample_name_and_preserve_active_file(ui,tmp_
     dialog=ui.show_path_settings();dialog.paths.item(0,1).setText(str(path));dialog.add_path()
     added=dialog.paths.rowCount()-1
     dialog.paths.item(added,0).setText('future');dialog.paths.item(added,1).setText(str(tmp_path/'future'));dialog.accept()
+    wait_until(lambda:not dialog.saving)
     wait_until(lambda: getattr(ui, '_mass_refresh_job', None) is None)
     assert settings.load_paths()['future']==str(tmp_path/'future')
     assert ui.selected() is curve and ui.active_document() is doc
@@ -98,10 +99,12 @@ def test_default_folder_picker_save_restart_and_import(ui,tmp_path,monkeypatch):
     dialog=ui.show_path_settings();assert dialog.paths.item(1,0).text()=='默认打开文件夹'
     monkeypatch.setattr(QFileDialog,'getExistingDirectory',lambda *a:str(desktop))
     dialog.paths.setCurrentCell(1,1);dialog.choose_file();dialog.accept()
+    wait_until(lambda:not dialog.saving)
     assert settings.load_paths()['open_folder']==str(desktop)
     initial=[]
-    def pick(*args):initial.append(args[2]);return [],''
-    monkeypatch.setattr(QFileDialog,'getOpenFileNames',pick)
+    from tma_app import data_file_dialog as picker
+    def pick(parent,*args,owner=None,**kwargs):initial.append(picker.start_folder(owner or parent));return [],''
+    monkeypatch.setattr(picker,'get_data_files',pick)
     ui.open_files()
     restarted=ClassicMainWindow()
     try:restarted.open_files()
@@ -115,5 +118,6 @@ def test_folder_cancel_clear_and_preserve_other_paths(ui,tmp_path):
     dialog=ui.show_path_settings();dialog.paths.item(1,1).setText('cancelled');dialog.reject()
     assert settings.import_folder()==str(tmp_path)
     dialog=ui.show_path_settings();dialog.paths.item(1,1).setText('');dialog.accept()
+    wait_until(lambda:not dialog.saving)
     assert settings.import_folder()==''
     assert settings.load_paths()=={'m':'mass.xlsx','open_folder':'','particle_folder':'','future':'next'}

@@ -264,6 +264,26 @@ def default_note_text(sample):
     match = lookup_record(sample)
     # The requested note expresses m in mg; unlabelled weighing values use mg.
     mass = 0.50 if match.value is None else match.value * (1000 if match.unit == 'g' else 1)
+    return format_note_text(mass)
+
+
+def format_note_text(mass=0.50):
     return ("方法日志：30 ℃ 平衡，施加 0.06 N\n"
             "                    20 ℃/min加热至 250 ℃\n"
             f"称取质量：{mass:.2f} mg")
+
+
+def note_text_for_curve(curve):
+    """GUI prefill: use already imported metadata, never wait for SMB/Excel."""
+    metadata = curve.dataset.metadata
+    if metadata.get('LookupMassSample') == [curve.sample_name]:
+        try:
+            value = float(metadata['LookupMass'][0])
+            unit = metadata.get('LookupMassUnit', ['mg'])[0]
+            mass = value * (1000 if unit == 'g' else 1)
+            if math.isfinite(mass) and mass > 0 and unit in ('', 'mg', 'g'):
+                return format_note_text(mass)
+        except (ValueError, TypeError, KeyError, IndexError): pass
+    # Opening a note is an editing operation. The import worker continues its
+    # existing mass lookup independently; do not issue another lookup here.
+    return format_note_text()

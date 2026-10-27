@@ -6,7 +6,9 @@ contiguous physical half-width is expanded to the nearest adjacent points until
 five samples are present, without sorting or joining acquisition branches.
 """
 import math
+import time
 import numpy as np
+from .cancellation import check_cancelled
 
 KINDS = ("normal", "d_time", "d_temperature", "d2_time", "d2_temperature")
 
@@ -32,7 +34,8 @@ def factory_template(dataset):
             "x": {"domain": domain, "signal": dataset.signals[dimension].label, "type": "normal", "width": 0.}, "secondary": False}
 
 
-def local_fit(x, y, width=0., derivative=0):
+def local_fit(x, y, width=0., derivative=0, *, cancelled=None):
+    check_cancelled(cancelled)
     x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
     if x.ndim != 1 or x.shape != y.shape or not np.isfinite(x).all() or not np.isfinite(y).all():
         raise ValueError("局部拟合需要等长、有限的一维信号")
@@ -42,10 +45,39 @@ def local_fit(x, y, width=0., derivative=0):
     if derivative == 0 and width == 0: return y.copy()
     if len(x) < 5: raise ValueError("局部最小二乘至少需要5个采样点")
     output = np.empty(len(x)); degree = max(1, derivative)
+    monotonic = bool(np.all(x[1:] >= x[:-1]) or np.all(x[1:] <= x[:-1]))
+    window_left = window_right = 0
+    yield_after = time.monotonic()+.008 if cancelled is not None else None
     for i in range(len(x)):
-        left, right = i, i+1
-        while left > 0 and abs(x[left-1]-x[i]) <= width/2: left -= 1
-        while right < len(x) and abs(x[right]-x[i]) <= width/2: right += 1
+        check_cancelled(cancelled)
+        if cancelled is not None and i % 32 == 0 and time.monotonic() >= yield_after:
+            # Very short NumPy calls can repeatedly reacquire the GIL before
+            # the Qt thread gets it on Windows. Yield only in background work;
+            # inputs, neighborhood selection and arithmetic remain unchanged.
+            if cancelled.wait(.001): check_cancelled(cancelled)
+            yield_after = time.monotonic()+.008
+        if monotonic:
+            # On a monotonic ramp the same physical-window boundaries only
+            # advance. Retain the original subtraction/tie comparisons, so
+            # least-squares inputs are identical even at floating-point ties.
+            while window_left < i and abs(x[window_left]-x[i]) > width/2:
+                window_left += 1
+                if window_left % 1024 == 0: check_cancelled(cancelled)
+            window_right = max(window_right, i+1)
+            while window_right < len(x) and abs(x[window_right]-x[i]) <= width/2:
+                window_right += 1
+                if window_right % 1024 == 0: check_cancelled(cancelled)
+            left, right = window_left, window_right
+        else:
+            # Reversals keep the original first-outside acquisition boundary;
+            # never sort ramps or join separate visits to a temperature.
+            left, right = i, i+1
+            while left > 0 and abs(x[left-1]-x[i]) <= width/2:
+                left -= 1
+                if left % 1024 == 0: check_cancelled(cancelled)
+            while right < len(x) and abs(x[right]-x[i]) <= width/2:
+                right += 1
+                if right % 1024 == 0: check_cancelled(cancelled)
         while right-left < 5:
             if left and (right == len(x) or abs(x[left-1]-x[i]) <= abs(x[right]-x[i])): left -= 1
             else: right += 1
@@ -60,11 +92,13 @@ def local_fit(x, y, width=0., derivative=0):
         if rank != degree+1: raise ValueError(f"第{i+1}点附近拟合退化")
         with np.errstate(over="ignore", invalid="ignore", divide="ignore", under="ignore"):
             output[i] = coefficients[derivative]*math.factorial(derivative)/np.float64(span)**derivative + (baseline if derivative == 0 else 0.)
+    check_cancelled(cancelled)
     if not np.isfinite(output).all(): raise ValueError("局部拟合结果超出有限范围")
     return output
 
 
-def typed_signal(dataset, index, kind="normal", width=0., normal_domain="temperature"):
+def typed_signal(dataset, index, kind="normal", width=0., normal_domain="temperature", *, cancelled=None):
+    check_cancelled(cancelled)
     if type(index) is not int or not 0 <= index < len(dataset.signals): raise ValueError("信号索引无效")
     if kind not in KINDS: raise ValueError("此信号类型的数学定义尚未确认")
     y = dataset.values[:, index]
@@ -72,7 +106,7 @@ def typed_signal(dataset, index, kind="normal", width=0., normal_domain="tempera
     axis_index = dataset.time_index if variable == "time" else dataset.temperature_index
     if kind == "normal" and width == 0: return np.asarray(y, dtype=float).copy()
     if axis_index is None: raise ValueError("文件没有所需的求导/平滑自变量")
-    return local_fit(dataset.values[:, axis_index], y, width, 2 if kind.startswith("d2_") else (1 if kind != "normal" else 0))
+    return local_fit(dataset.values[:, axis_index], y, width, 2 if kind.startswith("d2_") else (1 if kind != "normal" else 0), cancelled=cancelled)
 
 
 def type_label(dataset, index, kind):

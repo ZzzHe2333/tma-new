@@ -228,8 +228,10 @@ class SingleReportDialog(QDialog):
         self.folder_hint.setText("粒径默认目录：" + (folder or "未配置，可在设置中单独指定"))
 
     def choose_tma(self):
-        path, _ = QFileDialog.getOpenFileName(self, "选择单个 TMA 文件", import_folder(),
-            "TMA 数据 (*.0?? *.1?? *.2?? *.3?? *.4?? *.5?? *.6?? *.7?? *.8?? *.9?? *.txt);;所有文件 (*)")
+        from .data_file_dialog import get_data_files
+        paths, _ = get_data_files(self, "选择单个 TMA 文件",
+            "TMA 数据 (*.0?? *.1?? *.2?? *.3?? *.4?? *.5?? *.6?? *.7?? *.8?? *.9?? *.txt);;所有文件 (*)",owner=self.owner,multiple=False)
+        path=paths[0] if paths else ''
         if path:
             self.tma_path.setText(path)
             self.read_information(parts=("tma", "particle") if self.particle_path.text().lower().endswith(".p9m") else ("tma",))
@@ -426,6 +428,8 @@ class SingleReportDialog(QDialog):
             mode = "指定模板" if output["mode"] == "template" else "内部版三页报告"
             self.log.appendPlainText(f"已生成（{mode}）：{output['path']}")
             self.status.setText("报告已生成")
+            from .achievement_ui import record
+            record(self.owner, 'reports')
         elif result["kind"] == "template_error":
             self.log.appendPlainText("模板不可用：" + result["error"])
             answer = QMessageBox.question(self, "模板无法使用", result["error"] + "\n\n是否使用内部版三页报告作为兜底？",

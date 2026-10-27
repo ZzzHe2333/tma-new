@@ -7,7 +7,7 @@ from pathlib import Path
 import uuid
 
 
-def write_json(path, data):
+def write_json(path, data, *, sort_keys=False, allow_nan=True, durable=False):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     # tempfile.mkstemp retries PermissionError on Windows when os.access says
@@ -23,8 +23,10 @@ def write_json(path, data):
         break
     try:
         with os.fdopen(descriptor, 'w', encoding='utf-8') as handle:
-            json.dump(data, handle, ensure_ascii=False, indent=2)
+            json.dump(data, handle, ensure_ascii=False, indent=2, sort_keys=sort_keys, allow_nan=allow_nan)
             handle.write('\n')
+            if durable:
+                handle.flush();os.fsync(handle.fileno())
         os.replace(temporary, path)
     finally:
         try: temporary.unlink(missing_ok=True)

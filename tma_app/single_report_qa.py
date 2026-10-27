@@ -41,6 +41,8 @@ def verify_single_report(window, output, paths):
     previous = {key: os.environ.get(key) for key in ("LOCALAPPDATA", "TMA_MASS_XLSX")}
     os.environ["LOCALAPPDATA"] = str(output.parent / (output.stem + "-config-" + uuid.uuid4().hex[:8]))
     picker = QFileDialog.getOpenFileName
+    from . import data_file_dialog as picker_module
+    data_picker=picker_module.get_data_files
     question = QMessageBox.question
     try:
         if len(paths) != 3:
@@ -63,6 +65,10 @@ def verify_single_report(window, output, paths):
             directories.append(args[2])
             return next(choices), ""
         QFileDialog.getOpenFileName = staticmethod(pick)
+        def pick_data(parent,caption,filters,*,owner=None,**kwargs):
+            file,selected=pick(parent,caption,picker_module.start_folder(owner or parent),filters)
+            return [file] if file else [],selected
+        picker_module.get_data_files=pick_data
         dialog.choose_tma()
         wait_until(lambda: dialog.job is None)
         dialog.choose_particle()
@@ -153,6 +159,7 @@ def verify_single_report(window, output, paths):
         raise
     finally:
         QFileDialog.getOpenFileName = picker
+        picker_module.get_data_files=data_picker
         QMessageBox.question = question
         output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         window.dirty = False

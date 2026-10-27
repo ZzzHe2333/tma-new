@@ -135,6 +135,8 @@ class MassNormalizationDialog(QDialog):
             current=core.members(self.owner,self.document)
             if [c.uid for c in current]!=self.uids:raise ValueError('叠图曲线已改变，请重新打开统一化窗口')
             core.apply(self.owner,self.document,self.masses())
+            from .achievement_ui import record
+            record(self.owner, 'normalize')
         except ValueError as exc:self.error.setText(str(exc));return
         self.stop_lookup();super().accept()
 

@@ -1,6 +1,8 @@
 """Physical smoothing window matching the local TSmoothForm layout."""
 from PySide6.QtWidgets import QDialog,QLabel,QLineEdit,QCheckBox,QPushButton
 from .data_limits import smoothed_state
+from .calculation import BACKGROUND_POINTS
+from .calculation_jobs import CalculationDialogMixin
 
 
 def smoothing_variable(curve,display):
@@ -14,7 +16,7 @@ def smoothing_variable(curve,display):
     return display
 
 
-class SmoothDialog(QDialog):
+class SmoothDialog(CalculationDialogMixin,QDialog):
     def __init__(self,owner,curve):
         super().__init__(owner);self.owner,self.curve=owner,curve
         self.domain=smoothing_variable(curve,owner.domain)
@@ -35,17 +37,27 @@ class SmoothDialog(QDialog):
             if text=="确定":button.setDefault(True)
 
     def accept(self):
+        if self.job is not None:return
         try:
-            if self.curve not in self.owner.curves:raise ValueError("此曲线已移除")
+            if not any(c is self.curve for c in self.owner.curves):raise ValueError("此曲线已移除")
             width=float(self.width_edit.text())
+            if self.curve.sample_count>=BACKGROUND_POINTS:
+                peers=[c for c in self.owner.curves if c.dataset.document_key==self.curve.dataset.document_key]
+                self._calculation_reuse=self.reuse.isChecked()
+                self.start_calculation(peers,dict(kind='smooth',uid=self.curve.uid,domain=self.domain,width=width),self.apply_values)
+                return
             values=smoothed_state(self.curve,self.domain,width,use_saved_x=False)
-            self.owner.cancel_measurement(redraw=False);self.curve.checkpoint()
-            for key,value in values.items():setattr(self.curve,key,value)
-            self.curve.smooth_reuse=self.reuse.isChecked()
-            self.owner.remember_smoothing(self.curve)
-            self.owner.touch();self.owner.refresh_curve(self.curve.uid)
-            super().accept()
+            self._calculation_reuse=self.reuse.isChecked()
+            self.apply_values(values)
         except (ValueError,OverflowError) as exc:self.error.setText(str(exc));self.error.setToolTip(str(exc))
+
+    def apply_values(self,values):
+        self.owner.cancel_measurement(redraw=False);self.curve.checkpoint()
+        for key,value in values.items():setattr(self.curve,key,value)
+        self.curve.smooth_reuse=self._calculation_reuse
+        self.owner.remember_smoothing(self.curve)
+        self.owner.touch();self.owner.refresh_curve(self.curve.uid)
+        super().accept()
 
     def defaults(self):self.width_edit.setText("0");self.reuse.setChecked(False);self.error.clear()
 

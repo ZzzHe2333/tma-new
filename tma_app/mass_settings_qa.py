@@ -47,6 +47,7 @@ def verify(window, output, paths):
         wait_until(entered.is_set)
         assert not dialog.test_button.isEnabled()
         started = time.monotonic(); dialog.accept(); report['save_return_seconds'] = time.monotonic()-started
+        wait_until(lambda:not dialog.saving)
         assert dialog.result() == QDialog.DialogCode.Accepted
         assert settings.load_paths()['m'] == str(source)
         start_ticks = len(ticks); wait_until(lambda: len(ticks) >= start_ticks+15)
@@ -63,7 +64,7 @@ def verify(window, output, paths):
         dialog = window.show_path_settings(); dialog.test_mass(); wait_until(lambda: dialog.mass_job is None)
         assert '0.49 mg' in dialog.feedback.text()
         dialog.grab().save(str(output.with_suffix('.settings.png')))
-        dialog.accept(); wait_until(lambda: window._mass_refresh_job is None)
+        dialog.accept();wait_until(lambda:not dialog.saving); wait_until(lambda: window._mass_refresh_job is None)
         assert len(threads) == 1
         window.grab().save(str(output.with_suffix('.main.png')))
         report['checks'].append('completed_test_then_save_reuses_cache_without_another_excel_read')

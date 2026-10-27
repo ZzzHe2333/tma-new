@@ -32,6 +32,11 @@ CURVE_OPTION_DEFAULTS = {"marker": "", "legend_text": "", "show_legend": True, "
 APPEARANCE_FIELDS = ("style", "color", "marker", "width", "offset")
 
 
+def checkpoint_token(state):
+    """Logical identity survives deliberate history copies without owning them."""
+    return state[8].get('_undo_token') if len(state)>8 and isinstance(state[8],dict) else None
+
+
 def _text(value, label, maximum=4096):
     if not isinstance(value, str) or len(value) > maximum:
         raise ValueError(f"{label} 必须是长度不超过 {maximum} 的字符串")
@@ -434,16 +439,30 @@ class Curve:
     def display_y_offset(self,value=None):return (self.offset if value is None else value)*self.y_unit_factor()
     def display_x_shift(self,domain):return self.x_shift*self.x_unit_factor(domain)
 
-    def xy(self, domain="temperature"):
+    def xy(self, domain="temperature", *, cancelled=None):
         if self.working is not None and self.working_rows is not None and not np.isin(self.active_rows,self.working_rows).all():raise ValueError("此自定义处理未覆盖所选数据；请先恢复原始曲线再扩大范围")
-        x = self.x_values(domain) + self.display_x_shift(domain)
+        x = self.x_values(domain,cancelled=cancelled)
+        shift=self.display_x_shift(domain)
+        if type(shift) in (float,int):x+=shift
+        else:x=x+shift
         y = self.base_y if self.working is None else self.working
-        y=y[self.active_rows].astype(float)
+        if self.data_indices is not None:y=y[self.active_rows]
         time_index=self.dataset.time_index
-        if self.derived is None and self.reset_time and self.y_index==time_index and not any(op=="normalize" or op.startswith("derivative:") for op in self.operations):y-=self.time_origin
+        if self.derived is None and self.reset_time and self.y_index==time_index and not any(op=="normalize" or op.startswith("derivative:") for op in self.operations):
+            y=y.astype(float,copy=True);y-=self.time_origin
         from .dimension_units import quantity,convert
         spec=quantity(self)
-        return x,convert(y,spec)*self.scale*self.mass_normalization_factor+self.offset*spec["factor"]
+        if type(self.scale) not in (float,int) or type(self.offset) not in (float,int):
+            # Preserve NumPy/custom scalar dtype promotion for direct API
+            # callers. GUI/session transforms use ordinary Python scalars.
+            return x,convert(y,spec)*self.scale*self.mass_normalization_factor+self.offset*spec['factor']
+        # convert owns its output. Reuse only that private buffer, retaining
+        # the original operation order and rounding, including signed zeros.
+        output=convert(y,spec)
+        output*=self.scale
+        output*=self.mass_normalization_factor
+        output+=self.offset*spec['factor']
+        return x,output
 
     @property
     def mass_normalization_factor(self):
@@ -475,24 +494,35 @@ class Curve:
             return float(self.logical_dataset.values[self.active_rows[0],index])
         return float(self.dataset.values[self.active_rows[0],index])
 
-    def x_values(self, domain="temperature", *, full=False, canonical=False):
+    def x_values(self, domain="temperature", *, full=False, canonical=False, cancelled=None):
+        from .cancellation import check_cancelled
+        check_cancelled(cancelled)
         if self.derived is not None:
             from .running_integral import x_values
-            return x_values(self,domain,full=full,canonical=canonical)
-        rows=np.arange(len(self.dataset.values)) if full else self.active_rows
+            return x_values(self,domain,full=full,canonical=canonical,cancelled=cancelled)
+        rows=None if full or self.data_indices is None else self.active_rows
+        selection=slice(None) if rows is None else rows
         if domain == "signal":
             from .signal_processing import typed_signal
             from .dimension_units import typed_width_factor
             from .data_limits import segments
             from dataclasses import replace
             width=self.x_smooth_width/typed_width_factor(self,self.x_signal_type)
-            key = (id(self.dataset.values), self.x_signal_index, self.x_signal_type, width,tuple(rows))
-            if self._x_cache is None or self._x_cache[0] != key:
-                output=np.empty(len(rows))
-                for section in segments(rows):
-                    output[section]=typed_signal(replace(self.dataset,values=self.dataset.values[rows[section]]),self.x_signal_index,self.x_signal_type,width)
-                self._x_cache = (key,output)
-            output=self._x_cache[1].copy()
+            if self.x_signal_type == 'normal' and width == 0:
+                self._x_cache = None
+                if type(self.x_signal_index) is not int or not 0 <= self.x_signal_index < len(self.dataset.signals):
+                    raise ValueError('信号索引无效')
+                output=self.dataset.values[selection,self.x_signal_index].astype(float,copy=rows is None)
+            else:
+                key = (id(self.dataset.values),len(self.dataset.values),self.x_signal_index,self.x_signal_type,width,
+                       None if rows is None else tuple(rows))
+                if self._x_cache is None or self._x_cache[0] != key:
+                    selected_rows=np.arange(len(self.dataset.values)) if rows is None else rows
+                    output=np.empty(len(selected_rows))
+                    for section in segments(selected_rows):
+                        output[section]=typed_signal(replace(self.dataset,values=self.dataset.values[selected_rows[section]]),self.x_signal_index,self.x_signal_type,width,cancelled=cancelled)
+                    self._x_cache = (key,output)
+                output=self._x_cache[1].copy()
             if not full and self.reset_time and self.x_signal_index==self.dataset.time_index and self.x_signal_type=="normal":output-=self.time_origin
             if not canonical:
                 from .dimension_units import typed_affine,convert
@@ -502,7 +532,7 @@ class Curve:
         idx = self.dataset.temperature_index if domain == "temperature" else self.dataset.time_index
         if idx is None or idx < 0:
             raise ValueError(f"{self.dataset.path.name} 没有{domain}信号")
-        output=self.dataset.values[rows, idx].astype(float)
+        output=self.dataset.values[selection, idx].astype(float,copy=rows is None)
         if not full and domain=="time" and self.reset_time:output-=self.time_origin
         if not canonical:
             from .dimension_units import affine,convert
@@ -563,14 +593,15 @@ class Curve:
         self.history.append((None if self.working is None else self.working.copy(), list(self.operations), self.x_shift, self.scale,
                              self.overlay_offset if self.appearance_mode == "overlay" else self.offset, self.appearance_mode, self.y_type, self.smooth_width,
                              dict({key:deepcopy(getattr(self,key)) for key in ("data_indices","data_limit_spec","reset_time","smooth_domain","smooth_reuse","smooth_base_ops","smooth_source","smooth_x_config","working_rows","smooth_source_rows")},
-                                  _offset_view_key=self.active_overlay_key if self.appearance_mode=="overlay" else None)))
+                                  _offset_view_key=self.active_overlay_key if self.appearance_mode=="overlay" else None,
+                                  _undo_token=uuid.uuid4().hex)))
 
     def undo(self):
         if self.history:
             state = self.history.pop()
             if len(state)>8:
                 for key,value in state[8].items():
-                    if key!="_offset_view_key":setattr(self,key,value)
+                    if key not in ("_offset_view_key","_undo_token"):setattr(self,key,value)
             if len(state) >= 8: self.y_type, self.smooth_width = state[6:8]
             self.working, self.operations, self.x_shift, self.scale, offset = state[:5]
             mode = state[5] if len(state) > 5 else self.appearance_mode

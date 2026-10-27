@@ -26,7 +26,8 @@ from matplotlib.ticker import MaxNLocator, AutoMinorLocator, MultipleLocator, Fu
 from matplotlib.lines import Line2D
 
 from .app import MainWindow
-from .workspace import default_plot_options, validate_plot_options
+from .workspace import default_plot_options, validate_plot_options, checkpoint_token
+from .preferences import preference_batch
 from .overlay_settings import fill_manual_limits
 from .legend import render_legend, apply_anchor, moved_anchor
 from . import __version__, APP_NAME
@@ -79,6 +80,16 @@ def classic_palette():
     return cute_palette()
 
 
+class PlotCanvas(FigureCanvasQTAgg):
+    """Do not allocate an Agg image for a not-yet-plotted MDI document."""
+    def __init__(self,figure):
+        self.plot_ready=False
+        super().__init__(figure)
+
+    def draw_idle(self):
+        if self.plot_ready:super().draw_idle()
+
+
 class PlotDocument(QMdiSubWindow):
     closed_document = Signal(object)
 
@@ -91,8 +102,10 @@ class PlotDocument(QMdiSubWindow):
         self.plot_ticks = {}
         self.plot_ranges = {}
         self.figure = Figure(facecolor="white")
-        self.canvas = FigureCanvasQTAgg(self.figure)
-        self.navigation = NavigationToolbar2QT(self.canvas, owner)
+        self.canvas = PlotCanvas(self.figure)
+        # The toolbar keeps its canvas/figure alive. Own it with this document
+        # so closing a graph also releases the hidden navigation and callbacks.
+        self.navigation = NavigationToolbar2QT(self.canvas, self)
         self.navigation.hide()
         content = QWidget()
         content.setStyleSheet("background: white;")
@@ -138,6 +151,12 @@ class PlotDocument(QMdiSubWindow):
         self.closed_document.emit(self)
         event.accept()
 
+    def dispose(self):
+        # Matplotlib queues _draw_idle with singleShot. It can outlive the Qt
+        # canvas unless its pending flag is cleared before deferred deletion.
+        self.canvas._draw_pending = False
+        self.deleteLater()
+
 
 class ClassicMainWindow(MainWindow):
     def __init__(self):
@@ -150,6 +169,7 @@ class ClassicMainWindow(MainWindow):
         self.classic_legend = None  # Single traces have no legend; overlays do.
         self._drag_legend = None
         self._limits_undo={}
+        self._limits_cleanup_signature=None
         self._session_smooth_rules=[]
         self._last_document=None
         super().__init__()
@@ -165,7 +185,7 @@ class ClassicMainWindow(MainWindow):
         self.statusBar().clearMessage()
         self._plot_resize_timer = QTimer(self)
         self._plot_resize_timer.setSingleShot(True)
-        self._plot_resize_timer.timeout.connect(self.redraw)
+        self._plot_resize_timer.timeout.connect(self._redraw_after_resize)
 
     def _callbacks(self):
         return {
@@ -357,7 +377,7 @@ class ClassicMainWindow(MainWindow):
         }
         self.mdi = PastelMdiArea()
         self.mdi.setOption(QMdiArea.AreaOption.DontMaximizeSubWindowOnActivation, False)
-        self.mdi.subWindowActivated.connect(self.document_activated)
+        self.mdi.subWindowActivated.connect(self._mdi_document_activated)
         self.setCentralWidget(self.mdi)
         self.statusBar().setSizeGripEnabled(True)
         self.statusBar().setFixedHeight(19)
@@ -484,11 +504,15 @@ class ClassicMainWindow(MainWindow):
         return doc
 
     def _open_overlay(self, key, members):
+        created = key not in self.documents
         doc = self._document(key)
         doc.curve_uids = [c.uid for c in members]
         self.plot_options[key]["overlay_members"]=list(doc.curve_uids)
         doc.plot_signature = None
         self._show_document(key)
+        if created and len(members) >= 2 and not getattr(self, '_restoring_session', False):
+            from .achievement_ui import record
+            record(self, 'overlays')
         return doc
 
     def _toggle_curve_visible(self, curve, visible):
@@ -568,18 +592,24 @@ class ClassicMainWindow(MainWindow):
                 if not self._is_overlay(key) and key not in valid:
                     doc = self.documents.pop(key)
                     self.mdi.removeSubWindow(doc)
-                    doc.deleteLater()
+                    self._release_closed_plot(doc)
+                    doc.dispose()
             if not self.curves:
                 for key in [k for k in self.documents if self._is_overlay(k)]:
                     doc = self.documents.pop(key)
                     self.mdi.removeSubWindow(doc)
-                    doc.deleteLater()
+                    self._release_closed_plot(doc)
+                    doc.dispose()
             for c in self.curves:
                 key = c.dataset.document_key
                 if key not in self.documents:
                     self._document(key).show()
         finally:
             self._syncing_documents = False
+        if (self.figure is self._default_figure and not getattr(self,'_import_batch',False)
+                and not getattr(self,'_restoring_session',False)):
+            active=self.active_document()
+            if active is not None:self.document_activated(active)
 
     def active_document(self):
         if not hasattr(self,"mdi"):return None
@@ -590,6 +620,13 @@ class ClassicMainWindow(MainWindow):
         # document only while it is still attached to this workspace.
         previous=getattr(self,"_last_document",None)
         return previous if any(previous is doc for doc in self.documents.values()) else None
+
+    def _mdi_document_activated(self, doc):
+        # Regaining application focus can announce the same MDI child again.
+        # Explicit _show_document calls still refresh after user edits.
+        if doc is self._last_document and isinstance(doc, PlotDocument) and self.figure is doc.figure:
+            return
+        self.document_activated(doc)
 
     def document_activated(self, doc):
         if not isinstance(doc, PlotDocument) or self._activating or self._syncing_documents:
@@ -611,6 +648,7 @@ class ClassicMainWindow(MainWindow):
                     with QSignalBlocker(self.files):
                         self.files.setCurrentItem(self.files.topLevelItem(index))
             MainWindow.selection_changed(self)
+            self._update_cycle_action()
         finally:
             self._activating = False
 
@@ -618,14 +656,20 @@ class ClassicMainWindow(MainWindow):
         if self._updating:
             return
         c = self.selected()
+        activated = False
         if hasattr(self, "mdi") and not self._activating and not self._syncing_documents and c:
             active = self.active_document()
             if not isinstance(active, PlotDocument) or not self._is_overlay(active.key):
                 doc = self.documents.get(c.dataset.document_key)
                 if doc and doc is not active:
-                    self.mdi.setActiveSubWindow(doc)
-        MainWindow.selection_changed(self)
+                    # Activation already refreshes the selected curve and plot.
+                    self._show_document(doc.key)
+                    activated = True
+        if not activated:
+            MainWindow.selection_changed(self)
+        self._update_cycle_action()
 
+    def _update_cycle_action(self):
         cycle_action=self.classic_actions.get("CycleLimits1")
         if cycle_action is not None:
             from .data_limits import cycle_index
@@ -740,19 +784,23 @@ class ClassicMainWindow(MainWindow):
         keys=[key for key in (dataset.document_key,) if key in self.plot_options]
         keys += [key for key in self.plot_options if self._is_overlay(key)]
         before={key:{name:deepcopy(self.plot_options[key][name]) for name in range_keys} for key in keys}
-        transaction={"source":dataset.document_key,"checkpoints":{c.uid:c.history[-1] for c in source},"ranges":before}
+        # Bookkeeping must never own the numerical undo buffers. Histories are
+        # their sole owners; clearing a history immediately releases its data.
+        transaction={"source":dataset.document_key,"checkpoints":{c.uid:checkpoint_token(c.history[-1]) for c in source},"ranges":before}
         self.cancel_measurement(redraw=False);self.curves=draft
         for key in keys:
             self.plot_options[key].update(auto_x=True,auto_y=[True]*4,x_limits=None,y_limits=[None]*4,x_ticks=None,y_ticks=[None]*4)
             if key in self.documents:self.documents[key].plot_signature=None
         transaction["after"]={key:{name:deepcopy(self.plot_options[key][name]) for name in range_keys} for key in keys}
-        for state in transaction["checkpoints"].values():self._limits_undo[id(state)]=transaction
+        for token in transaction["checkpoints"].values():self._limits_undo[token]=transaction
         self.touch();self.refresh_curve(uid)
         self.statusBar().showMessage("数据界限已应用；原始文件未改。",5000)
 
     def undo(self):
         curve=self.selected()
-        transaction=self._limits_undo.get(id(curve.history[-1])) if curve and curve.history else None
+        token=checkpoint_token(curve.history[-1]) if curve and curve.history else None
+        transaction=self._limits_undo.get(token)
+        if transaction is not None and transaction['checkpoints'].get(curve.uid)!=token:transaction=None
         if transaction is None:
             from .data_limits import smoothing_rule
             before=smoothing_rule(curve) if curve is not None else None
@@ -761,14 +809,14 @@ class ClassicMainWindow(MainWindow):
             return
         states=transaction["checkpoints"]
         current=[c for c in self.curves if c.uid in states]
-        if {c.uid for c in current}!=set(states) or any(not c.history or c.history[-1] is not states[c.uid] for c in current):
+        if {c.uid for c in current}!=set(states) or any(not c.history or checkpoint_token(c.history[-1])!=states[c.uid] for c in current):
             self.statusBar().showMessage("请先撤销此文件较新的处理；也可用‘全范围’重新读取。",6000);return
         for item in current:item.undo()
         for key,values in transaction["ranges"].items():
             if key in self.plot_options:
                 for name,value in values.items():
                     if self.plot_options[key][name]==transaction["after"][key][name]:self.plot_options[key][name]=value
-        for state in states.values():self._limits_undo.pop(id(state),None)
+        for token in states.values():self._limits_undo.pop(token,None)
         self.touch();self.selection_changed()
 
     def redraw(self, *_):
@@ -778,9 +826,12 @@ class ClassicMainWindow(MainWindow):
         active = self.active_document()
         if not isinstance(active, PlotDocument):
             return
+        if hasattr(self, '_plot_resize_timer'):
+            self._plot_resize_timer.stop()
         self.touch_cloud_usage()
         self._drag_legend = None
         self.figure, self.canvas, self.toolbar = active.figure, active.canvas, active.navigation
+        self.canvas.plot_ready=True
         curves = self.visible_curves()
         options = self.plot_options.get(active.key, default_plot_options())
         if self._is_overlay(active.key):
@@ -894,10 +945,8 @@ class ClassicMainWindow(MainWindow):
         active.plot_ticks = {i: (axis.get_xticks().copy(), axis.get_yticks().copy()) for i, axis in self.axes.items()}
         active.plot_ranges = {i: (axis.get_xlim(), axis.get_ylim()) for i, axis in self.axes.items()}
         from .axis_layout import fit_y_gaps
-        fit_y_gaps(self,scale)
-        self.layout_result_annotations()
-        if any(flags["line"] or flags["symbol"] for flags in options["axis_flags"]): self.canvas.draw()
-        renderer = self.canvas.get_renderer()
+        renderer = fit_y_gaps(self,scale)
+        self.layout_result_annotations(renderer=renderer)
         for index, axis in self.axes.items():
             flags = options["axis_flags"][index]
             curve = next((c for c, _, _ in self._plot_artists if c.axis == index), None)
@@ -914,7 +963,14 @@ class ClassicMainWindow(MainWindow):
                                color=color, lw=.8, ls=render_style(curve.style) if flags["line"] else "None",
                                marker=curve.marker if flags["symbol"] else "", markevery=[1], ms=4, clip_on=False)
                 glyph.set_gid(f"tma-axis-style-{index}"); self.figure.add_artist(glyph)
+        active.layout_size = self.canvas.get_width_height(physical=True)
         self.canvas.draw_idle()
+
+    def _redraw_after_resize(self):
+        active = self.active_document()
+        if (not getattr(self, '_closing', False) and isinstance(active, PlotDocument)
+                and getattr(active, 'layout_size', None) != active.canvas.get_width_height(physical=True)):
+            self.redraw()
 
     def canvas_resized(self, event):
         if hasattr(self, "_plot_resize_timer") and event.canvas is self.canvas:
@@ -1186,16 +1242,17 @@ class ClassicMainWindow(MainWindow):
         c = self.selected()
         if c not in curves: c = curves[0] if curves else None
         if c is None: return
-        from .mass_lookup import default_note_text
+        from .note_prefill import prepare
         dialog = QInputDialog(self)
         dialog.setWindowTitle("批注")
         dialog.setLabelText("文字（支持多行）")
         dialog.setOption(QInputDialog.InputDialogOption.UsePlainTextEditForTextInput)
-        dialog.setTextValue(default_note_text(c.sample_name))
+        note_job = prepare(dialog,c)
         dialog.setOkButtonText("确定"); dialog.setCancelButtonText("取消")
         dialog.setMinimumSize(560, 300); dialog.resize(680, 380)
         accepted = dialog.exec() == QDialog.DialogCode.Accepted
         text = dialog.textValue()
+        if note_job is not None:note_job.cancel()
         dialog.deleteLater()
         if not accepted or not text.strip(): return
         axis = self.axes[c.axis]
@@ -1239,6 +1296,7 @@ class ClassicMainWindow(MainWindow):
             doc.plot_signature = None
             self.redraw()
 
+    @preference_batch
     def finish_import(self, datasets, failures):
         self._import_batch = True
         try:
@@ -1284,14 +1342,14 @@ class ClassicMainWindow(MainWindow):
         self.statusBar().clearMessage()
 
     def open_files(self):
-        from .path_settings import import_folder
-        paths, _ = QFileDialog.getOpenFileNames(self, "打开数据文件", import_folder(), "TA 数据 / TMA 会话 (*.0?? *.1?? *.2?? *.3?? *.4?? *.5?? *.6?? *.7?? *.8?? *.9?? *.tai *.txt *.tmas);;所有文件 (*)")
+        from .data_file_dialog import get_data_files
+        paths, _ = get_data_files(self, "打开数据文件", "TA 数据 / TMA 分析文件 (*.0?? *.1?? *.2?? *.3?? *.4?? *.5?? *.6?? *.7?? *.8?? *.9?? *.tai *.txt *.tmas);;所有文件 (*)")
         if not paths:
             return
         sessions = [p for p in paths if Path(p).suffix.casefold() == ".tmas"]
         if sessions:
             if len(paths) != 1:
-                self.warn("会话文件请单独打开。")
+                self.warn("分析文件请单独打开。")
             elif self.confirm_discard():
                 self.restore_session(paths[0])
         else:
@@ -1309,7 +1367,8 @@ class ClassicMainWindow(MainWindow):
                 for key in [k for k in self.documents if self._is_overlay(k)]:
                     doc = self.documents.pop(key)
                     self.mdi.removeSubWindow(doc)
-                    doc.deleteLater()
+                    self._release_closed_plot(doc)
+                    doc.dispose()
                 self._overlay_seq = 0
                 self.sync_documents()
                 saved=[key for key in self.plot_options if self._is_overlay(key)]
@@ -1329,6 +1388,25 @@ class ClassicMainWindow(MainWindow):
     def touch(self):
         self.dirty = True
         self.setWindowTitle(f"{APP_NAME} {__version__}")
+        if self._limits_undo and not getattr(self,'_closing',False):
+            timer=getattr(self,'_limits_cleanup_timer',None)
+            if timer is None:
+                timer=self._limits_cleanup_timer=QTimer(self)
+                timer.setSingleShot(True);timer.setInterval(200)
+                timer.timeout.connect(self._prune_limits_undo)
+            if not timer.isActive():timer.start()
+        elif not self._limits_undo:self._limits_cleanup_signature=None
+
+    def _prune_limits_undo(self):
+        if getattr(self,'_closing',False):return
+        if not self._limits_undo:
+            self._limits_cleanup_signature=None;return
+        signature=tuple((c.uid,id(c.history),len(c.history),checkpoint_token(c.history[-1]) if c.history else None) for c in self.curves)
+        if signature==self._limits_cleanup_signature:return
+        self._limits_cleanup_signature=signature
+        reachable={checkpoint_token(state) for c in self.curves for state in c.history}
+        self._limits_undo={key:value for key,value in self._limits_undo.items() if key in reachable}
+        if not self._limits_undo:self._limits_cleanup_signature=None
 
     def _update_measurement_controls(self):
         MainWindow._update_measurement_controls(self)
@@ -1390,6 +1468,9 @@ class ClassicMainWindow(MainWindow):
         doc.curve_uids=list(self.documents[source_key].curve_uids or [])
         self.plot_options[key]["overlay_members"]=list(doc.curve_uids)
         self.cancel_measurement(redraw=False);self._show_document(key);self.touch()
+        if len(doc.curve_uids) >= 2:
+            from .achievement_ui import record
+            record(self, 'overlays')
         return doc
 
     def show_normal(self):
@@ -1434,7 +1515,27 @@ class ClassicMainWindow(MainWindow):
                 curve.overlay_views={key:value for key,value in curve.overlay_views.items() if key!=doc.key}
             self.touch()
         self.mdi.removeSubWindow(doc)
-        doc.deleteLater()
+        self._release_closed_plot(doc)
+        doc.dispose()
+
+    def _release_closed_plot(self, doc):
+        """Detach controller references before a canvas is deleted by Qt."""
+        targets=getattr(self,'_import_mass_targets',{})
+        self._import_mass_targets={ticket:key for ticket,key in targets.items() if key!=doc.key}
+        if self._last_document is doc:self._last_document=None
+        if self.figure is not doc.figure:return
+        if hasattr(self,'_plot_resize_timer'):self._plot_resize_timer.stop()
+        if hasattr(self,'span'):
+            self.span.disconnect_events()
+            del self.span
+        self.axes={}
+        self._plot_artists=[]
+        self._result_annotations=[]
+        self._measurement_artists=[]
+        self._drag_annotation=self._drag_measurement=self._drag_legend=None
+        self.figure,self.canvas,self.toolbar=self._default_figure,self._default_canvas,self._default_toolbar
+        active=self.active_document()
+        if active is not None and not self._syncing_documents:self.document_activated(active)
 
     def close_active_document(self):
         active = self.active_document()
@@ -1452,7 +1553,8 @@ class ClassicMainWindow(MainWindow):
         try:
             for doc in list(self.documents.values()):
                 self.mdi.removeSubWindow(doc)
-                doc.deleteLater()
+                self._release_closed_plot(doc)
+                doc.dispose()
             self.documents.clear()
             self.curves.clear()
             self.results.clear()

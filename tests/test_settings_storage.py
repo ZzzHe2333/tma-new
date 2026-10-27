@@ -7,6 +7,7 @@ import pytest
 
 from test_point_interaction import ui
 from tma_app import atomic_files, path_settings as settings, ui_size
+from tma_app.batch_qa import wait_until
 
 
 @pytest.fixture
@@ -63,6 +64,7 @@ def test_dialog_saves_once_and_restart_file_picker_uses_backup(ui, storage, monk
     dialog.paths.item(1, 1).setText('//server/ta/Data/TMA/实验室样品/2026')
     dialog.batch_popup.setChecked(False); dialog.cache_hours.setValue(72)
     dialog.accept()
+    wait_until(lambda:not dialog.saving)
     assert dialog.result() == QDialog.DialogCode.Accepted and calls == [primary, backup]
     assert str(backup) in ui.statusBar().currentMessage()
     dialog = ui.show_path_settings()
@@ -70,8 +72,9 @@ def test_dialog_saves_once_and_restart_file_picker_uses_backup(ui, storage, monk
     assert not dialog.batch_popup.isChecked() and dialog.cache_hours.value() == 72
     dialog.reject()
     folders = []
-    def choose(owner, title, folder, *args): folders.append(folder); return [], ''
-    monkeypatch.setattr(QFileDialog, 'getOpenFileNames', choose)
+    from tma_app import data_file_dialog as picker
+    def choose(parent,*args,owner=None,**kwargs):folders.append(picker.start_folder(owner or parent));return [],''
+    monkeypatch.setattr(picker,'get_data_files',choose)
     restarted = ClassicMainWindow()
     try: restarted.open_files()
     finally: restarted.dirty = False; restarted.close()
@@ -86,6 +89,7 @@ def test_all_locations_denied_keep_old_settings_and_dialog_open(ui, storage, mon
     def denied(*args): raise PermissionError('fixture all locations denied')
     monkeypatch.setattr(atomic_files, 'write_json', denied)
     dialog = ui.show_path_settings(); dialog.paths.item(1, 1).setText('changed'); dialog.accept()
+    wait_until(lambda:not dialog.saving)
     assert dialog.result() != QDialog.DialogCode.Accepted and dialog.isVisible()
     assert '配置保存失败' in dialog.feedback.text()
     assert primary.read_bytes() == before and not backup.exists()

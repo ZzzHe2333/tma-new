@@ -34,12 +34,13 @@ from .theme import CUTE_STYLE, cute_palette, app_icon
 from .reader import read_dataset
 from .numerics import analyze, process_signal
 from .workspace import Curve, PALETTE, save_session, load_session
+from .preferences import preference_batch
 from .measurement import MeasurementArtists,initial_indices,point_values,initial_y_point
 from .point_labels import CURVE_VALUE_KINDS
 from .peak_integration import KINDS as INTEGRATION_KINDS
 from .legacy_t1_t2_h import format_plot_temp_c
 from .graph_options import render_style
-from .import_jobs import ImportWorker
+from .import_jobs import ImportWorker, ImportMassJob
 
 
 STYLE = CUTE_STYLE
@@ -129,7 +130,9 @@ class MainWindow(QMainWindow):
         self.dirty = False
         self.session_path = None
         self.worker = None
+        self._import_mass_job = None
         self._closing = False
+        self._last_data_directory = ''
         self._updating = False
         self._plot_artists = []
         self._result_annotations = []
@@ -150,6 +153,10 @@ class MainWindow(QMainWindow):
         self._build_measurement_controls()
         from .user_dialog import install as install_user_menu
         install_user_menu(self)
+        from .achievement_ui import install as install_achievements
+        install_achievements(self)
+        from .path_settings import refresh_in_background
+        refresh_in_background()
         self.statusBar().showMessage("就绪 · 拖入 TA 数据文件，或点击「导入数据」")
         self.redraw()
         QTimer.singleShot(0, self.start_saved_mcp)
@@ -258,8 +265,8 @@ class MainWindow(QMainWindow):
             ("从云盘导入…", lambda: self.show_cloud(), ""),
             ("批量处理 T1 / T2 / M / H…", self.show_batch_analysis, "Ctrl+Shift+B"),
             ("单样品报告…", self.show_single_report, "Ctrl+Shift+R"),
-            ("打开会话…", self.open_session, "Ctrl+Shift+O"),
-            ("保存会话…", self.save, "Ctrl+S"),
+            ("打开分析文件…", self.open_session, "Ctrl+Shift+O"),
+            ("保存分析文件…", self.save, "Ctrl+S"),
             ("导出图像…", self.export_plot, "Ctrl+E"),
             ("导出当前数据 CSV…", self.export_data, ""),
             ("导出分析结果 CSV…", self.export_results, ""),
@@ -291,8 +298,8 @@ class MainWindow(QMainWindow):
         header.addWidget(caption)
         header.addStretch()
         header.addWidget(button("单样品报告", self.show_single_report))
-        header.addWidget(button("打开会话", self.open_session))
-        header.addWidget(button("保存会话", self.save))
+        header.addWidget(button("打开分析文件", self.open_session))
+        header.addWidget(button("保存分析文件", self.save))
         header.addWidget(button("＋ 导入数据", self.open_files, True))
         header.addWidget(button("分享", self.show_share))
         layout.addLayout(header)
@@ -479,8 +486,8 @@ class MainWindow(QMainWindow):
                 raise ValueError("输出路径与原始数据相同，请选择新的文件名。")
 
     def open_files(self):
-        from .path_settings import import_folder
-        paths, _ = QFileDialog.getOpenFileNames(self, "导入 TA 数据", import_folder(), "TA 数据 (*.0?? *.1?? *.2?? *.3?? *.4?? *.5?? *.6?? *.7?? *.8?? *.9?? *.tai *.txt *.csv);;所有文件 (*)")
+        from .data_file_dialog import get_data_files
+        paths, _ = get_data_files(self, "导入 TA 数据", "TA 数据 (*.0?? *.1?? *.2?? *.3?? *.4?? *.5?? *.6?? *.7?? *.8?? *.9?? *.tai *.txt *.csv);;所有文件 (*)")
         if paths:
             self.import_files(paths)
 
@@ -489,6 +496,8 @@ class MainWindow(QMainWindow):
         paths = [str(p) for p in paths]
         if not paths:
             return
+        from .diagnostics import record_event
+        record_event('import.request',files=len(paths),synchronous=synchronous,queued=self.worker is not None)
         numeric_paths = [p for p in paths if Path(p).suffix[1:].isdigit()]
         if batch_results and not synchronous and len(numeric_paths) > 1:
             from .path_settings import batch_popup_enabled
@@ -511,7 +520,6 @@ class MainWindow(QMainWindow):
         self.worker.completed.connect(self.receive_import)
         self.worker.finished.connect(self.worker_finished)
         self.worker.progress.connect(self.import_progress)
-        self.worker.mass_ready.connect(self.import_mass_ready)
         self.worker.start()
         self.statusBar().showMessage(f"正在解析 {len(paths)} 个文件…")
 
@@ -523,6 +531,12 @@ class MainWindow(QMainWindow):
         from .diagnostics import record_event
         record_event('import.gui.apply', files=len(datasets), failures=len(failures))
         self.finish_import(datasets, failures)
+        requests = [(ds._import_ticket, ds.name) for ds in datasets if hasattr(ds, '_import_ticket')]
+        if requests and not self._closing:
+            if self._import_mass_job is None:
+                self._import_mass_job = ImportMassJob(self)
+                self._import_mass_job.mass_ready.connect(self.import_mass_ready)
+            self._import_mass_job.enqueue(requests)
 
     @Slot(str)
     def import_progress(self, message):
@@ -533,6 +547,8 @@ class MainWindow(QMainWindow):
     def worker_finished(self):
         if self._closing: return
         if self.sender() is not self.worker: return
+        from .diagnostics import record_event
+        record_event('import.read.finished')
         self.worker.deleteLater()
         self.worker = None
         queued = getattr(self, '_pending_import_paths', [])
@@ -563,9 +579,11 @@ class MainWindow(QMainWindow):
         dialog.raise_()
         return dialog
 
+    @preference_batch
     def finish_import(self, datasets, failures):
         used = {c.dataset.document_key for c in self.curves}
         counts = self._opening_counts = getattr(self, '_opening_counts', {})
+        unit_defaults=None;units_loaded=False
         for index, ds in enumerate(datasets):
             path_key = os.path.normcase(str(ds.path))
             previous_count = max(counts.get(path_key, 0), max((c.dataset.opening_index for c in self.curves if os.path.normcase(str(c.dataset.path)) == path_key), default=0))
@@ -583,9 +601,12 @@ class MainWindow(QMainWindow):
             curve = Curve(ds, y_index=yi, color=PALETTE[len(self.curves) % len(PALETTE)])
             from .dimension_units import dimension_index
             if dimension_index(ds) is not None or ds.time_index is not None or ds.temperature_index is not None:
-                from .preferences import load_defaults
-                try:curve.unit_options=deepcopy(load_defaults('units')['options'].get('unit_defaults'))
-                except (ValueError,OSError) as exc:self.log.appendPlainText(f'单位默认设置未载入：{exc}')
+                if not units_loaded:
+                    units_loaded=True
+                    from .preferences import load_defaults
+                    try:unit_defaults=load_defaults('units')['options'].get('unit_defaults')
+                    except (ValueError,OSError) as exc:self.log.appendPlainText(f'单位默认设置未载入：{exc}')
+                curve.unit_options=deepcopy(unit_defaults)
             self.curves.append(curve)
             self.log.appendPlainText(f"导入 {ds.path.name} · {len(ds.values):,} 点 · SHA256 {ds.sha256}")
             self.update_curve_mass(curve, ds.__dict__.pop('_mass_match', None))
@@ -597,6 +618,8 @@ class MainWindow(QMainWindow):
             if not self.files.selectedItems():
                 self.files.setCurrentItem(self.files.topLevelItem(0))
             self.redraw()
+            from .achievement_ui import record
+            record(self, 'imports', len(datasets))
         self.statusBar().showMessage(f"已导入 {len(datasets)} 个文件；失败 {len(failures)} 个")
         if failures:
             self.warn("以下文件未能导入：\n" + "\n".join(failures))
@@ -897,9 +920,10 @@ class MainWindow(QMainWindow):
             axis_labels.setdefault(c.axis, c.plot_label)
             label = c.legend_text or c.dataset.path.name
             style = render_style(c.style)
-            gaps=np.flatnonzero(np.diff(c.active_rows)!=1)+1
+            gaps=np.flatnonzero(np.diff(c.active_rows)!=1)+1 if c.data_indices is not None else ()
             dx=self.display_x_offset(c)
-            px,py=np.insert(x+dx,gaps,np.nan),np.insert(y,gaps,np.nan)
+            px,py=x+dx,y
+            if len(gaps):px,py=np.insert(px,gaps,np.nan),np.insert(py,gaps,np.nan)
             line, = axis.plot(px, py, color=c.color, lw=c.width, ls=style, marker=c.marker or ("." if c.style == "None" else ""), markevery=max(1, len(x)//60), ms=3, label=label if c.show_legend else "_nolegend_")
             line._tma_curve_uid = c.uid
             if c.show_legend:
@@ -987,7 +1011,8 @@ class MainWindow(QMainWindow):
         base.set_title("THERMAL ANALYSIS  /  " + (f"{len(handles)} curves" if handles else "Workspace"), loc="left", fontsize=10, color="#4d607c", pad=16)
         if self._plot_artists:
             if handles:
-                base.legend(handles, labels, loc="best", fontsize=8, framealpha=.94, edgecolor="#e3e9f2")
+                from .legend import cache_draw_positions
+                cache_draw_positions(base.legend(handles, labels, loc="best", fontsize=8, framealpha=.94, edgecolor="#e3e9f2"))
         else:
             base.text(.5, .54, "从原始数据开始", ha="center", transform=base.transAxes, fontsize=22, color="#365778")
             base.text(.5, .44, "导入 .001 / .002 / .003 等 TA 数据\n选择信号、叠加曲线，并在区间内进行分析", ha="center", va="center", transform=base.transAxes, fontsize=11, color="#8392a5", linespacing=1.8)
@@ -1003,7 +1028,7 @@ class MainWindow(QMainWindow):
                 self.toolbar.pan()
             else:
                 self.toolbar.zoom()
-        self.span.set_active(active)
+        if hasattr(self,'span'):self.span.set_active(active)
 
     def range_selected(self, lo, hi):
         self.lo_box.setValue(lo)
@@ -1020,11 +1045,12 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage(f"{c.dataset.path.name}  |  X {x[i]:.6g}  |  Y {y[i]:.6g}  |  采样点 {int(curve.active_rows[i])+1:,}")
                 break
 
-    def layout_result_annotations(self):
+    def layout_result_annotations(self, renderer=None):
         """Place result text inside the plot, avoiding other result text boxes."""
         if not self._result_annotations: return
-        self.canvas.draw()
-        renderer = self.canvas.get_renderer()
+        if renderer is None:
+            self.canvas.draw()
+            renderer = self.canvas.get_renderer()
         occupied = [Text.get_window_extent(text, renderer).expanded(1.04, 1.12)
                     for editor in self._measurement_artists for text in editor.temps if text.get_visible()]
         for result, annotation in self._result_annotations:
@@ -1177,6 +1203,8 @@ class MainWindow(QMainWindow):
                          "reference_length_mm": self.length_box.value() or None, "values": result,
                          "annotation": annotation_options if isinstance(annotation_options, dict) else {}}
                 self.results.append(entry)
+                from .achievement_ui import record
+                record(self, 'analysis')
                 self.log.appendPlainText(f"分析 {entry['file']} {kind}: {json.dumps(result, ensure_ascii=False)}")
                 self.touch()
             except Exception as exc:
@@ -1353,7 +1381,10 @@ class MainWindow(QMainWindow):
         entry["interactive"]["confirmed"] = True
         index = next((i for i, original in enumerate(self.results) if original is self._editing_measurement), None)
         if index is not None: self.results[index] = entry
-        else: self.results.append(entry)
+        else:
+            self.results.append(entry)
+            from .achievement_ui import record
+            record(self, 'analysis')
         self._pending_measurement = self._editing_measurement = None
         self._drag_measurement = self._drag_annotation = None
         self._update_measurement_controls()
@@ -1432,7 +1463,7 @@ class MainWindow(QMainWindow):
             self.selection_changed()
 
     def save(self):
-        path, _ = QFileDialog.getSaveFileName(self, "保存完整会话（内嵌数据）", str(self.session_path or "未命名.tmas"), "ZzzHe TMA Analysis 会话 (*.tmas)")
+        path, _ = QFileDialog.getSaveFileName(self, "保存分析文件（内嵌数据）", str(self.session_path or "未命名.tmas"), "ZzzHe TMA Analysis 分析文件 (*.tmas)")
         if not path:
             return False
         try:
@@ -1443,7 +1474,7 @@ class MainWindow(QMainWindow):
             self.session_path = Path(path)
             self.dirty = False
             self.setWindowTitle(f"ZzzHe TMA Analysis {__version__}  ·  {Path(path).name}")
-            self.statusBar().showMessage(f"会话已保存：{path}")
+            self.statusBar().showMessage(f"分析文件已保存：{path}")
             return True
         except Exception as exc:
             self.warn(str(exc))
@@ -1455,10 +1486,11 @@ class MainWindow(QMainWindow):
 
     def open_session(self):
         if self.worker is not None:
-            self.warn("正在导入数据，请等待完成后打开会话。")
+            self.warn("正在导入数据，请等待完成后打开分析文件。")
             return
-        from .path_settings import import_folder
-        path, _ = QFileDialog.getOpenFileName(self, "打开会话", import_folder(), "ZzzHe TMA Analysis 会话 (*.tmas)")
+        from .data_file_dialog import get_data_files
+        paths, _ = get_data_files(self, "打开分析文件", "ZzzHe TMA Analysis 分析文件 (*.tmas)",multiple=False)
+        path=paths[0] if paths else ''
         if not path or not self.confirm_discard():
             return
         self.restore_session(path)
@@ -1481,7 +1513,7 @@ class MainWindow(QMainWindow):
             self.dirty = False
             self.setWindowTitle(f"ZzzHe TMA Analysis {__version__}  ·  {Path(path).name}")
         except Exception as exc:
-            self.warn(f"会话未打开：{exc}")
+            self.warn(f"分析文件未打开：{exc}")
 
     def export_plot(self, preferred=None):
         self.touch_cloud_usage()
@@ -1493,6 +1525,8 @@ class MainWindow(QMainWindow):
             try:
                 self.protect_output(path)
                 self.write_plot(path)
+                from .achievement_ui import record
+                record(self, 'images')
                 self.statusBar().showMessage(f"图像已导出：{path}")
             except Exception as exc:
                 self.warn(str(exc))
@@ -1567,6 +1601,8 @@ class MainWindow(QMainWindow):
         if path:
             try:
                 self.write_data(path, c)
+                from .achievement_ui import record
+                record(self, 'tables')
                 self.statusBar().showMessage(f"已导出数据与参数旁文件：{path}")
             except Exception as exc:
                 self.warn(str(exc))
@@ -1585,6 +1621,8 @@ class MainWindow(QMainWindow):
         if path:
             try:
                 self.write_results(path)
+                from .achievement_ui import record
+                record(self, 'tables')
             except Exception as exc:
                 self.warn(str(exc))
 
@@ -1606,12 +1644,14 @@ class MainWindow(QMainWindow):
         if path:
             try:
                 self.write_report(path)
+                from .achievement_ui import record
+                record(self, 'reports')
                 self.statusBar().showMessage(f"报告已导出，可用浏览器打印 PDF：{path}")
             except Exception as exc:
                 self.warn(str(exc))
 
     def about(self):
-        QMessageBox.information(self, "关于 ZzzHe TMA Analysis", f"ZzzHe TMA Analysis {__version__}\n作者：ZzzHe\nPython + PySide6 (Qt) + Matplotlib\n\n独立实现的热分析工作台。支持已验证的 TA TMA 二进制与 StartOfData 文本。\n保留原始采集顺序；区间拟合/求导不自动排序升降温分支。\n\n斜率：最小二乘直线拟合。\n积分：支持直线／水平S形基线；原生峰积分使用记录时间，不直接作为焓。\nCTE：斜率(µm/°C) / 长度(mm) × 1000 ppm/K。\nOnset：区间前段基线与最大绝对斜率附近切线交点，需人工核对。\n\n尚未实现原 UA 的专用 DSC/TGA/DMA 分析、旧会话/宏兼容。")
+        QMessageBox.information(self, "关于 ZzzHe TMA Analysis", f"ZzzHe TMA Analysis {__version__}\n作者：ZzzHe\nPython + PySide6 (Qt) + Matplotlib\n\n热分析数据读取与处理软件。支持已验证的 TA TMA 二进制与 StartOfData 文本。\n保留原始采集顺序；区间拟合/求导不自动排序升降温分支。\n\n斜率：最小二乘直线拟合。\n积分：支持直线／水平S形基线；原生峰积分使用记录时间，不直接作为焓。\nCTE：斜率(µm/°C) / 长度(mm) × 1000 ppm/K。\nOnset：区间前段基线与最大绝对斜率附近切线交点，需人工核对。\n\n尚未实现原 UA 的专用 DSC/TGA/DMA 分析、旧会话/宏兼容。")
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -1626,10 +1666,15 @@ class MainWindow(QMainWindow):
         if self._closing:
             event.accept(); return
         self._closing = True
+        achievements = getattr(self, 'achievement_controller', None)
+        if achievements is not None: achievements.detach(self)
         self._mcp_closed = True
         self._pending_import_paths = []
         if self.worker is not None:
             self.worker.cancel();self.worker.deleteLater();self.worker=None
+        import_mass = self._import_mass_job
+        if import_mass is not None:
+            import_mass.cancel();import_mass.deleteLater();self._import_mass_job=None
         mass_job = getattr(self, '_mass_refresh_job', None)
         if mass_job is not None:
             mass_job.cancel();mass_job.deleteLater();self._mass_refresh_job=None
@@ -1640,6 +1685,8 @@ class MainWindow(QMainWindow):
         for job in (self.cloud_maintenance,self.cloud_touch_job):
             if job is not None:job.cancelled.set()
         for dialog in self.findChildren(QDialog):
+            stop_calculation=getattr(dialog,'shutdown_calculation',None)
+            if stop_calculation is not None:stop_calculation()
             stop_test=getattr(dialog,'stop_mass_test',None)
             if stop_test is not None:stop_test()
             job=getattr(dialog,'job',None)
@@ -1654,6 +1701,15 @@ class MainWindow(QMainWindow):
 
 
 def main():
+    import_continuation_verify = len(sys.argv)>4 and sys.argv[1]=='--verify-import-continuation'
+    undo_verify = len(sys.argv)>3 and sys.argv[1]=='--verify-undo-memory'
+    calculation_verify = len(sys.argv)>2 and sys.argv[1]=='--verify-calculations'
+    core_verify = len(sys.argv)>4 and sys.argv[1]=='--verify-core'
+    performance_verify = len(sys.argv)>3 and sys.argv[1]=='--verify-performance-stability'
+    responsiveness_verify = len(sys.argv)>2 and sys.argv[1]=='--verify-responsiveness'
+    achievement_verify = len(sys.argv)>3 and sys.argv[1]=='--verify-achievements'
+    picker_verify = len(sys.argv)>3 and sys.argv[1]=='--verify-data-picker'
+    close_verify = len(sys.argv)>3 and sys.argv[1]=='--verify-direct-close'
     help_verify = len(sys.argv)>2 and sys.argv[1]=='--verify-help-topics'
     edited_area_verify = len(sys.argv)>2 and sys.argv[1]=='--verify-edited-area'
     printing_verify = len(sys.argv)>2 and sys.argv[1] in ('--verify-printing', '--verify-print-settings-restart')
@@ -1674,7 +1730,7 @@ def main():
     batch_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-batch"
     report_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-report"
     verify_mode = len(sys.argv) > 2 and sys.argv[1] in ("--verify-overlay-user", "--verify-user-state", "--verify-launch", "--verify-ui-menu", "--verify-ui-size", "--verify-cache", "--verify-mass-settings", "--verify-sharing", "--verify-batch", "--verify-batch-stress", "--verify-batch-live", "--verify-report", "--verify-mcp", "--verify-cloud", "--verify-recommendation", "--verify-mass-normalization")
-    verify_mode = verify_mode or settings_storage_verify or printing_verify or edited_area_verify or help_verify
+    verify_mode = verify_mode or settings_storage_verify or printing_verify or edited_area_verify or help_verify or close_verify or picker_verify or achievement_verify or responsiveness_verify or performance_verify or core_verify or calculation_verify or undo_verify or import_continuation_verify
     if verify_mode:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     application = QApplication(sys.argv)
@@ -1690,10 +1746,48 @@ def main():
         from .classic import ClassicMainWindow, CLASSIC_STYLE
         application.setStyleSheet(CLASSIC_STYLE)
         window = ClassicMainWindow()
+    if verify_mode and os.environ.get('ZZZHE_TMA_QA_HIDE_WINDOW')=='1':
+        window.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen,True)
     if "--modern" not in sys.argv and (not verify_mode or batch_live_verify or ui_size_verify or ui_menu_verify or overlay_user_verify or printing_verify or edited_area_verify):
         window.showMaximized()
     else:
         window.show()
+    if import_continuation_verify:
+        from .import_continuation_qa import verify
+        verify(window,Path(sys.argv[2]),[Path(arg).absolute() for arg in sys.argv[3:]])
+        return
+    if undo_verify:
+        from .undo_qa import verify
+        verify(window,Path(sys.argv[2]),[Path(arg).absolute() for arg in sys.argv[3:]])
+        return
+    if calculation_verify:
+        from .calculation_qa import verify
+        verify(window,Path(sys.argv[2]))
+        return
+    if core_verify:
+        from .core_qa import verify
+        verify(window,Path(sys.argv[2]),Path(sys.argv[3]),[Path(arg).absolute() for arg in sys.argv[4:]])
+        return
+    if performance_verify:
+        from .performance_qa import verify
+        verify(window,Path(sys.argv[2]),[Path(arg).absolute() for arg in sys.argv[3:]])
+        return
+    if responsiveness_verify:
+        from .responsiveness_qa import verify
+        verify(window,Path(sys.argv[2]))
+        return
+    if achievement_verify:
+        from .achievement_qa import verify
+        verify(window,Path(sys.argv[2]),sys.argv[3],[Path(arg).absolute() for arg in sys.argv[4:]])
+        return
+    if picker_verify:
+        from .data_picker_qa import verify
+        verify(window,Path(sys.argv[2]),sys.argv[3])
+        return
+    if close_verify:
+        from .direct_close_qa import verify
+        verify(window,Path(sys.argv[2]),sys.argv[3],[Path(arg).absolute() for arg in sys.argv[4:]])
+        return
     if help_verify:
         from .help_topics_qa import verify
         verify(window,Path(sys.argv[2]),[Path(arg).absolute() for arg in sys.argv[3:]])

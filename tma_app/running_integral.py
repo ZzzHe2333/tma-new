@@ -46,9 +46,9 @@ def source_reference(curve):
     return ref
 
 
-def x_values(curve, domain, *, full=False, canonical=False):
+def x_values(curve, domain, *, full=False, canonical=False, cancelled=None):
     ref = source_reference(curve)
-    vector = ref.x_values(domain, canonical=True)
+    vector = ref.x_values(domain, canonical=True, cancelled=cancelled)
     positions = np.asarray(curve.derived['positions'])
     if not full: positions = positions[curve.active_rows]
     output = np.interp(positions, np.arange(len(vector)), vector)

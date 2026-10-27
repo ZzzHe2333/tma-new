@@ -153,7 +153,8 @@ def test_app_close_stops_service_and_does_not_change_document(ui):
     curve = ui.selected()
     ui.dirty = False
     ui.close()
-    assert ui.mcp_service.state == "stopped" and ui.selected() is curve
+    assert not ui.isVisible() and not ui.mcp_service.active.is_set() and ui.selected() is curve
+    eventually(lambda: ui.mcp_service.state == "stopped", timeout=5)
     ui.start_saved_mcp()
     assert ui.mcp_service.state == "stopped"  # A queued startup after close cannot reopen a port.
 
@@ -167,7 +168,8 @@ def test_saved_enabled_setting_autostarts_a_new_window(ui):
         assert fresh.mcp_service.port == value["port"]
     finally:
         fresh.dirty = False; fresh.close()
-    assert fresh.mcp_service.state == "stopped"
+    assert not fresh.isVisible() and not fresh.mcp_service.active.is_set()
+    eventually(lambda: fresh.mcp_service.state == "stopped", timeout=5)
 
 
 def test_gui_timer_keeps_running_during_batch_job(ui, tmp_path, monkeypatch):
