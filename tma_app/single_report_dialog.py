@@ -430,6 +430,7 @@ class SingleReportDialog(QDialog):
             self.status.setText("报告已生成")
             from .achievement_ui import record
             record(self.owner, 'reports')
+            self.notify_report(output["path"])
         elif result["kind"] == "template_error":
             self.log.appendPlainText("模板不可用：" + result["error"])
             answer = QMessageBox.question(self, "模板无法使用", result["error"] + "\n\n是否使用内部版三页报告作为兜底？",
@@ -440,6 +441,21 @@ class SingleReportDialog(QDialog):
                 self.status.setText("已取消，未使用兜底方式")
         if job is not None:
             job.deleteLater()
+
+    def notify_report(self, output_path):
+        """Single-report template: sources, selected record, values, name and folder."""
+        keys = ("D50", "SPAN", "T1", "T2", "M", "H", "TMA")
+        values = {key: self.fields[key].text().strip() for key in keys}
+        output = Path(output_path) if output_path else None
+        record = self.record_box.currentText().strip() if self.record_box.currentData() is not None else ""
+        self.owner.notify_usage("单样品报告", with_plot=True, fields=[
+            ("TMA源", self.tma_path.text().strip().strip('"')),
+            ("粒径源", self.particle_path.text().strip().strip('"')),
+            ("粒径名", record),
+            ("数据", "|".join(values[key] for key in keys)),
+            ("样品报告名字", output.name if output else ""),
+            ("保存路径", str(output.parent) if output else ""),
+        ])
 
     def update_density(self):
         from . import single_report as backend

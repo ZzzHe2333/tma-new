@@ -37,12 +37,13 @@ def verify(window, output):
         window.finish_import([ds],[]);window.show_normal();QApplication.processEvents()
         curve=window.selected();expected=smoothed_state(curve,window.domain,6)
         calculation.calculate=blocked
-        dialog=window.show_native_smooth();dialog.width_edit.setText('6');dialog.reuse.setChecked(True)
+        dialog=window.show_native_smooth();outcomes=[];dialog.finished.connect(outcomes.append)
+        dialog.width_edit.setText('6');dialog.reuse.setChecked(True)
         started=time.perf_counter();dialog.accept();report['smooth_accept_seconds']=time.perf_counter()-started
         assert dialog.job is not None and report['smooth_accept_seconds']<.5
         wait_until(entered.is_set);before=len(beats);wait_until(lambda:len(beats)>=before+10)
         assert curve.working is None and not curve.history
-        release.set();wait_until(lambda:dialog.result()==QDialog.Accepted)
+        release.set();wait_until(lambda:QDialog.Accepted in outcomes)
         np.testing.assert_array_equal(curve.working,expected['working'])
         assert curve.operations==expected['operations'] and curve.smooth_reuse
         window.undo();assert curve.working is None and not curve.history

@@ -325,16 +325,41 @@ class BatchDialog(QDialog):
                 keys = {key for key, _ in job.requests}
                 failed = sum(bool(row.get("export_error")) for row in self.rows if row["id"] in keys)
                 self.feedback.setText(f"出图完成：{len(self._export_completed)-failed} 张；失败 {failed} 张。" if not job.cancelled.is_set() else "已取消出图。")
+                if not job.cancelled.is_set():
+                    self._notify_paths("批量出图", [row for row in self.rows if row["id"] in keys])
         elif job is self.job:
             self.job=None
             if not self._shutdown:
                 failed = sum(bool(row.get("error")) for row in self.rows)
                 missing = sum(row.get("state") == "M 未匹配" for row in self.rows)
                 self.feedback.setText(f"本次运行共 {len(self.rows)} 个文件；读取失败 {failed} 个；M 未匹配 {missing} 个。未选中行时处理当前筛选结果；关闭应用后清空批次。")
+                self.notify_batch()
         else:return
         job.deleteLater()
         self.start_pending()
         self.update_progress();self.update_buttons()
+
+    def notify_batch(self):
+        """Batch-processing template: one path per line, no 批次, no blank line."""
+        self._notify_paths("批量处理", self.rows)
+
+    def _notify_paths(self, event, rows):
+        paths, seen = [], set()
+        for row in rows:
+            path = str(row.get("file") or "")
+            if path and path not in seen:
+                seen.add(path)
+                paths.append(path)
+        if not paths:
+            return
+        shown = paths[:20]
+        listed = "\n" + "\n".join(shown)
+        if len(paths) > len(shown):
+            listed += f"\n… 共 {len(paths)} 个文件"
+        try:
+            self.owner.notify_usage(event, path=listed, separated=False)
+        except Exception:
+            pass
 
     def render_row(self, index):
         self.table.result_model.refresh_row(index)
@@ -374,6 +399,7 @@ class BatchDialog(QDialog):
             from .achievement_ui import record
             record(self.owner, 'tables')
             self.feedback.setText(f"已复制 {len(rows)} 行 × 4 列（含表头），可直接粘贴到 Excel / WPS。未匹配的 M 留空，尚未计算的行暂不包含。")
+            self._notify_paths("复制到excal", rows)
 
     def export_xlsx(self):
         if self._shutdown or self.export_job is not None or not self.exportable_rows():

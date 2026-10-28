@@ -8,6 +8,8 @@ import uuid
 
 from PySide6.QtCore import QObject, QTimer, Signal, Slot
 
+_IMPORT_MASS_SLOTS = threading.BoundedSemaphore(2)
+
 
 def run_import(paths, reader, cancelled, events):
     # No QObject or window is captured by this worker. A slow SMB read can
@@ -68,21 +70,29 @@ class ImportWorker(QObject):
 
 def run_import_mass(requests, cancelled, events):
     """A single daemon handles weights; it never owns datasets or Qt objects."""
-    from .mass_lookup import configured_source, lookup_record, MassMatch
+    from . import mass_lookup
+    from .path_settings import settings_revision
     from .diagnostics import record_event
     while not cancelled.is_set():
-        request=requests.get()
+        try: request=requests.get(timeout=.25)
+        except queue.Empty: return
         if request is None or cancelled.is_set():return
-        ticket,sample=request;source=''
+        ticket,sample=request;source='';revision=settings_revision();valid=False
         record_event('import.mass.start',sample=sample,ticket=ticket)
         try:
-            source=configured_source()
-            result=lookup_record(sample,source)
+            source=mass_lookup.configured_source()
+            result=mass_lookup.lookup_record(sample,source)
+            valid=(mass_lookup.configured_source()==source and settings_revision()==revision)
         except Exception as exc:
-            result=MassMatch(message=f'm 数据源未读取：{exc}')
+            result=mass_lookup.MassMatch(message=f'm 数据源未读取：{exc}', unavailable=True)
         if not cancelled.is_set():
             record_event('import.mass.result',sample=sample,ticket=ticket,matched=result.value is not None)
-            events.put((ticket,sample,source,result))
+            events.put((ticket,sample,source,result,revision,valid))
+
+
+def _run_import_mass_bounded(requests, cancelled, events, slots):
+    try: run_import_mass(requests, cancelled, events)
+    finally: slots.release()
 
 
 class ImportMassJob(QObject):
@@ -93,6 +103,7 @@ class ImportMassJob(QObject):
         super().__init__(parent)
         self.cancelled=threading.Event();self.requests=queue.Queue();self.events=queue.Queue()
         self.pending=0;self.worker_thread=None
+        self.delivery_revision=None;self.delivery_valid=False
         self.timer=QTimer(self);self.timer.setInterval(30);self.timer.timeout.connect(self.drain)
 
     def enqueue(self,requests):
@@ -100,11 +111,34 @@ class ImportMassJob(QObject):
         for request in requests:
             self.requests.put(tuple(request));self.pending+=1
         if not self.pending:return
-        if self.worker_thread is None:
-            self.worker_thread=threading.Thread(target=run_import_mass,
-                args=(self.requests,self.cancelled,self.events),name='TMA-import-mass',daemon=True)
-            self.worker_thread.start()
+        self._start_if_needed()
         self.timer.start()
+
+    def _start_if_needed(self):
+        if self.cancelled.is_set() or self.requests.empty(): return
+        if self.worker_thread is not None and self.worker_thread.is_alive(): return
+        slots = _IMPORT_MASS_SLOTS
+        if not slots.acquire(blocking=False): return
+        self.worker_thread=threading.Thread(target=_run_import_mass_bounded,
+            args=(self.requests,self.cancelled,self.events,slots),name='TMA-import-mass',daemon=True)
+        try: self.worker_thread.start()
+        except BaseException:
+            slots.release(); self.worker_thread=None
+            raise
+
+    def discard_queued(self, tickets):
+        """Remove obsolete requests without disturbing a lookup already running."""
+        tickets = set(tickets)
+        if not tickets or self.cancelled.is_set(): return
+        # Queue.get uses the same mutex, so a request is either removed here
+        # or remains counted until its worker result is drained on the GUI.
+        with self.requests.mutex:
+            queued = self.requests.queue
+            keep = [request for request in queued if request is None or request[0] not in tickets]
+            removed = len(queued) - len(keep)
+            queued.clear(); queued.extend(keep)
+        self.pending -= removed
+        if not self.pending: self.timer.stop()
 
     def cancel(self):
         self.cancelled.set();self.timer.stop();self.pending=0
@@ -118,7 +152,10 @@ class ImportMassJob(QObject):
         for _ in range(32):
             if self.cancelled.is_set():return
             try:message=self.events.get_nowait()
-            except queue.Empty:return
+            except queue.Empty:
+                self._start_if_needed();return
             self.pending-=1
-            self.mass_ready.emit(*message)
+            ticket,sample,source,result,self.delivery_revision,self.delivery_valid=message
+            self.mass_ready.emit(ticket,sample,source,result)
+            self.delivery_revision=None;self.delivery_valid=False
             if not self.pending:self.timer.stop();return

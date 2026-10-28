@@ -165,6 +165,7 @@ class MainWindow(QMainWindow):
         self.cloud_timer.timeout.connect(self.start_cloud_maintenance)
         self.cloud_timer.start()
         QTimer.singleShot(0, lambda: self.start_cloud_maintenance(schedule=True))
+        QTimer.singleShot(0, lambda: self.notify_usage("登录软件", startup=True))
 
     def start_cloud_maintenance(self, *, schedule=False):
         if self._mcp_closed or self.cloud_maintenance is not None:
@@ -257,6 +258,7 @@ class MainWindow(QMainWindow):
         settings_menu.addAction("MCP · AI 连接…", self.show_mcp_settings)
         settings_menu.addAction("云盘 · WebDAV…", lambda: self.show_cloud())
         settings_menu.addAction("分享渠道…", self.show_sharing_settings)
+        settings_menu.addAction("通知…", self.show_notification_settings).setObjectName("NotificationSettings1")
         from .ui_size import add_size_menu
         self.ui_size_menu = add_size_menu(self, settings_menu)
         filemenu = self.menuBar().addMenu("文件")
@@ -609,7 +611,12 @@ class MainWindow(QMainWindow):
                 curve.unit_options=deepcopy(unit_defaults)
             self.curves.append(curve)
             self.log.appendPlainText(f"导入 {ds.path.name} · {len(ds.values):,} 点 · SHA256 {ds.sha256}")
-            self.update_curve_mass(curve, ds.__dict__.pop('_mass_match', None))
+            match = ds.__dict__.pop('_mass_match', None)
+            if match is None and hasattr(ds, '_import_ticket'):
+                # The import worker's ticket is queued by receive_import.
+                from .mass_lookup import MassMatch
+                match = MassMatch(message='m 正在后台匹配')
+            self.update_curve_mass(curve, match)
             for warning in ds.warnings:
                 self.log.appendPlainText(f"  提示: {warning}")
         if datasets:
@@ -620,53 +627,126 @@ class MainWindow(QMainWindow):
             self.redraw()
             from .achievement_ui import record
             record(self, 'imports', len(datasets))
+            if len(datasets) == 1:
+                ds = datasets[0]
+                self.notify_usage("导入数据", (ds.name or ds.path.stem).strip(),
+                                  with_plot=True, path=str(ds.path))
+            else:
+                paths = [str(ds.path) for ds in datasets]
+                shown = paths[:20]
+                listed = "\n" + "\n".join(shown)
+                if len(paths) > len(shown):
+                    listed += f"\n… 共 {len(paths)} 个文件"
+                self.notify_usage("批量导入", with_plot=True, path=listed, separated=False)
         self.statusBar().showMessage(f"已导入 {len(datasets)} 个文件；失败 {len(failures)} 个")
         if failures:
             self.warn("以下文件未能导入：\n" + "\n".join(failures))
 
-    def update_curve_mass(self, curve, result=None):
-        from .mass_lookup import lookup_record
-        result = lookup_record(curve.sample_name) if result is None else result
+    def update_curve_mass(self, curve, result=None, *, source=None):
         metadata = curve.dataset.metadata
-        for key in ("LookupMass", "LookupMassUnit", "LookupMassSource", "LookupMassSample"): metadata.pop(key, None)
+        mass_keys = ('LookupMass', 'LookupMassUnit', 'LookupMassSource', 'LookupMassSample',
+                     'LookupMassConfigSource', 'LookupMassStatus')
+        if result is None:
+            # Workbook and persistent-cache reads can block on disk or SMB.
+            # Queue a plain-data request and apply it only while its document
+            # and sample are still current.
+            import uuid
+            from .mass_lookup import MassMatch
+            key = curve.dataset.document_key
+            # An older refresh can otherwise match again if the user changes
+            # a name from A to B and then back to A before its result arrives.
+            refresh_targets = getattr(self, '_mass_refresh_targets', {})
+            refresh_key = str(id(curve.dataset))
+            if refresh_key in refresh_targets:
+                self._retain_mass_refresh_targets({k:v for k,v in refresh_targets.items() if k != refresh_key})
+            targets = getattr(self, '_import_mass_targets', None)
+            if targets is None:
+                targets = self._import_mass_targets = {}
+            self.invalidate_import_mass_targets({key})
+            ticket = uuid.uuid4().hex
+            targets[ticket] = key
+            if self._import_mass_job is None:
+                self._import_mass_job = ImportMassJob(self)
+                self._import_mass_job.mass_ready.connect(self.import_mass_ready)
+            self._import_mass_job.enqueue([(ticket, curve.sample_name)])
+            if metadata.get('LookupMassSample') != [curve.sample_name]:
+                for name in mass_keys:
+                    metadata.pop(name, None)
+            result = MassMatch(message='m 正在后台匹配')
+            self.log.appendPlainText(f'  m：{result.message}')
+            return result
+        if (result.value is None and getattr(result, 'unavailable', False) and source is not None
+                and metadata.get('LookupMassSample') == [curve.sample_name]
+                and metadata.get('LookupMassConfigSource') == [source]
+                and metadata.get('LookupMass')):
+            metadata['LookupMassStatus'] = ['数据源暂不可用，保留此前匹配的重量，请核对']
+            self.log.appendPlainText(f"  m：{result.message}；保留此前匹配的重量，请核对")
+            return result
+        for key in mass_keys: metadata.pop(key, None)
         if result.value is not None:
             metadata.update(LookupMass=[str(result.value)], LookupMassUnit=[result.unit], LookupMassSource=[result.source], LookupMassSample=[curve.sample_name])
+            if source is not None: metadata['LookupMassConfigSource'] = [source]
+            if '源暂不可用' in result.message: metadata['LookupMassStatus'] = [result.message]
             self.log.appendPlainText(f"  m = {result.value:g} {result.unit} · {curve.sample_name} · {result.source}")
         else: self.log.appendPlainText(f"  m：{result.message}")
         return result
 
+    def invalidate_import_mass_targets(self, document_keys):
+        targets = getattr(self, '_import_mass_targets', {})
+        obsolete = [ticket for ticket, key in targets.items() if key in document_keys]
+        for ticket in obsolete: targets.pop(ticket, None)
+        job = self._import_mass_job
+        if job is not None: job.discard_queued(obsolete)
+
     @Slot(str, str, str, object)
     def import_mass_ready(self, ticket, sample, source, result):
         if self._closing: return
-        from .mass_lookup import configured_source
         key = getattr(self, '_import_mass_targets', {}).pop(ticket, None)
         curve = next((c for c in self.curves if c.dataset.document_key == key and c.sample_name == sample), None)
         if curve is None: return
-        try:
-            if configured_source() != source: return
-        except (ValueError, OSError): return
+        sender = self.sender()
+        if isinstance(sender, ImportMassJob):
+            from .path_settings import settings_revision
+            if (sender is not self._import_mass_job or not sender.delivery_valid
+                    or sender.delivery_revision != settings_revision()):
+                if sender is self._import_mass_job:
+                    self.statusBar().showMessage('m 数据源已变化或暂不可用，请核对后重新读取')
+                return
+        else:
+            # Direct programmatic calls do not carry the worker's validation.
+            from .mass_lookup import configured_source
+            try:
+                if configured_source() != source: return
+            except (ValueError, OSError): return
         previous = curve.dataset.metadata.get('LookupMass')
-        self.update_curve_mass(curve, result)
+        self.update_curve_mass(curve, result, source=source)
         if result.value is not None or previous:
             self.touch(); self.rebuild_files()
 
-    def refresh_mass_lookup(self, initial_matches=None):
+    def refresh_mass_lookup(self, initial_matches=None, *, source_hint=None):
         from .mass_jobs import MassLookupJob
-        from .mass_lookup import configured_source
+        from .path_settings import settings_revision
         previous = getattr(self, '_mass_refresh_job', None)
         if previous is not None: previous.cancel(); previous.deleteLater()
         self._mass_refresh_job = None
         self._mass_refresh_targets = {}; self._mass_refresh_matches = 0
+        self._mass_refresh_matched_keys = set()
         self._mass_refresh_changed = False
-        try: source = configured_source()
-        except (OSError, ValueError) as exc:
-            self.statusBar().showMessage(f"设置已保存，m 配置未读取：{exc}"); return
+        self._mass_refresh_unavailable = False
+        self._mass_refresh_revision = settings_revision()
+        # All existing requests are superseded by this refresh. Detach the
+        # old worker even if an SMB read is stuck so new imports can use the
+        # new source; its pure-data daemon releases its slot when it returns.
+        old_import = self._import_mass_job
+        if old_import is not None:
+            old_import.cancel(); old_import.deleteLater(); self._import_mass_job = None
+        self._import_mass_targets = {}
         for curve in self.curves:
             key = str(id(curve.dataset))
             if key in self._mass_refresh_targets: continue
             self._mass_refresh_targets[key] = (curve.dataset, curve.sample_name)
-            if initial_matches and curve.sample_name in initial_matches:
-                self.update_curve_mass(curve, initial_matches[curve.sample_name])
+            if source_hint is not None and initial_matches and curve.sample_name in initial_matches:
+                self.update_curve_mass(curve, initial_matches[curve.sample_name], source=source_hint)
                 self._mass_refresh_changed = True
         targets = self._mass_refresh_targets
         if not targets:
@@ -674,11 +754,10 @@ class MainWindow(QMainWindow):
         # A refresh supersedes any old import-time weight requests, including
         # requests for the same path whose workbook changed in the meantime.
         keys = {dataset.document_key for dataset, sample in targets.values()}
-        tickets = getattr(self, '_import_mass_targets', {})
-        for ticket in list(tickets):
-            if tickets[ticket] in keys: tickets.pop(ticket, None)
+        self.invalidate_import_mass_targets(keys)
         if self._mass_refresh_changed: self.touch(); self.rebuild_files()
-        self._mass_refresh_job = job = MassLookupJob([(key, sample) for key, (_, sample) in targets.items()], source, self)
+        self._mass_refresh_job = job = MassLookupJob([(key, sample) for key, (_, sample) in targets.items()],
+                                                     source_hint, self, validate_source=source_hint is not None)
         job.row_ready.connect(self.mass_refresh_ready); job.finished.connect(self.mass_refresh_finished)
         self.statusBar().showMessage(f"路径设置已保存，正在后台刷新 {len(targets)} 个样品的 m…")
         job.start()
@@ -687,32 +766,67 @@ class MainWindow(QMainWindow):
     def mass_refresh_ready(self, key, result):
         job = getattr(self, '_mass_refresh_job', None)
         if self.sender() is not job or key not in self._mass_refresh_targets: return
-        from .mass_lookup import configured_source
-        try:
-            if configured_source() != job.source: return
-        except (ValueError, OSError): return
+        from .path_settings import settings_revision
+        if settings_revision() != self._mass_refresh_revision: return
         dataset, sample = self._mass_refresh_targets[key]
         curve = next((c for c in self.curves if c.dataset is dataset and c.sample_name == sample), None)
         if curve is None: return
-        self.update_curve_mass(curve, result)
-        self._mass_refresh_matches += result.value is not None
+        source = job.source if job.source is not None else job.resolved_source
+        if source is None: return
+        self.update_curve_mass(curve, result, source=source)
+        if getattr(result, 'unavailable', False) or '源暂不可用' in result.message:
+            self._mass_refresh_unavailable = True
+        if result.value is not None:self._mass_refresh_matched_keys.add(key)
+        else:self._mass_refresh_matched_keys.discard(key)
+        self._mass_refresh_matches = len(self._mass_refresh_matched_keys)
         self._mass_refresh_changed = True
 
     @Slot()
     def mass_refresh_finished(self):
         job = getattr(self, '_mass_refresh_job', None)
-        if self.sender() is not job: return
+        if job is None or self.sender() is not job: return
+        from .path_settings import settings_revision
+        error = job.error_message
+        if settings_revision() != self._mass_refresh_revision:
+            error = 'm 数据源已变化，请重新读取并核对重量。'
         self._mass_refresh_job = None; job.deleteLater()
         if self._mass_refresh_changed: self.touch(); self.rebuild_files()
-        self.statusBar().showMessage(f"m 后台刷新完成：{self._mass_refresh_matches}/{len(self._mass_refresh_targets)} 个样品匹配成功")
+        message = error or f"m 后台刷新完成：{self._mass_refresh_matches}/{len(self._mass_refresh_targets)} 个样品匹配成功"
+        if self._mass_refresh_unavailable: message += '；数据源暂不可用，保留的重量请核对'
+        self.statusBar().showMessage(message)
         self._mass_refresh_targets = {}
 
+    def prune_mass_refresh_targets(self):
+        targets=getattr(self,'_mass_refresh_targets',{})
+        if not targets:return
+        live={str(id(curve.dataset)) for curve in self.curves}
+        remaining={key:value for key,value in targets.items() if key in live}
+        if len(remaining)==len(targets):return
+        self._retain_mass_refresh_targets(remaining)
+
+    def _retain_mass_refresh_targets(self, remaining):
+        self._mass_refresh_targets=remaining
+        self._mass_refresh_matched_keys.intersection_update(remaining)
+        self._mass_refresh_matches=len(self._mass_refresh_matched_keys)
+        if remaining:return
+        job=getattr(self,'_mass_refresh_job',None)
+        self._mass_refresh_job=None
+        if job is not None:job.cancel();job.deleteLater()
+        self._mass_refresh_changed=False
+        self.statusBar().showMessage('已停止不再需要的 m 查询')
+
     def rebuild_files(self):
-        previous = self.selected()
+        self.prune_mass_refresh_targets()
+        current = self.files.currentItem()
+        previous_uid = current.data(0, Qt.ItemDataRole.UserRole) if current is not None else None
+        if previous_uid is None:
+            previous = self.selected()
+            previous_uid = previous.uid if previous is not None else None
         self._updating = True
         self.files.clear()
         for curve in self.curves:
             item = QTreeWidgetItem([curve.dataset.display_name, f"{curve.sample_count:,}"])
+            item.setData(0, Qt.ItemDataRole.UserRole, curve.uid)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(0, Qt.CheckState.Checked if curve.visible else Qt.CheckState.Unchecked)
             item.setForeground(0, QColor(curve.color))
@@ -722,9 +836,11 @@ class MainWindow(QMainWindow):
                 unit = " ".join(curve.dataset.metadata.get("LookupMassUnit", []))
                 tooltip += f"\n质量 m = {mass} {unit}"
                 tooltip += "\n" + " ".join(curve.dataset.metadata.get("LookupMassSource", []))
+                if curve.dataset.metadata.get('LookupMassStatus'):
+                    tooltip += "\n" + " ".join(curve.dataset.metadata['LookupMassStatus'])
             item.setToolTip(0, tooltip)
             self.files.addTopLevelItem(item)
-            if previous is not None and curve.uid == previous.uid:
+            if curve.uid == previous_uid:
                 self.files.setCurrentItem(item)
         source_count = len({c.dataset.document_key for c in self.curves})
         self.count_label.setText(f"{source_count} 个文件 · {len(self.curves)} 条曲线")
@@ -1567,6 +1683,57 @@ class MainWindow(QMainWindow):
         self.sharing_settings_dialog = dialog
         dialog.setModal(True); dialog.show(); return dialog
 
+    def show_notification_settings(self):
+        from .notification_dialog import NotificationSettingsDialog
+        existing = getattr(self, "notification_settings_dialog", None)
+        if existing is not None and existing.isVisible():
+            existing.raise_(); return existing
+        try:
+            dialog = NotificationSettingsDialog(self)
+        except (ValueError, OSError) as exc:
+            self.warn(str(exc)); return
+        if existing is not None: existing.deleteLater()
+        self.notification_settings_dialog = dialog
+        dialog.setModal(True); dialog.show(); return dialog
+
+    def notify_usage(self, event, batch="", *, with_plot=False, startup=False, path="",
+                     fields=None, separated=None):
+        """Tell the operator someone is using the app; never blocks or raises.
+
+        Startup carries machine identity and both addresses; later events only
+        need the machine code. Public-IP lookup runs on the worker thread.
+        """
+        try:
+            from .notifications import notify, settings, supports_image, machine_details, EVENT_KEYS
+            config = settings()
+            if not config.get('enabled') or not config.get('target'):return
+            event_key = EVENT_KEYS.get(str(event).strip())
+            if event_key is not None and not config.get('events',{}).get(event_key,True):return
+            png = None
+            if with_plot and config.get('attach_image') and supports_image(config.get('provider')):
+                png = self._current_plot_png()
+            extra = list(fields or [])
+
+            def details():
+                items = list(extra)
+                items.extend(machine_details(full=True) if startup else machine_details())
+                return items
+
+            notify(event, batch, png, details, path, separated)
+        except Exception:
+            pass
+
+    def _current_plot_png(self):
+        """Render the active plot once; only called when image notifications are on."""
+        try:
+            import tempfile
+            with tempfile.TemporaryDirectory(prefix='ZzzHeTMA-notify-') as directory:
+                path = Path(directory) / 'plot.png'
+                self.write_plot(path)
+                return path.read_bytes()
+        except Exception:
+            return None
+
     def write_plot(self, path):
         self.protect_output(path)
         suffix = Path(path).suffix.lower()
@@ -1701,6 +1868,9 @@ class MainWindow(QMainWindow):
 
 
 def main():
+    mass_gui_verify = len(sys.argv)>4 and sys.argv[1]=='--verify-mass-gui'
+    mass_continuation_verify = len(sys.argv)>4 and sys.argv[1]=='--verify-mass-continuation'
+    document_release_verify = len(sys.argv)>4 and sys.argv[1]=='--verify-document-release'
     import_continuation_verify = len(sys.argv)>4 and sys.argv[1]=='--verify-import-continuation'
     undo_verify = len(sys.argv)>3 and sys.argv[1]=='--verify-undo-memory'
     calculation_verify = len(sys.argv)>2 and sys.argv[1]=='--verify-calculations'
@@ -1730,7 +1900,7 @@ def main():
     batch_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-batch"
     report_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-report"
     verify_mode = len(sys.argv) > 2 and sys.argv[1] in ("--verify-overlay-user", "--verify-user-state", "--verify-launch", "--verify-ui-menu", "--verify-ui-size", "--verify-cache", "--verify-mass-settings", "--verify-sharing", "--verify-batch", "--verify-batch-stress", "--verify-batch-live", "--verify-report", "--verify-mcp", "--verify-cloud", "--verify-recommendation", "--verify-mass-normalization")
-    verify_mode = verify_mode or settings_storage_verify or printing_verify or edited_area_verify or help_verify or close_verify or picker_verify or achievement_verify or responsiveness_verify or performance_verify or core_verify or calculation_verify or undo_verify or import_continuation_verify
+    verify_mode = verify_mode or mass_gui_verify or mass_continuation_verify or settings_storage_verify or printing_verify or edited_area_verify or help_verify or close_verify or picker_verify or achievement_verify or responsiveness_verify or performance_verify or core_verify or calculation_verify or undo_verify or import_continuation_verify or document_release_verify
     if verify_mode:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     application = QApplication(sys.argv)
@@ -1752,6 +1922,18 @@ def main():
         window.showMaximized()
     else:
         window.show()
+    if mass_gui_verify:
+        from .mass_gui_qa import verify
+        verify(window,Path(sys.argv[2]),[Path(arg).absolute() for arg in sys.argv[3:]])
+        return
+    if mass_continuation_verify:
+        from .mass_continuation_qa import verify
+        verify(window,Path(sys.argv[2]),[Path(arg).absolute() for arg in sys.argv[3:]])
+        return
+    if document_release_verify:
+        from .document_release_qa import verify
+        verify(window,Path(sys.argv[2]),[Path(arg).absolute() for arg in sys.argv[3:]])
+        return
     if import_continuation_verify:
         from .import_continuation_qa import verify
         verify(window,Path(sys.argv[2]),[Path(arg).absolute() for arg in sys.argv[3:]])

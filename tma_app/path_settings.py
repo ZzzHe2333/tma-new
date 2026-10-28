@@ -31,6 +31,27 @@ def cached_settings():
         return deepcopy(value) if value is not None else None
 
 
+def cached_mass_source():
+    """Return an in-memory source or None without waiting for disk or locks."""
+    if 'TMA_MASS_XLSX' in os.environ: return os.environ['TMA_MASS_XLSX'].strip()
+    if not _snapshot_lock.acquire(blocking=False): return None
+    try:
+        snapshot = _snapshots.get(str(config_path()))
+        if snapshot is None: return None
+        paths = snapshot[1].get('paths')
+        if not isinstance(paths, dict): return None
+        source = paths.get('m', '')
+        return source.strip() if isinstance(source, str) else None
+    finally:
+        _snapshot_lock.release()
+
+
+def settings_revision():
+    """In-process save revision; a single dictionary read never waits on I/O."""
+    key = str(config_path())
+    return key, _revisions.get(key, 0), os.environ.get('TMA_MASS_XLSX')
+
+
 def refresh_in_background():
     key = str(config_path())
     with _snapshot_lock:

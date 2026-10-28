@@ -26,15 +26,21 @@ import os
 import re
 from pathlib import Path
 import csv
-from io import StringIO
+import codecs
+from io import BytesIO, TextIOWrapper
 from dataclasses import dataclass
 import threading
+from collections import OrderedDict
+from weakref import WeakValueDictionary
+from contextlib import closing
+from itertools import chain, islice
 
 MASS_XLSX = os.environ.get("TMA_MASS_XLSX", "//192.168.0.105/TMA称量数据.xlsx")
 
 _unavailable = False
-_table_cache = {}
-_table_locks = {}
+_table_cache = OrderedDict()
+_table_cache_guard = threading.RLock()
+_table_locks = WeakValueDictionary()
 _table_locks_guard = threading.Lock()
 
 
@@ -44,6 +50,7 @@ class MassMatch:
     source: str = ""
     unit: str = ""
     message: str = ""
+    unavailable: bool = False
 
 
 def _normalize(text: object) -> str:
@@ -150,7 +157,8 @@ def configured_source():
 
 def clear_cache(*, disk=True):
     global _unavailable
-    _table_cache.clear(); _unavailable = False
+    with _table_cache_guard: _table_cache.clear()
+    _unavailable = False
     from .mass_cache import clear
     clear(disk=disk)
 
@@ -161,22 +169,35 @@ def _rows(path):
     if suffix in ('.csv', '.cvs'):
         raw = path.read_bytes()
         encoding = 'utf-16' if raw.startswith((b'\xff\xfe', b'\xfe\xff')) else 'utf-8-sig'
-        try: text = raw.decode(encoding)
-        except UnicodeDecodeError: text = raw.decode('gb18030')
-        try: dialect = csv.Sniffer().sniff(text[:8192], delimiters=',;\t')
-        except csv.Error: dialect = csv.excel
-        yield '', list(csv.reader(StringIO(text), dialect))
+        # Validate incrementally so a late non-UTF-8 byte still selects the
+        # same GB18030 fallback, without keeping a second full decoded copy.
+        decoder = codecs.getincrementaldecoder(encoding)()
+        try:
+            view = memoryview(raw)
+            for offset in range(0, len(raw), 65536):
+                decoder.decode(view[offset:offset+65536], final=False)
+            decoder.decode(b'', final=True)
+        except UnicodeDecodeError:
+            encoding = 'gb18030'
+        with TextIOWrapper(BytesIO(raw), encoding=encoding, newline='\n') as stream:
+            sample = stream.read(8192)
+            try: dialect = csv.Sniffer().sniff(sample, delimiters=',;\t')
+            except csv.Error: dialect = csv.excel
+            stream.seek(0)
+            yield '', csv.reader(stream, dialect)
     elif suffix == '.xlsx':
         from openpyxl import load_workbook
         book = load_workbook(path, read_only=True, data_only=True)
         try:
-            for sheet in book.worksheets: yield sheet.title, list(sheet.iter_rows(values_only=True))
+            for sheet in book.worksheets: yield sheet.title, sheet.iter_rows(values_only=True)
         finally: book.close()
     elif suffix == '.xls':
         import xlrd
         book = xlrd.open_workbook(str(path), on_demand=True)
         try:
-            for sheet in book.sheets(): yield sheet.name, [sheet.row_values(i) for i in range(sheet.nrows)]
+            for index in range(book.nsheets):
+                sheet = book.sheet_by_index(index)
+                yield sheet.name, (sheet.row_values(i) for i in range(sheet.nrows))
         finally: book.release_resources()
     else: raise ValueError('m 数据源仅支持 CSV、XLSX、XLS 文件或包含这些文件的文件夹')
 
@@ -193,42 +214,51 @@ def _records(path, *, force=False):
         lock = _table_locks.setdefault(key, threading.Lock())
     with lock:
         if force:
-            for cached in list(_table_cache):
-                if os.path.normcase(cached[0]) == key: _table_cache.pop(cached, None)
+            with _table_cache_guard:
+                for cached in list(_table_cache):
+                    if os.path.normcase(cached[0]) == key: _table_cache.pop(cached, None)
         return _read_records(path)
 
 
 def _read_records(path):
     stamp = path.stat()
     cache_key = (str(path.resolve()), stamp.st_mtime_ns, stamp.st_size)
-    cached = _table_cache.get(cache_key)
-    if cached is not None: return cached
+    with _table_cache_guard:
+        cached = _table_cache.get(cache_key)
+        if cached is not None:
+            _table_cache.move_to_end(cache_key)
+            return cached
     names = {'样品', '样品名', '样品名称', '样本名', '批次', '批次号', '批号', '编号', 'samplename', 'sample', 'batch', 'batchnumber', '批次编号'}
     masses = {'m', '重量', '质量', '称量重量', '样品重量', '样品质量', 'mass', 'weight'}
     records = []
-    for sheet_name, rows in _rows(path):
-        origin = cache_key[0] + (f' [{sheet_name}]' if sheet_name else '')
-        name_col, mass_col, start, unit = 1, 2, 0, ''
-        for index, row in enumerate(rows[:20]):
-            headers = [_header(v) for v in row]
-            ni = next((i for i,h in enumerate(headers) if h in names), None)
-            mi = next((i for i,h in enumerate(headers) if h in masses or any(h == base+u for base in masses for u in ('mg','g'))), None)
-            if ni is not None and mi is not None:
-                name_col, mass_col, start = ni, mi, index+1
-                explicit_unit = re.search(r'[（(\[]\s*(mg|g)\s*[）)\]]', str(row[mi]), re.I)
-                unit = explicit_unit.group(1).lower() if explicit_unit else 'mg' if headers[mi].endswith('mg') else 'g' if headers[mi].endswith('g') else ''
-                break
-        for row in rows[start:]:
-            if len(row) <= max(name_col, mass_col) or row[name_col] is None: continue
-            value = _to_number(row[mass_col])
-            if value is None or not math.isfinite(value) or value <= 0: continue
-            raw_unit = re.search(r'\b(mg|g)\s*$', str(row[mass_col]), re.I)
-            record_unit = raw_unit.group(1).lower() if raw_unit else unit
-            records.append((row[name_col], value, record_unit, origin))
+    with closing(_rows(path)) as sheets:
+        for sheet_name, rows in sheets:
+            origin = cache_key[0] + (f' [{sheet_name}]' if sheet_name else '')
+            name_col, mass_col, start, unit = 1, 2, 0, ''
+            row_iterator = iter(rows)
+            first_rows = list(islice(row_iterator, 20))
+            for index, row in enumerate(first_rows):
+                headers = [_header(v) for v in row]
+                ni = next((i for i,h in enumerate(headers) if h in names), None)
+                mi = next((i for i,h in enumerate(headers) if h in masses or any(h == base+u for base in masses for u in ('mg','g'))), None)
+                if ni is not None and mi is not None:
+                    name_col, mass_col, start = ni, mi, index+1
+                    explicit_unit = re.search(r'[（(\[]\s*(mg|g)\s*[）)\]]', str(row[mi]), re.I)
+                    unit = explicit_unit.group(1).lower() if explicit_unit else 'mg' if headers[mi].endswith('mg') else 'g' if headers[mi].endswith('g') else ''
+                    break
+            for row in chain(first_rows[start:], row_iterator):
+                if len(row) <= max(name_col, mass_col) or row[name_col] is None: continue
+                value = _to_number(row[mass_col])
+                if value is None or not math.isfinite(value) or value <= 0: continue
+                raw_unit = re.search(r'\b(mg|g)\s*$', str(row[mass_col]), re.I)
+                record_unit = raw_unit.group(1).lower() if raw_unit else unit
+                records.append((row[name_col], value, record_unit, origin))
     # Keep only the current revision of this file in memory.
-    for key in list(_table_cache):
-        if key[0] == cache_key[0]: _table_cache.pop(key, None)
-    _table_cache[cache_key] = records
+    with _table_cache_guard:
+        for key in list(_table_cache):
+            if key[0] == cache_key[0]: _table_cache.pop(key, None)
+        _table_cache[cache_key] = records
+        while len(_table_cache) > 16: _table_cache.popitem(last=False)
     return records
 
 
@@ -252,7 +282,7 @@ def lookup_record(sample, source=None, *, force=False):
         return result
     except Exception as exc:
         _unavailable = True
-        return MassMatch(source=str(source or ''), message=f'm 数据源未读取：{exc}')
+        return MassMatch(source=str(source or ''), message=f'm 数据源未读取：{exc}', unavailable=True)
 
 
 def lookup_mass(filename):

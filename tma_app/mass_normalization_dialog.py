@@ -33,7 +33,8 @@ class MassNormalizationDialog(QDialog):
             used=curve.mass_normalization_mg if curve.mass_normalization_mg is not None else known
             for col,text in ((0,f'{curve.sample_name} · {curve.dataset.display_name} · Y{curve.axis+1}'),(1,'' if known is None else f'{known:.12g}'),(3,'')):
                 item=QTableWidgetItem(text);item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                item.setToolTip(text);self.table.setItem(row,col,item)
+                warning=' '.join(curve.dataset.metadata.get('LookupMassStatus', [])) if col==1 else ''
+                item.setToolTip(text + ('\n' + warning if warning else ''));self.table.setItem(row,col,item)
             edit=QLineEdit('' if used is None else f'{used:.12g}')
             edit.setPlaceholderText('必填，单位 mg');edit.setObjectName(f'MassInput{row}')
             check=QCheckBox();check.setObjectName(f'MassConfirm{row}')
@@ -44,7 +45,9 @@ class MassNormalizationDialog(QDialog):
         layout.addWidget(self.table)
         self.error=QLabel();self.error.setWordWrap(True);self.error.setStyleSheet('color:#b14c69;')
         layout.addWidget(self.error)
-        self.lookup_status=QLabel('优先使用已读取的 m；缺失项将自动从称量缓存或数据源获取。')
+        stale=any(c.dataset.metadata.get('LookupMassStatus') for c in self.curves)
+        self.lookup_status=QLabel('优先使用已读取的 m；缺失项将自动从称量缓存或数据源获取。' +
+                                  (' 部分重量来自暂不可用的数据源，请核对。' if stale else ''))
         self.lookup_status.setWordWrap(True);layout.addWidget(self.lookup_status)
         bottom=QHBoxLayout()
         self.restore_button=QPushButton('恢复原始比例')
@@ -91,16 +94,12 @@ class MassNormalizationDialog(QDialog):
 
     def auto_read(self,*,force=False):
         if not self.isVisible():return
-        from .mass_lookup import configured_source
         from .mass_jobs import MassLookupJob
-        try:source=configured_source()
-        except (ValueError,OSError):source=''
-        if not source:
-            self.lookup_status.setText('未配置 m 数据源；已读取的重量仍可使用，缺失项请手动填写。');return
-        self.stop_lookup();self.lookup_source=source
+        from .path_settings import settings_revision
+        self.stop_lookup();self._lookup_revision=settings_revision()
         self._force_fill=force
         self._using_stale=False
-        self.mass_job=MassLookupJob([(str(i),c.sample_name) for i,c in enumerate(self.curves)],source,self,force=force)
+        self.mass_job=MassLookupJob([(str(i),c.sample_name) for i,c in enumerate(self.curves)],None,self,force=force)
         self.mass_job.row_ready.connect(self.mass_ready);self.mass_job.finished.connect(self.mass_finished)
         self.refresh_button.setEnabled(False);self.lookup_status.setText('正在自动读取 m，优先复用缓存；可以手动填写或取消。')
         self.mass_job.start()
@@ -108,10 +107,8 @@ class MassNormalizationDialog(QDialog):
     @Slot(str,object)
     def mass_ready(self,key,result):
         if self.sender() is not self.mass_job:return
-        from .mass_lookup import configured_source
-        try:
-            if configured_source()!=self.lookup_source:return
-        except (ValueError,OSError):return
+        from .path_settings import settings_revision
+        if settings_revision()!=self._lookup_revision:return
         row=int(key);value=core.match_mass_mg(result)
         if '暂不可用' in result.message:self._using_stale=True
         if value is None:return
@@ -125,7 +122,12 @@ class MassNormalizationDialog(QDialog):
     @Slot()
     def mass_finished(self):
         if self.sender() is not self.mass_job:return
+        from .path_settings import settings_revision
+        error=self.mass_job.error_message
+        if settings_revision()!=self._lookup_revision:
+            error='m 数据源已变化，请重新读取并核对重量。'
         self.stop_lookup()
+        if error:self.lookup_status.setText(error);return
         count=sum(bool(self.table.item(i,1).text()) for i in range(len(self.curves)))
         self.lookup_status.setText(f'已自动读取 {count}/{len(self.curves)} 条 m；请逐条核对并确认。缺失项可手动填写。')
         if self._using_stale:self.lookup_status.setText(self.lookup_status.text()+' 数据源暂不可用，当前采用已有缓存。')

@@ -267,6 +267,7 @@ class ClassicMainWindow(MainWindow):
         settings_menu.addAction("MCP · AI 连接…", self.show_mcp_settings).setObjectName("McpSettings1")
         settings_menu.addAction("云盘 · WebDAV…", lambda: self.show_cloud()).setObjectName("CloudSettings1")
         settings_menu.addAction("分享渠道…", self.show_sharing_settings).setObjectName("SharingSettings1")
+        settings_menu.addAction("通知…", self.show_notification_settings).setObjectName("NotificationSettings1")
         from .ui_size import add_size_menu
         self.ui_size_menu = add_size_menu(self, settings_menu)
 
@@ -736,7 +737,7 @@ class ClassicMainWindow(MainWindow):
         if old and old.isVisible():old.raise_();return old
         try:dialog=SmoothDialog(self,curve)
         except ValueError as exc:self.warn(str(exc));return
-        self.dialogs["smooth"]=dialog;dialog.show();return dialog
+        self._register_temporary_dialog("smooth",dialog);dialog.show();return dialog
 
     def smoothing_rules(self):
         from copy import deepcopy
@@ -764,7 +765,7 @@ class ClassicMainWindow(MainWindow):
         old=self.dialogs.get("data_limits")
         if old and old.isVisible():old.raise_();return old
         dialog=LimitBoundsDialog(self,curve,kind) if kind else DataLimitsDialog(self,curve)
-        self.dialogs["data_limits"]=dialog;dialog.show();return dialog
+        self._register_temporary_dialog("data_limits",dialog);dialog.show();return dialog
 
     def full_data_range(self):
         curve=self.current_data_curve()
@@ -1233,7 +1234,7 @@ class ClassicMainWindow(MainWindow):
         if self._pending_measurement is None: return
         from .classic_dialogs import CursorLimitsDialog
         dialog = CursorLimitsDialog(self)
-        self.dialogs["cursor_limits"] = dialog
+        self._register_temporary_dialog("cursor_limits",dialog)
         dialog.show()
         return dialog
 
@@ -1490,7 +1491,7 @@ class ClassicMainWindow(MainWindow):
             self._show_document(document.key)
             dialog=MassNormalizationDialog(self,document)
         except ValueError as exc:self.warn(str(exc));return
-        self.dialogs['mass_normalization']=dialog
+        self._register_temporary_dialog('mass_normalization',dialog)
         dialog.show()
         return dialog
 
@@ -1520,8 +1521,7 @@ class ClassicMainWindow(MainWindow):
 
     def _release_closed_plot(self, doc):
         """Detach controller references before a canvas is deleted by Qt."""
-        targets=getattr(self,'_import_mass_targets',{})
-        self._import_mass_targets={ticket:key for ticket,key in targets.items() if key!=doc.key}
+        self.invalidate_import_mass_targets({doc.key})
         if self._last_document is doc:self._last_document=None
         if self.figure is not doc.figure:return
         if hasattr(self,'_plot_resize_timer'):self._plot_resize_timer.stop()
@@ -1599,6 +1599,15 @@ class ClassicMainWindow(MainWindow):
         dialog.activateWindow()
         return dialog
 
+    def _register_temporary_dialog(self,key,dialog):
+        """Finished editors must not keep datasets rooted through Qt parents."""
+        self.dialogs[key]=dialog
+        def finished(_result):
+            if self.dialogs.get(key) is dialog:self.dialogs.pop(key,None)
+            dialog.deleteLater()
+        dialog.finished.connect(finished)
+        return dialog
+
     def show_view(self, key):
         titles = {"metadata": "参数块 / 文件信息", "data": "数据表", "results": "结果表", "log": "分析日志"}
         self._dialog(key, titles[key], [self._panels[key]], (850, 520))
@@ -1613,7 +1622,7 @@ class ClassicMainWindow(MainWindow):
         if old and old.isVisible():
             old.raise_(); return old
         dialog = GraphOptionsDialog(self)
-        self.dialogs["graph_options"] = dialog
+        self._register_temporary_dialog("graph_options",dialog)
         dialog.show()
         return dialog
 
@@ -1670,7 +1679,7 @@ class ClassicMainWindow(MainWindow):
         old=self.dialogs.get('area_calculation')
         if old is not None and old.isVisible():old.raise_();return old
         if old is not None:old.deleteLater()
-        dialog=AreaDialog(self);self.dialogs['area_calculation']=dialog;dialog.show();return dialog
+        dialog=AreaDialog(self);self._register_temporary_dialog('area_calculation',dialog);dialog.show();return dialog
 
     def sigmoid_iterations(self):
         value=self.plot_options.get('__settings__',{}).get('sigmoid_iterations')
@@ -1729,7 +1738,7 @@ class ClassicMainWindow(MainWindow):
             if old and old.isVisible():
                 if old.entry is entry:old.raise_();return old
                 old.reject()
-            dialog=RunningIntegralDialog(self,entry);self.dialogs['running_integral']=dialog;dialog.show();return dialog
+            dialog=RunningIntegralDialog(self,entry);self._register_temporary_dialog('running_integral',dialog);dialog.show();return dialog
         except ValueError as exc:self.statusBar().showMessage(str(exc),7000)
 
     def commit_running_integral(self,entry,*,expected_parent=None,expected_positions=None,**config):
@@ -1777,7 +1786,7 @@ class ClassicMainWindow(MainWindow):
         from .auto_limits_dialog import AutoLimitsDialog
         old=self.dialogs.get('auto_limits')
         if old and old.isVisible():old.raise_();return old
-        dialog=AutoLimitsDialog(self);self.dialogs['auto_limits']=dialog;dialog.show();return dialog
+        dialog=AutoLimitsDialog(self);self._register_temporary_dialog('auto_limits',dialog);dialog.show();return dialog
 
     def apply_auto_limits(self,entry,rule,positions):
         from .auto_limits import replace_rule
@@ -1795,7 +1804,7 @@ class ClassicMainWindow(MainWindow):
         from .alpha_dialogs import AnalysisOptionsDialog
         old=self.dialogs.get('analysis_options')
         if old and old.isVisible():old.raise_();return old
-        dialog=AnalysisOptionsDialog(self);self.dialogs['analysis_options']=dialog;dialog.show();return dialog
+        dialog=AnalysisOptionsDialog(self);self._register_temporary_dialog('analysis_options',dialog);dialog.show();return dialog
 
     def start_alpha(self,kind,curve_uid=None):
         from .alpha import ALPHA_KINDS,check_curve,reference_length
@@ -1808,7 +1817,7 @@ class ClassicMainWindow(MainWindow):
             if length is None:
                 old=self.dialogs.get('sample_size')
                 if old and old.isVisible():old.raise_();return old
-                dialog=SampleSizeDialog(self,curve,kind);self.dialogs['sample_size']=dialog;dialog.show();return dialog
+                dialog=SampleSizeDialog(self,curve,kind);self._register_temporary_dialog('sample_size',dialog);dialog.show();return dialog
             self.files.setCurrentItem(self.files.topLevelItem(next(i for i,c in enumerate(self.curves) if c.uid==curve.uid)))
             return self.start_point_measurement(kind,analysis_config=dict(reference_length_mm=length,reference_source=source,smoothing_width_c=self.alpha_width()))
         except ValueError as exc:self.warn(str(exc))
@@ -1818,7 +1827,7 @@ class ClassicMainWindow(MainWindow):
         from .units_dialog import UnitsDialog
         old=self.dialogs.get('units')
         if old and old.isVisible():old.raise_();return old
-        dialog=UnitsDialog(self);self.dialogs['units']=dialog;dialog.show();return dialog
+        dialog=UnitsDialog(self);self._register_temporary_dialog('units',dialog);dialog.show();return dialog
 
     def apply_unit_options(self,document,options):
         from .dimension_units import proposal
@@ -1864,7 +1873,7 @@ class ClassicMainWindow(MainWindow):
         from .file_info_dialog import FileInfoDialog
         old=self.dialogs.get('file_information')
         if old and old.isVisible():old.raise_();return old
-        dialog=FileInfoDialog(self);self.dialogs['file_information']=dialog;dialog.show();return dialog
+        dialog=FileInfoDialog(self);self._register_temporary_dialog('file_information',dialog);dialog.show();return dialog
 
     def show_help_topics(self, topic='start'):
         from .help_topics import show
@@ -1903,7 +1912,7 @@ class ClassicMainWindow(MainWindow):
         from .signals_dialog import SignalsDialog
         old = self.dialogs.get("signals")
         if old and old.isVisible(): old.raise_(); return old
-        dialog = SignalsDialog(self); self.dialogs["signals"] = dialog; dialog.show(); return dialog
+        dialog = SignalsDialog(self); self._register_temporary_dialog("signals",dialog); dialog.show(); return dialog
 
     def show_overlay_options(self, *, new=False):
         from .classic_dialogs import OverlayOptionsDialog
@@ -1916,7 +1925,7 @@ class ClassicMainWindow(MainWindow):
         try:key=self._next_overlay_key() if new else self._overlay_key_for_edit()
         except ValueError as exc:self.statusBar().showMessage(str(exc),6000);return
         dialog = OverlayOptionsDialog(self, key=key, blank=new)
-        self.dialogs["overlay_options"] = dialog
+        self._register_temporary_dialog("overlay_options",dialog)
         dialog.setModal(True); dialog.show()
         return dialog
 
@@ -1927,7 +1936,7 @@ class ClassicMainWindow(MainWindow):
         if old and old.isVisible(): old.raise_(); return old
         try:dialog=AutoConfigureDialog(self, blank=new)
         except ValueError as exc:self.statusBar().showMessage(str(exc),6000);return
-        self.dialogs["auto_configure"] = dialog
+        self._register_temporary_dialog("auto_configure",dialog)
         dialog.show(); return dialog
 
     def signal_analysis_dialog(self, kind):
@@ -1938,7 +1947,7 @@ class ClassicMainWindow(MainWindow):
         old = self.dialogs.get("signal_analysis")
         if old: old.reject()
         dialog = SignalAnalysisDialog(self, kind)
-        self.dialogs["signal_analysis"] = dialog
+        self._register_temporary_dialog("signal_analysis",dialog)
         dialog.show(); dialog.raise_()
         return dialog
 
@@ -2075,7 +2084,7 @@ class ClassicMainWindow(MainWindow):
         from .label_point_dialog import LabelPointDialog
         old=self.dialogs.get("label_point")
         if old and old.isVisible():old.raise_();return old
-        dialog=LabelPointDialog(self,entry);self.dialogs["label_point"]=dialog;dialog.show();return dialog
+        dialog=LabelPointDialog(self,entry);self._register_temporary_dialog("label_point",dialog);dialog.show();return dialog
 
     def edit_point_label(self,entry):
         if entry.get("kind") not in ("curve_value","curve_value_y"):return
@@ -2106,7 +2115,7 @@ class ClassicMainWindow(MainWindow):
         old = self.dialogs.get("rescale")
         if old and old.isVisible(): old.raise_(); return old
         dialog = RescaleDialog(self, selected)
-        self.dialogs["rescale"] = dialog
+        self._register_temporary_dialog("rescale",dialog)
         dialog.setModal(True); dialog.show()
         return dialog
 

@@ -29,6 +29,7 @@ exe = EXE(
     strip=False,
     upx=True,
     console=False,
+    uac_admin=True,
     icon='tma_app/assets/cute/app.ico',
     version='tma_app/assets/cute/version_info.txt',
     disable_windowed_traceback=False,

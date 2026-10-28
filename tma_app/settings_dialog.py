@@ -1,5 +1,6 @@
 """Local named paths and read-only weighing-sheet lookup settings."""
 import math
+import os
 import queue
 import threading
 from PySide6.QtCore import Qt, QTimer, Slot,QSignalBlocker
@@ -207,7 +208,9 @@ class SettingsDialog(QDialog):
     @Slot()
     def mass_test_finished(self):
         if self.sender() is not self.mass_job: return
+        error=self.mass_job.error_message
         self.stop_mass_test()
+        if error:self.feedback.setText(error)
 
     def accept(self):
         if self.saving or not self.save_button.isEnabled():return
@@ -224,8 +227,9 @@ class SettingsDialog(QDialog):
         tested = self.tested_mass
         self.stop_mass_test()
         if paths.get('m', '') != self.original_paths.get('m', '') or tested is not None:
-            seed = {tested[0]: tested[2]} if tested is not None and tested[1] == paths.get('m', '') else None
-            self.owner.refresh_mass_lookup(initial_matches=seed)
+            source = os.environ.get('TMA_MASS_XLSX', paths.get('m', '')).strip()
+            seed = {tested[0]: tested[2]} if tested is not None and tested[1] == source else None
+            self.owner.refresh_mass_lookup(initial_matches=seed, source_hint=source)
         else: self.owner.statusBar().showMessage(f"路径设置已保存：{saved}")
         if self.ui_size.currentData() != self.original_ui_size:
             from .ui_size import change_from_menu

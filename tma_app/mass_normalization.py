@@ -20,9 +20,9 @@ def validate_mass(value):
 
 def known_mass_mg(curve):
     """Only real read values; never use the annotation's 0.50 mg fallback."""
-    from .mass_cache import peek
+    from .mass_cache import peek_memory
     try:
-        cached = peek(curve.sample_name)
+        cached = peek_memory(curve.sample_name)
         value = match_mass_mg(cached)
         if value is not None: return value
     except (ValueError, OSError): pass

@@ -13,7 +13,7 @@ from . import __version__
 
 def verify(window,output,inputs):
     from .reader import read_dataset
-    from .mass_lookup import lookup_record
+    from .mass_lookup import lookup_record, MassMatch
     from .workspace import save_session,load_session
     from . import mass_normalization as core
     output=Path(output).resolve();output.parent.mkdir(parents=True,exist_ok=True)
@@ -21,7 +21,11 @@ def verify(window,output,inputs):
     try:
         assert len(inputs)==2
         hashes=[hashlib.sha256(path.read_bytes()).hexdigest() for path in inputs]
-        window.finish_import([read_dataset(path) for path in inputs],[])
+        datasets=[read_dataset(path) for path in inputs]
+        # This check supplies controlled CSV matches below; avoid racing an
+        # unrelated automatic lookup for the isolated QA profile.
+        for dataset in datasets:dataset._mass_match=MassMatch(message='m 正在后台匹配')
+        window.finish_import(datasets,[])
         window.show_overlay();doc=window.active_document()
         original={c.uid:tuple(v.copy() for v in c.xy()) for c in window.curves}
         weights=output.with_suffix('.weights.csv')

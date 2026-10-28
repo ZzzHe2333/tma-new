@@ -24,6 +24,8 @@ Push-Location -LiteralPath $projectPath
 try {
     & $pythonExecutable -m PyInstaller --noconfirm --clean --distpath $distributionPath 'ZzzHe TMA Analysis.spec'
     if ($LASTEXITCODE -ne 0) { throw 'PyInstaller build failed' }
+    & $pythonExecutable (Join-Path $projectPath 'tools\verify_execution_manifest.py') (Join-Path $packagePath 'ZzzHe TMA Analysis.exe')
+    if ($LASTEXITCODE -ne 0) { throw 'Executable administrator manifest verification failed' }
     Copy-Item -LiteralPath (Join-Path $projectPath 'README.md') -Destination (Join-Path $packagePath 'README.md')
     Copy-Item -LiteralPath (Join-Path $projectPath 'tools\diagnostic_start.cmd') -Destination (Join-Path $packagePath 'diagnostic_start.cmd')
     Copy-Item -LiteralPath (Join-Path $projectPath 'docs\windows-release-signing.md') -Destination (Join-Path $packagePath 'WINDOWS_SIGNING.md')
