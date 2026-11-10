@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from copy import deepcopy
 import threading
+import time
 
 # Snapshots are small local preferences, never instrument/table data. GUI
 # readers use these without stat/glob/read calls; disk readers publish updates.
@@ -13,6 +14,8 @@ _snapshot_lock = threading.Lock()
 _snapshots = {}
 _refreshing = set()
 _revisions = {}
+_refresh_checked = {}
+RUNTIME_REFRESH_SECONDS = 30
 
 
 def _publish(path, data, *, identity=None, expected=None, written=False):
@@ -21,7 +24,11 @@ def _publish(path, data, *, identity=None, expected=None, written=False):
         if expected is not None and _revisions.get(key,0)!=expected:return
         if written:_revisions[key]=_revisions.get(key,0)+1
         _snapshots[key] = (path, deepcopy(data))
-        while len(_snapshots) > 16: _snapshots.pop(next(iter(_snapshots)))
+        _refresh_checked[key] = time.monotonic()
+        while len(_snapshots) > 16:
+            expired = next(iter(_snapshots))
+            _snapshots.pop(expired)
+            _refresh_checked.pop(expired, None)
 
 
 def cached_settings():
@@ -52,17 +59,46 @@ def settings_revision():
     return key, _revisions.get(key, 0), os.environ.get('TMA_MASS_XLSX')
 
 
-def refresh_in_background():
+def refresh_in_background(*, min_interval=0):
     key = str(config_path())
+    stamp = time.monotonic()
     with _snapshot_lock:
-        if key in _refreshing: return
+        previous = _refresh_checked.get(key)
+        if key in _refreshing or (previous is not None and stamp - previous < min_interval):
+            return False
         _refreshing.add(key)
+        _refresh_checked[key] = stamp
+        while len(_refresh_checked) > 16:
+            _refresh_checked.pop(next(iter(_refresh_checked)))
     def work():
         try: _read_settings(primary=Path(key))
         except (OSError, ValueError): pass
         finally:
             with _snapshot_lock: _refreshing.discard(key)
-    threading.Thread(target=work,name='TMA-config-read',daemon=True).start()
+    try:
+        threading.Thread(target=work,name='TMA-config-read',daemon=True).start()
+    except RuntimeError:
+        with _snapshot_lock:
+            _refreshing.discard(key)
+            if _refresh_checked.get(key) == stamp:
+                _refresh_checked.pop(key, None)
+        return False
+    return True
+
+
+def runtime_settings_data():
+    """Reuse loaded preferences for frequent GUI decisions; refresh off-thread.
+
+    Disk readers and the first read of a cold profile keep their existing fresh
+    read behavior. Saves publish immediately. External edits are checked on use
+    at most once per interval, even when a previous refresh has failed.
+    """
+    if threading.current_thread() is threading.main_thread():
+        snapshot = cached_settings()
+        if snapshot is not None:
+            refresh_in_background(min_interval=RUNTIME_REFRESH_SECONDS)
+            return snapshot[1]
+    return _settings_data()
 
 
 def config_path():
@@ -80,9 +116,8 @@ def load_paths():
 def save_paths(paths):
     if not isinstance(paths, dict) or any(not isinstance(k, str) or not k.strip() or not isinstance(v, str) for k, v in paths.items()):
         raise ValueError("路径名称和路径必须为文字")
-    data = _settings_data()
-    data.update(version=1, paths={"m": "", **paths})
-    _save_data(data)
+    value = {"m": "", **paths}
+    _update_data(lambda data: data.update(version=1, paths=value))
 
 
 def _settings_data():
@@ -125,12 +160,29 @@ def _read_settings(*, primary=None):
 
 
 def _save_data(data):
+    """Replace a complete document; section writers should use _update_data."""
+    from .config_transaction import settings_transaction
+    primary = config_path()
+    with settings_transaction(primary):
+        return _write_settings(data, primary)
+
+
+def _update_data(update):
+    """Read/modify/write one profile atomically; update only mutates plain data."""
+    from .config_transaction import settings_transaction
+    primary = config_path()
+    with settings_transaction(primary):
+        data = _read_settings(primary=primary)[1]
+        update(data)
+        return _write_settings(data, primary)
+
+
+def _write_settings(data, primary):
     from .atomic_files import write_json
     from .ui_size import fallback_path
-    primary = config_path()
     try:
         write_json(primary, data)
-        _publish(primary, data, written=True)
+        _publish(primary, data, identity=primary, written=True)
         return primary
     except OSError as exc:
         backup = fallback_path(primary)
@@ -138,7 +190,7 @@ def _save_data(data):
         try: write_json(backup, data)
         except OSError as backup_exc:
             raise OSError(f"配置保存失败。用户目录：{exc}；备用目录：{backup_exc}") from backup_exc
-        _publish(backup, data, written=True)
+        _publish(backup, data, identity=primary, written=True)
         return backup
 
 
@@ -149,17 +201,18 @@ def save_settings(paths, *, batch_popup, cache_hours):
     if type(batch_popup) is not bool: raise ValueError("批量窗口设置必须为开或关")
     if type(cache_hours) not in (int, float) or not math.isfinite(cache_hours) or not 1 <= cache_hours <= 720:
         raise ValueError("m 缓存有效期须为 1–720 小时")
-    data = _settings_data()
-    validate_dialog_settings(data)
-    data.update(version=1, paths={"m": "", **paths})
-    data['ui'] = {**data.get('ui', {}), 'batch_popup': batch_popup}
-    data['mass_cache'] = {**data.get('mass_cache', {}), 'refresh_hours': float(cache_hours)}
-    return _save_data(data)
+    value = {"m": "", **paths}
+    def update(data):
+        validate_dialog_settings(data)
+        data.update(version=1, paths=value)
+        data['ui'] = {**data.get('ui', {}), 'batch_popup': batch_popup}
+        data['mass_cache'] = {**data.get('mass_cache', {}), 'refresh_hours': float(cache_hours)}
+    return _update_data(update)
 
 
 def batch_popup_enabled():
     try:
-        return _settings_data().get("ui", {}).get("batch_popup", True) is not False
+        return runtime_settings_data().get("ui", {}).get("batch_popup", True) is not False
     except (OSError, ValueError, AttributeError):
         return True
 
@@ -167,14 +220,17 @@ def batch_popup_enabled():
 def save_batch_popup(enabled):
     if type(enabled) is not bool:
         raise ValueError("批量窗口设置必须为开或关")
-    data = _settings_data()
-    data["ui"] = {**data.get("ui", {}), "batch_popup": enabled}
-    _save_data(data)
+    def update(data):
+        data["ui"] = {**data.get("ui", {}), "batch_popup": enabled}
+    _update_data(update)
 
 
 def ensure_config():
-    path, data = _read_settings()
-    return path if path is not None else _save_data(data)
+    from .config_transaction import settings_transaction
+    primary = config_path()
+    with settings_transaction(primary):
+        path, data = _read_settings(primary=primary)
+        return path if path is not None else _write_settings(data, primary)
 
 
 def mass_source():
@@ -202,5 +258,10 @@ def particle_folder():
 
 
 def save_particle_folder(path):
-    paths = load_paths()
-    save_paths({**paths, "particle_folder": str(path).strip()})
+    value = str(path).strip()
+    def update(data):
+        paths = data.get('paths')
+        if not isinstance(paths, dict) or any(not isinstance(k,str) or not k.strip() or not isinstance(v,str) for k,v in paths.items()):
+            raise ValueError('路径配置文件格式无效')
+        data.update(version=1, paths={"m": "", **paths, "particle_folder": value})
+    _update_data(update)

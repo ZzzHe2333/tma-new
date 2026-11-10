@@ -65,6 +65,12 @@ class Dataset:
         return next((v.strip() for k, vs in self.metadata.items()
                      if k.casefold() == "sample" for v in vs if v.strip()), self.path.name)
 
+    @property
+    def sample_identity(self):
+        """Internal classification, computed only when explicitly requested."""
+        from .sample_identity import recognize_sample
+        return recognize_sample(self.name) or recognize_sample(self.path.stem)
+
     def index_for(self, keyword: str) -> int:
         query = _fold(keyword)
         if not query:

@@ -2,6 +2,13 @@ import os
 from pathlib import Path
 import sys
 
+if __name__ == '__main__' and len(sys.argv) == 4 and sys.argv[1] == '--directory-scan-worker':
+    from tma_app.directory_scan import worker_main
+    sys.exit(worker_main(sys.argv[2], sys.argv[3]))
+if __name__ == '__main__' and len(sys.argv) == 3 and sys.argv[1] == '--verify-directory-scan-wait':
+    from tma_app.directory_scan import wait_probe
+    sys.exit(wait_probe(sys.argv[2]))
+
 from tma_app.diagnostics import install as install_diagnostics
 install_diagnostics()
 
@@ -21,7 +28,13 @@ if sys.stderr is None:
         sys.stderr = open(os.devnull, "w", encoding="utf-8")
 
 if __name__ == "__main__":
-    if len(sys.argv) > 2 and sys.argv[1] == "--verify-cloud-schedule":
+    if len(sys.argv) > 2 and sys.argv[1] == "--verify-diagnostics-exit":
+        from tma_app.diagnostics_qa import blocked_exit
+        sys.exit(blocked_exit(Path(sys.argv[2])))
+    elif len(sys.argv) > 2 and sys.argv[1] == "--verify-config-write":
+        from tma_app.config_transaction_qa import side_writer
+        sys.exit(side_writer(Path(sys.argv[2])))
+    elif len(sys.argv) > 2 and sys.argv[1] == "--verify-cloud-schedule":
         from tma_app.cloud_qa import verify_scheduled_cleanup
         sys.exit(0 if verify_scheduled_cleanup(sys.argv[2])["status"] == "passed" else 1)
     elif "--cloud-cleanup" in sys.argv:

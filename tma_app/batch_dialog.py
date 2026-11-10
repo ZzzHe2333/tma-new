@@ -4,6 +4,7 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+import os
 import threading
 import queue
 import uuid
@@ -13,7 +14,7 @@ from PySide6.QtWidgets import (QApplication, QAbstractItemView, QComboBox, QDial
     QHeaderView, QHBoxLayout, QLabel, QProgressBar, QPushButton, QVBoxLayout)
 
 from . import batch_analysis as backend
-from .path_settings import import_folder, mass_source
+from .batch_sources import PendingMassSource, capture_mass_source
 from .theme import app_icon
 from .batch_jobs import run_batch_job
 from .batch_table import ResultsTable
@@ -66,6 +67,7 @@ class BatchDialog(QDialog):
         self.job = None
         self.export_job = None
         self._shutdown = False
+        self.popup_revision = 0
         self._export_completed = set()
         self._export_total = 0
         self._job_total = 0
@@ -166,15 +168,13 @@ class BatchDialog(QDialog):
 
     def enqueue_files(self, paths):
         if self._shutdown:return
-        paths = [str(Path(path).resolve()) for path in paths]
+        # Keep GUI admission lexical. Real-path/network work belongs to the
+        # existing calculation worker, which resolves each source before use.
+        paths = [str(path) if str(path).startswith('cloud://') else os.path.abspath(path) for path in paths]
         if not paths:
             self.feedback.setText("请先导入文件。")
             return
-        try:
-            source = mass_source()
-        except (OSError, ValueError) as exc:
-            self.feedback.setText(f"m 路径配置未读取：{exc}")
-            source = ""
+        source = capture_mass_source()
         stamp = datetime.now(timezone(timedelta(hours=8))).isoformat(timespec="seconds")
         batch_id = uuid.uuid4().hex
         number = len({row["batch_id"] for row in self.rows}) + 1
@@ -182,7 +182,8 @@ class BatchDialog(QDialog):
         self.latest_batch_id = batch_id
         for path in paths:
             row = dict(id=uuid.uuid4().hex, file=path, name=Path(path).name,
-                       state="排队中", mass_config=source, error="", warning="",
+                       state="排队中", mass_config=None if isinstance(source, PendingMassSource) else source,
+                       mass_profile=source.profile if isinstance(source, PendingMassSource) else '', error="", warning="",
                        batch_id=batch_id, batch_label=batch_label, imported_at=stamp)
             self.rows.append(row)
         self.update_batch_filter()
@@ -247,7 +248,11 @@ class BatchDialog(QDialog):
             return
         # Separate queues when the weighing source changes between imports.
         source = pending[0]["mass_config"]
-        pending = [row for row in pending if row["mass_config"] == source]
+        profile = pending[0].get('mass_profile', '') if source is None else ''
+        pending = [row for row in pending if row["mass_config"] == source
+                   and (source is not None or row.get('mass_profile', '') == profile)]
+        if source is None:
+            source = PendingMassSource(profile)
         for row in pending:
             row["state"] = "计算中"
         self.start_job(BatchJob("calculate", [(row["id"], row["file"]) for row in pending], source))
@@ -398,7 +403,7 @@ class BatchDialog(QDialog):
             QApplication.clipboard().setText(backend.table_text(rows))
             from .achievement_ui import record
             record(self.owner, 'tables')
-            self.feedback.setText(f"已复制 {len(rows)} 行 × 4 列（含表头），可直接粘贴到 Excel / WPS。未匹配的 M 留空，尚未计算的行暂不包含。")
+            self.feedback.setText(f"已复制 {len(rows)} 行 × 5 列（文件名、T1、T2、M、H，含表头），可直接粘贴到 Excel / WPS。未匹配的 M 留空，尚未计算的行暂不包含。")
             self._notify_paths("复制到excal", rows)
 
     def export_xlsx(self):
@@ -418,7 +423,8 @@ class BatchDialog(QDialog):
         if not rows:
             self.feedback.setText("所选行没有可出图的结果。")
             return
-        directory = QFileDialog.getExistingDirectory(self, "选择图片输出文件夹", import_folder())
+        from .data_file_dialog import start_folder
+        directory = QFileDialog.getExistingDirectory(self, "选择图片输出文件夹", start_folder(self.owner))
         if directory:
             # Name reservation/filesystem access stays on the worker as well.
             self.start_plot_job(rows, directory)
@@ -445,9 +451,11 @@ class BatchDialog(QDialog):
         self.update_batch_filter();self.refresh_view()
 
     def reject(self):
+        self.popup_revision += 1
         self.cancel_processing()
         super().reject()
 
     def closeEvent(self, event):
+        self.popup_revision += 1
         self.cancel_processing()
         super().closeEvent(event)

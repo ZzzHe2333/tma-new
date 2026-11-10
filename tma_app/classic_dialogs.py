@@ -249,6 +249,8 @@ class AddCurvesDialog(QDialog):
     def __init__(self, parent, curves, axis, *, empty_selection=False):
         super().__init__(parent)
         self.empty_selection = empty_selection
+        self.file_job = None
+        self._closed = False
         self.setWindowTitle("添加曲线")
         self.source_curves=list(curves)
         self.resize(630, 349)
@@ -265,6 +267,7 @@ class AddCurvesDialog(QDialog):
         controls = QHBoxLayout()
         for title, fn in (("全部选择", lambda: self.check_files(True)), ("取消选择", lambda: self.check_files(False)), ("打开文件…", self.open_files)):
             btn = QPushButton(title); btn.clicked.connect(fn); controls.addWidget(btn)
+            if title == "打开文件…": self.open_button = btn
         left.addLayout(controls)
         right.addWidget(QLabel("信号"))
         self.signals = QListWidget()
@@ -278,15 +281,17 @@ class AddCurvesDialog(QDialog):
         buttons.button(QDialogButtonBox.StandardButton.Ok).setText("确定")
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
         buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject); layout.addWidget(buttons)
+        self.apply_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
         self.files.itemChanged.connect(self.refresh_signals)
         self.compatible.toggled.connect(self.refresh_signals)
         self.refresh_files()
 
-    def refresh_files(self):
+    def refresh_files(self, states=None):
         self.files.blockSignals(True); self.files.clear()
         for ds in self.datasets:
             item = QListWidgetItem(ds.display_name)
-            item.setToolTip(str(ds.path)); item.setCheckState(Qt.CheckState.Unchecked if self.empty_selection else Qt.CheckState.Checked)
+            default = Qt.CheckState.Unchecked if self.empty_selection else Qt.CheckState.Checked
+            item.setToolTip(str(ds.path)); item.setCheckState((states or {}).get(ds.document_key, default))
             self.files.addItem(item)
         self.files.blockSignals(False); self.refresh_signals()
 
@@ -318,20 +323,57 @@ class AddCurvesDialog(QDialog):
             self.signals.setCurrentRow(labels.index(selected) if selected in labels else -1 if self.empty_selection else 0)
 
     def open_files(self):
-        from .path_settings import import_folder
-        paths, _ = QFileDialog.getOpenFileNames(self, "添加数据文件", import_folder(), "TA 数据 (*.0?? *.1?? *.2?? *.3?? *.4?? *.5?? *.6?? *.7?? *.8?? *.9?? *.txt *.tai);;所有文件 (*)")
-        failures = []
-        known = {str(ds.path.resolve()) for ds in self.datasets}
-        for path in paths:
-            if str(Path(path).resolve()) in known:
-                continue
-            try:
-                self.datasets.append(read_dataset(path)); known.add(str(Path(path).resolve()))
-            except Exception as exc:
-                failures.append(f"{Path(path).name}: {exc}")
-        self.refresh_files(); self.error.setText("\n".join(failures))
+        if self.file_job is not None or self._closed: return
+        from .data_file_dialog import get_data_files
+        from .import_jobs import ImportWorker
+        owner = self.parentWidget()
+        while owner is not None and owner.parentWidget() is not None:
+            owner = owner.parentWidget()
+        paths, _ = get_data_files(self, "添加数据文件", "TA 数据 (*.0?? *.1?? *.2?? *.3?? *.4?? *.5?? *.6?? *.7?? *.8?? *.9?? *.txt *.tai);;所有文件 (*)", owner=owner or self)
+        if not paths or self._closed: return
+        self.file_job = ImportWorker(paths, read_dataset, self, known_paths=[ds.path for ds in self.datasets])
+        self.file_job.completed.connect(self.files_loaded)
+        self.file_job.progress.connect(self.error.setText)
+        self.file_job.finished.connect(self.files_finished)
+        self.open_button.setEnabled(False); self.apply_button.setEnabled(False)
+        self.error.setText(f"正在后台读取 {len(paths)} 个文件… 可随时取消或关闭。")
+        try:
+            self.file_job.start()
+        except (RuntimeError, OSError):
+            self.file_job.cancel(); self.files_finished()
+            self.error.setText("后台读取未能启动，请稍后重试；已选曲线保留。")
+
+    def files_loaded(self, datasets, failures):
+        if self._closed or self.file_job is None: return
+        states = {ds.document_key: self.files.item(i).checkState() for i, ds in enumerate(self.datasets)}
+        self.datasets.extend(datasets)
+        self.refresh_files(states)
+        self.error.setText("\n".join(failures))
+
+    def files_finished(self):
+        job, self.file_job = self.file_job, None
+        if job is not None: job.deleteLater()
+        if not self._closed:
+            self.open_button.setEnabled(True); self.apply_button.setEnabled(True)
+
+    def cancel_file_import(self):
+        self._closed = True
+        job, self.file_job = self.file_job, None
+        if job is not None:
+            job.cancel(); job.deleteLater()
+
+    def reject(self):
+        self.cancel_file_import()
+        super().reject()
+
+    def closeEvent(self, event):
+        self.cancel_file_import()
+        super().closeEvent(event)
 
     def accept(self):
+        if self.file_job is not None:
+            self.error.setText("文件正在后台读取，请等待完成或取消。")
+            return
         item = self.signals.currentItem()
         if not item or not self.checked_datasets():
             self.error.setText("请选择文件和一个信号。"); return

@@ -20,7 +20,7 @@ from . import report_internal_core as core
 from .report_template_core import PDFTemplateEditor
 from .mass_lookup import lookup_record, _batch_keys
 from .path_settings import config_path
-from .batch_analysis import serialized
+from .batch_analysis import serialized, _BATCH_LOCK
 
 LOGGER = logging.getLogger(__name__)
 TEMPLATE_KEYS = ("tmaname", "lijing", "qifawd", "zuidawd", "tmamd", "shengchan")
@@ -358,7 +358,10 @@ def _protect_output(path, request, data):
         raise ValueError("输出 PDF 不能覆盖 TMA、粒径、模板或称量表源文件")
 
 
-@serialized
+def _source_fingerprint(stat):
+    return stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_ino
+
+
 def generate_report(request, data=None, *, force_internal=False, progress=None, cancelled=None):
     """An invalid/failed selected template always raises; the GUI asks first."""
     from .cloud_storage import resolve_source
@@ -371,20 +374,34 @@ def generate_report(request, data=None, *, force_internal=False, progress=None, 
             if not force_internal: raise TemplateError(str(exc)) from exc
     provided_data = data is not None
     if data is None:
-        data = read_sources(request["tma_path"], request["particle_path"], request.get("mass_source", ""),
-                            algorithm=request.get("algorithm", "auto"), record_index=request.get("record_index"),
-                            particle_revision=request.get("particle_revision"), progress=progress)
+        # The no-prefetched-data route includes PDF parsing. Preserve its
+        # serialization while the normal UI's already-read data avoid it.
+        with _BATCH_LOCK:
+            data = read_sources(request["tma_path"], request["particle_path"], request.get("mass_source", ""),
+                                algorithm=request.get("algorithm", "auto"), record_index=request.get("record_index"),
+                                particle_revision=request.get("particle_revision"), progress=progress)
     if data.get("errors"):
         raise ValueError("\n".join(data["errors"]))
-    template = None if force_internal else validate_template(request.get("template_path", ""))
+    if force_internal or not str(request.get("template_path", "")).strip():
+        template = None
+    else:
+        with _BATCH_LOCK:
+            template = validate_template(request["template_path"])
     fields = dict(data["fields"])
     fields.update({key: value for key, value in request.get("fields", {}).items() if provided_data or str(value).strip()})
     values = collect_values(fields, data, require_span=not bool(template))
+    fingerprints = {}
     for key in ("tma", "particle"):
         source = data[key]
+        before = Path(source['file']).stat()
         if str(Path(request[key + "_path"]).resolve()) != source["file"] or digest(source["file"]) != source["sha256"]:
             if key == "particle": clear_particle_cache()
             raise ValueError("源文件已变化，请重新读取信息后生成报告")
+        after = Path(source['file']).stat()
+        if _source_fingerprint(before) != _source_fingerprint(after):
+            if key == "particle": clear_particle_cache()
+            raise ValueError("源文件已变化，请重新读取信息后生成报告")
+        fingerprints[source['file']] = (_source_fingerprint(after), key)
     path = Path(request["output_path"]).resolve()
     _protect_output(path, request, data)
     if path.suffix.casefold() != ".pdf":
@@ -392,6 +409,27 @@ def generate_report(request, data=None, *, force_internal=False, progress=None, 
     work_root = config_path().parent / "report-work"
     work_root.mkdir(parents=True, exist_ok=True)
     path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix="report-", suffix=".pdf", dir=path.parent)
+    os.close(descriptor)
+    Path(temporary).unlink()  # PyMuPDF's save expects a new file.
+    try:
+        _render_report(request,data,template,fields,values,temporary,work_root,progress,cancelled)
+        for source, (expected, kind) in fingerprints.items():
+            if _source_fingerprint(Path(source).stat()) != expected:
+                if kind == "particle": clear_particle_cache()
+                raise ValueError("源文件已变化，请重新读取信息后生成报告")
+        if cancelled is not None and cancelled.is_set():
+            raise ValueError("已取消报告生成")
+        os.replace(temporary,path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+    return dict(path=str(path), mode="template" if template else "internal", fallback=force_internal,
+                values=values, fields=fields, data=data)
+
+
+@serialized
+def _render_report(request,data,template,fields,values,temporary,work_root,progress,cancelled):
+    """Serialize Matplotlib/PDF work; source and final output I/O are outside."""
     with tempfile.TemporaryDirectory(prefix="report-", dir=work_root) as directory:
         directory = Path(directory)
         tma_image = directory / "tma.tif"
@@ -411,40 +449,31 @@ def generate_report(request, data=None, *, force_internal=False, progress=None, 
         else:
             with Image.open(particle["file"]) as image:
                 image.convert("RGB").save(particle_image)
-        descriptor, temporary = tempfile.mkstemp(prefix="report-", suffix=".pdf", dir=path.parent)
-        os.close(descriptor)
-        Path(temporary).unlink()  # PyMuPDF's save expects a new file.
-        try:
-            if template:
-                if progress:
-                    progress("正在填充指定 PDF 模板…")
-                editor = None
-                try:
-                    editor = ReportTemplateEditor(template, LOGGER)
-                    template_values = {**values, "shengchan": values["shengchan"][:10].replace("-", "/")}
-                    for key in TEMPLATE_KEYS:
-                        if not editor.replace_label(key, template_values[key], page_index=0):
-                            raise ValueError(f"占位符未填充：{key}")
-                    editor.replace_image_centered(1, str(tma_image))
-                    editor.replace_image_centered(2, str(particle_image))
-                    editor.doc.set_metadata({**editor.doc.metadata, "creator": "Power By ZzzHe"})
-                    editor.save(temporary)
-                except Exception as exc:
-                    raise TemplateError(f"模板填充失败：{exc}") from exc
-                finally:
-                    if editor is not None:
-                        editor.close()
-            else:
-                if progress:
-                    progress("正在生成内部版三页报告…")
-                core.build_final_pdf_internal(temporary, values, str(tma_image), str(particle_image))
-            with fitz.open(temporary) as doc:
-                if doc.page_count < 3:
-                    raise ValueError("报告页数异常")
-            if cancelled is not None and cancelled.is_set():
-                raise ValueError("已取消报告生成")
-            os.replace(temporary, path)
-        finally:
-            Path(temporary).unlink(missing_ok=True)
-    return dict(path=str(path), mode="template" if template else "internal", fallback=force_internal,
-                values=values, fields=fields, data=data)
+        if template:
+            if progress:
+                progress("正在填充指定 PDF 模板…")
+            editor = None
+            try:
+                editor = ReportTemplateEditor(template, LOGGER)
+                template_values = {**values, "shengchan": values["shengchan"][:10].replace("-", "/")}
+                for key in TEMPLATE_KEYS:
+                    if not editor.replace_label(key, template_values[key], page_index=0):
+                        raise ValueError(f"占位符未填充：{key}")
+                editor.replace_image_centered(1, str(tma_image))
+                editor.replace_image_centered(2, str(particle_image))
+                editor.doc.set_metadata({**editor.doc.metadata, "creator": "Power By ZzzHe"})
+                editor.save(temporary)
+            except Exception as exc:
+                raise TemplateError(f"模板填充失败：{exc}") from exc
+            finally:
+                if editor is not None:
+                    editor.close()
+        else:
+            if progress:
+                progress("正在生成内部版三页报告…")
+            core.build_final_pdf_internal(temporary, values, str(tma_image), str(particle_image))
+        with fitz.open(temporary) as doc:
+            if doc.page_count < 3:
+                raise ValueError("报告页数异常")
+        if cancelled is not None and cancelled.is_set():
+            raise ValueError("已取消报告生成")

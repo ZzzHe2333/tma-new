@@ -24,7 +24,10 @@ DEFAULT_PORT = 18765
 
 
 def load_settings():
-    value = path_settings._settings_data().get("mcp", {})
+    return parse_settings(path_settings._settings_data().get("mcp", {}))
+
+
+def parse_settings(value):
     if not isinstance(value, dict):
         raise ValueError("MCP 配置格式无效")
     result = {"enabled": False, "port": DEFAULT_PORT, "token": "", **value}
@@ -44,9 +47,8 @@ def validate_settings(value):
 
 def save_settings(value):
     validate_settings(value)
-    data = path_settings._settings_data()
-    data["mcp"] = {key: value[key] for key in ("enabled", "port", "token")}
-    path_settings._save_data(data)
+    settings = {key: value[key] for key in ("enabled", "port", "token")}
+    path_settings._update_data(lambda data: data.update(mcp=settings))
 
 
 def endpoint(port):
@@ -292,8 +294,10 @@ class McpService:
         self.state = "stopped"
         self.error = ""
         self.port = DEFAULT_PORT
+        self.control_revision = 0
 
     def start(self, settings):
+        self.control_revision += 1
         validate_settings(settings)
         if not settings["enabled"]:
             self.stop()
@@ -353,6 +357,7 @@ class McpService:
                 self.state = "stopped"
 
     def stop(self, *, wait=True):
+        self.control_revision += 1
         self.active.clear()
         if self.jobs:
             self.jobs.shutdown()

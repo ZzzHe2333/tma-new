@@ -24,13 +24,22 @@ class SettingsDialog(QDialog):
         hint = QLabel("默认打开文件夹：每次启动后首次从这里选文件；之后沿用本次最近选定文件所在目录，重启再回到默认目录。\nm：选择称量表或其所在文件夹，支持 CSV、XLSX、XLS。优先识别样品名与重量表头；无表头时读取 B 列名称、C 列重量。")
         hint.setWordWrap(True); layout.addWidget(hint)
         from .ui_size import PRESETS
-        size_row = QHBoxLayout(); size_row.addWidget(QLabel('字体与界面大小'))
+        size_row = QHBoxLayout(); size_row.addWidget(QLabel('全部放大'))
         self.ui_size = QComboBox(); self.ui_size.setObjectName('UiSizePreset')
-        for key, label, _ in PRESETS: self.ui_size.addItem(label, key)
+        for key, _, scale in PRESETS: self.ui_size.addItem(f'{scale:g}×', key)
         controller=getattr(owner,'_ui_size_controller',None)
         self.ui_size.setCurrentIndex(self.ui_size.findData(controller.selected if controller is not None else 'standard')); size_row.addWidget(self.ui_size)
         self.original_ui_size = self.ui_size.currentData()
         size_row.addWidget(QLabel('字体、图标、预览整体放大，重启后生效'), 1); layout.addLayout(size_row)
+        from .ui_size import size_controller
+        icon_row = QHBoxLayout(); icon_row.addWidget(QLabel('图标放大'))
+        self.icon_size = QComboBox(); self.icon_size.setObjectName('IconSizePreset')
+        for key, _, scale in PRESETS: self.icon_size.addItem(f'{scale:g}×', key)
+        self.icon_size.setCurrentIndex(self.icon_size.findData(size_controller(owner, icons=True).selected))
+        self.original_icon_size = self.icon_size.currentData()
+        icon_row.addWidget(self.icon_size)
+        icon_row.addWidget(QLabel('图标实际倍率取两项中的较大值，重启后生效'), 1)
+        layout.addLayout(icon_row)
         self.batch_popup = QCheckBox("批量导入后自动弹出结果窗口（关闭后仍会后台计算，可从文件菜单查看）")
         self.batch_popup.setObjectName("BatchPopupSetting")
         self.batch_popup.setChecked(initial.get('ui',{}).get('batch_popup',True) is not False); layout.addWidget(self.batch_popup)
@@ -66,6 +75,7 @@ class SettingsDialog(QDialog):
         self.paths.itemChanged.connect(self.path_changed)
         self.paths.itemChanged.connect(self.mark_edited)
         self.batch_popup.toggled.connect(self.mark_edited);self.ui_size.currentIndexChanged.connect(self.mark_edited);self.cache_hours.valueChanged.connect(self.mark_edited)
+        self.icon_size.currentIndexChanged.connect(self.mark_edited)
         self.slow_timer = QTimer(self); self.slow_timer.setSingleShot(True)
         self.slow_timer.timeout.connect(lambda: self.feedback.setText("m 数据源响应较慢，仍在后台读取；可以继续保存设置或关闭窗口。"))
         self.io_timer=QTimer(self);self.io_timer.setInterval(30);self.io_timer.timeout.connect(self.drain_io)
@@ -78,7 +88,7 @@ class SettingsDialog(QDialog):
     def mark_edited(self,*_):self._edited=True
 
     def set_form_enabled(self,enabled):
-        for widget in [self.paths,self.batch_popup,self.cache_hours,self.ui_size,self.refresh_button,*self.form_buttons]:widget.setEnabled(enabled)
+        for widget in [self.paths,self.batch_popup,self.cache_hours,self.ui_size,self.icon_size,self.refresh_button,*self.form_buttons]:widget.setEnabled(enabled)
         if enabled and self.mass_job is not None:
             self.test_button.setEnabled(False);self.refresh_button.setEnabled(False)
 
@@ -234,6 +244,9 @@ class SettingsDialog(QDialog):
         if self.ui_size.currentData() != self.original_ui_size:
             from .ui_size import change_from_menu
             change_from_menu(self.owner, self.ui_size.currentData())
+        if self.icon_size.currentData() != self.original_icon_size:
+            from .ui_size import change_from_menu
+            change_from_menu(self.owner, self.icon_size.currentData(), icons=True)
         super().accept()
 
     def reject(self):

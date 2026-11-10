@@ -1,14 +1,15 @@
 """App notifications: Server酱 / Bark / 企业微信 / 飞书.
 
-Transport only — no Qt objects and no plotting happen here. Every network call
-runs on a short-lived daemon thread, so a slow or unreachable endpoint can never
-block the UI or startup. Targets (send keys, webhook URLs, app secrets) are
+Transport only — no Qt objects and no plotting happen here. Network calls run
+on at most two daemon workers with a bounded queue, so a slow endpoint cannot
+create unlimited threads or retained images. Targets and application secrets are
 stored with the same Windows DPAPI protection used for cloud passwords and are
 never echoed in an error message or a log line.
 """
 from __future__ import annotations
 
 import base64
+from collections import deque
 import hashlib
 import json
 import platform
@@ -19,10 +20,7 @@ import uuid
 from datetime import datetime
 from urllib.parse import parse_qs, urlsplit, urlunsplit, urlencode
 
-import httpx
-
-from . import cloud_storage as cloud
-from .path_settings import _settings_data, _save_data
+from .path_settings import _settings_data, _update_data
 
 # key, label, supports image, hint shown in the settings dialog
 PROVIDERS = (
@@ -38,8 +36,73 @@ EVENT_KEYS = {'登录软件': 'startup', '启动': 'startup', '单样品报告':
               '复制到excal': 'copy_excel', '批量出图': 'batch_plot'}
 DEFAULT_EVENTS = {'startup': True, 'report': True, 'import': True, 'batch_import': True,
                   'batch_process': True, 'copy_excel': True, 'batch_plot': True}
-TIMEOUT = httpx.Timeout(30, connect=10)
+TIMEOUT_SECONDS = 30
 _last_error = ''
+
+
+class _DeliveryQueue:
+    """Bound both waiting and active notifications; release idle worker threads."""
+    def __init__(self, deliver, *, max_workers=2, max_pending=64,
+                 max_bytes=64 * 1024 * 1024, idle_seconds=10):
+        self.deliver = deliver
+        self.max_workers, self.max_pending = max_workers, max_pending
+        self.max_bytes, self.idle_seconds = max_bytes, idle_seconds
+        self.condition = threading.Condition()
+        self.waiting = deque()
+        self.workers = set()
+        self.pending = self.retained_bytes = self.active = 0
+
+    def submit(self, args, size):
+        with self.condition:
+            if self.pending >= self.max_pending or self.retained_bytes + size > self.max_bytes:
+                return False
+            self.waiting.append((args, size))
+            self.pending += 1
+            self.retained_bytes += size
+            needed = min(self.max_workers, self.active + len(self.waiting))
+            while len(self.workers) < needed:
+                worker = threading.Thread(target=self._run, name='TMA-notify', daemon=True)
+                self.workers.add(worker)
+                try:
+                    worker.start()
+                except RuntimeError:
+                    self.workers.discard(worker)
+                    if not self.workers:
+                        self.waiting.pop()
+                        self.pending -= 1
+                        self.retained_bytes -= size
+                        return False
+                    break
+            self.condition.notify_all()
+            return True
+
+    def _run(self):
+        global _last_error
+        worker = threading.current_thread()
+        try:
+            while True:
+                with self.condition:
+                    if not self.waiting:
+                        self.condition.wait(self.idle_seconds)
+                    if not self.waiting:
+                        self.workers.discard(worker)
+                        return
+                    args, size = self.waiting.popleft()
+                    self.active += 1
+                try:
+                    self.deliver(*args)
+                except Exception:
+                    _last_error = '通知后台任务失败，请检查配置和网络'
+                finally:
+                    with self.condition:
+                        self.active -= 1
+                        self.pending -= 1
+                        self.retained_bytes -= size
+                    # Do not retain the previous image during the idle timeout.
+                    del args
+        finally:
+            with self.condition:
+                self.workers.discard(worker)
 
 
 def provider_label(key):
@@ -56,8 +119,9 @@ def provider_hint(key):
 
 def _post_json(url, payload, headers=None):
     """POST once, never follow redirects, never leak the URL in the error text."""
+    import httpx
     try:
-        with httpx.Client(timeout=TIMEOUT, trust_env=False, follow_redirects=False) as client:
+        with httpx.Client(timeout=httpx.Timeout(TIMEOUT_SECONDS, connect=10), trust_env=False, follow_redirects=False) as client:
             response = client.post(url, json=payload, headers=headers or {})
         if response.status_code != 200:
             raise ValueError(f'通知服务返回 HTTP {response.status_code}')
@@ -70,8 +134,9 @@ def _post_json(url, payload, headers=None):
 
 
 def _post_form(url, data):
+    import httpx
     try:
-        with httpx.Client(timeout=TIMEOUT, trust_env=False, follow_redirects=False) as client:
+        with httpx.Client(timeout=httpx.Timeout(TIMEOUT_SECONDS, connect=10), trust_env=False, follow_redirects=False) as client:
             response = client.post(url, data=data)
         if response.status_code != 200:
             raise ValueError(f'通知服务返回 HTTP {response.status_code}')
@@ -160,7 +225,15 @@ def _secret(value, label):
 
 
 def settings():
-    data = _settings_data().get('notifications', {})
+    return _parse_settings(_settings_data().get('notifications', {}))
+
+
+def runtime_settings():
+    from .path_settings import runtime_settings_data
+    return _parse_settings(runtime_settings_data().get('notifications', {}))
+
+
+def _parse_settings(data):
     if not isinstance(data, dict):
         raise ValueError('通知配置格式无效')
     provider = data.get('provider', DEFAULT_PROVIDER)
@@ -182,51 +255,57 @@ def settings():
 
 def save_settings(provider, target, *, enabled, attach_image, app_id='', app_secret='',
                   events=None, clear_target=False):
+    from . import cloud_storage as cloud
     if provider not in PROVIDER_KEYS:
         raise ValueError('请选择通知渠道')
     if type(enabled) is not bool or type(attach_image) is not bool:
         raise ValueError('通知开关必须是开或关')
     if attach_image and not supports_image(provider):
         raise ValueError(f'{provider_label(provider)} 仅支持文字通知')
-    previous = settings()
-    value = {
-        'enabled': enabled,
-        'provider': provider,
-        'attach_image': attach_image,
-        'target': '' if clear_target else previous['target'],
-        'app_id': previous['app_id'],
-        'app_secret': previous['app_secret'],
-        'events': {key: bool((events or {}).get(key, previous['events'][key])) for key in DEFAULT_EVENTS},
-    }
+    secrets = {}
     if str(target).strip():
-        value['target'] = cloud.protect_password(normalize_target(provider, str(target)))
+        secrets['target'] = cloud.protect_password(normalize_target(provider, str(target)))
     if str(app_id).strip():
-        value['app_id'] = cloud.protect_password(str(app_id).strip())
+        secrets['app_id'] = cloud.protect_password(str(app_id).strip())
     if str(app_secret).strip():
-        value['app_secret'] = cloud.protect_password(str(app_secret).strip())
-    data = _settings_data()
-    data['notifications'] = value
-    _save_data(data)
+        secrets['app_secret'] = cloud.protect_password(str(app_secret).strip())
+    value = {}
+    def update(data):
+        previous = _parse_settings(data.get('notifications', {}))
+        value.update(enabled=enabled, provider=provider, attach_image=attach_image,
+                     target='' if clear_target else previous['target'], app_id=previous['app_id'],
+                     app_secret=previous['app_secret'],
+                     events={key: bool((events or {}).get(key, previous['events'][key])) for key in DEFAULT_EVENTS})
+        value.update(secrets)
+        data['notifications'] = value
+    _update_data(update)
     return value
 
 
 # ----------------------------------------------------------------- machine info
 
 def machine_code():
-    """Stable short code derived from the Windows MachineGuid (never reversible)."""
+    """Derive identity on this host, including its network hardware identity.
+
+    The latter also distinguishes cloned Windows installations with an identical
+    MachineGuid. Persisted notification caches are never an identity source.
+    """
     raw = ''
     try:
         import winreg
-        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Microsoft\Cryptography') as key:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Microsoft\Cryptography', 0,
+                            winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as key:
             raw = str(winreg.QueryValueEx(key, 'MachineGuid')[0])
     except Exception:
         raw = ''
-    if not raw:
-        try:
-            raw = f'{platform.node()}-{uuid.getnode()}'
-        except Exception:
-            raw = platform.node() or 'unknown'
-    digest = hashlib.sha256(raw.encode('utf-8')).hexdigest().upper()
+    try:
+        node = uuid.getnode()
+        hardware = f'{node:012x}' if not node & (1 << 40) else ''
+    except Exception:
+        hardware = ''
+    identity = '|'.join(('ZzzHeTMA-notify-v2', raw.strip().lower(), hardware,
+                         platform.node().strip().lower() if not raw or not hardware else ''))
+    digest = hashlib.sha256(identity.encode('utf-8')).hexdigest().upper()
     return '-'.join(digest[i:i + 4] for i in range(0, 16, 4))
 
 
@@ -252,6 +331,7 @@ def lan_ip():
 
 
 def public_ip(timeout=6):
+    import httpx
     for url in ('https://api.ipify.org', 'https://ifconfig.me/ip'):
         try:
             with httpx.Client(timeout=httpx.Timeout(timeout, connect=4),
@@ -317,20 +397,19 @@ def _machine_items(cache, full=False):
 
 
 def machine_details(full=False, force=False):
-    """Cached machine identity; re-collected only when missing or older than 30 days.
+    """Verify local identity before reusing cached, expensive address lookups.
 
     ``full`` adds computer name and both addresses (startup only). A failed public
     lookup keeps the previous value and leaves the timestamp alone so the next
     launch retries instead of caching a failure for a month.
     """
     cache = _read_machine_cache()
+    current = machine_code()
+    if cache.get('machine_code') != current:
+        cache = {'machine_code': current}
+        _write_machine_cache(cache)
     if not full:
-        code = cache.get('machine_code')
-        if code:
-            return [('机器码', code)]
-        fresh = machine_code()
-        _write_machine_cache({**cache, 'machine_code': fresh})
-        return [('机器码', fresh)]
+        return [('机器码', current)]
     if not force and cache.get('machine_code') and _cache_fresh(cache):
         return _machine_items(cache, full=True)
     fresh = _collect_machine(full=True)
@@ -435,9 +514,10 @@ def _feishu_token(app_id, app_secret):
 def _send_image_feishu(url, png, app_id, app_secret):
     if not app_id or not app_secret:
         raise ValueError('飞书发送图片需在通知设置中填写 App ID 与 App Secret；否则请取消勾选图片')
+    import httpx
     token = _feishu_token(app_id, app_secret)
     try:
-        with httpx.Client(timeout=TIMEOUT, trust_env=False, follow_redirects=False) as client:
+        with httpx.Client(timeout=httpx.Timeout(TIMEOUT_SECONDS, connect=10), trust_env=False, follow_redirects=False) as client:
             upload = client.post('https://open.feishu.cn/open-apis/im/v1/images',
                                  headers={'Authorization': f'Bearer {token}'},
                                  data={'image_type': 'message'},
@@ -478,6 +558,7 @@ def send_now(provider, target, event, batch='', png=None, *, app_id='', app_secr
 def _deliver(config, event, batch, png, details, path, separated):
     global _last_error
     try:
+        from . import cloud_storage as cloud
         url = normalize_target(config['provider'], cloud.protect_password(config['target'], decrypt=True))
         items = details() if callable(details) else details
         text = format_message(event, batch, details=items, path=path, separated=separated)
@@ -497,13 +578,13 @@ def _deliver(config, event, batch, png, details, path, separated):
 
 
 def notify(event, batch='', png=None, details=None, path='', separated=None):
-    """Fire-and-forget: never blocks the caller, never raises to the UI.
+    """Enqueue delivery; frequent GUI calls reuse already loaded preferences.
 
     ``details`` may be a callable; it is evaluated on the worker thread, which is
     where a public-IP lookup belongs.
     """
     try:
-        config = settings()
+        config = runtime_settings()
     except (ValueError, OSError):
         return False
     if not config['enabled'] or not config['target']:
@@ -513,9 +594,16 @@ def notify(event, batch='', png=None, details=None, path='', separated=None):
         return False
     if png is not None and (not config['attach_image'] or not supports_image(config['provider'])):
         png = None
-    threading.Thread(target=_deliver, args=(config, event, batch, png, details, path, separated),
-                     name='TMA-notify', daemon=True).start()
-    return True
+    size = (len(png) if png else 0) + sum(len(str(value).encode('utf-8'))
+                                        for value in (event, batch, path))
+    accepted = _delivery_queue.submit((config, event, batch, png, details, path, separated), size)
+    if not accepted:
+        global _last_error
+        _last_error = '通知后台队列或图片容量已满，此次通知未加入队列，请稍后重试'
+    return accepted
+
+
+_delivery_queue = _DeliveryQueue(_deliver)
 
 
 def last_error():

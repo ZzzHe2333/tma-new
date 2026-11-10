@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
-from io import StringIO
+from io import BytesIO, StringIO
 import logging
 import math
 import os
@@ -13,6 +13,7 @@ import threading
 from functools import wraps
 from collections import OrderedDict
 from copy import deepcopy
+from weakref import WeakValueDictionary
 
 import numpy as np
 from . import piliang_core as original
@@ -23,6 +24,8 @@ HEADERS = ("T1 (°C)", "T2 (°C)", "M (mg)", "H (µm)")
 LOGGER = logging.getLogger(__name__)
 _BATCH_LOCK = threading.RLock()
 _CALC_CACHE = OrderedDict()
+_FILE_LOCKS = WeakValueDictionary()
+_FILE_LOCKS_GUARD = threading.Lock()
 
 
 def serialized(function):
@@ -42,47 +45,73 @@ def history_snapshot(rows):
     return [{key: value for key, value in row.items() if key in keys} for row in rows]
 
 
-@serialized
-def calculate_file(path):
-    """Use exactly the supplied reader, V233 detection and raw interpolation."""
+def calculate_file(path, *, cancelled=None):
+    """Supplied reader/V233 logic; cancellation stops between I/O/numeric stages."""
+    def checkpoint():
+        if cancelled is not None and cancelled.is_set():
+            raise InterruptedError('已取消读取')
     result = dict(file=str(path), name=Path(path).name, T1=None, T2=None, M=None, H=None,
                   error="", warning="", mass_source="", state="计算中", png="")
     try:
+        checkpoint()
         from .cloud_storage import resolve_source
         path = resolve_source(path)
+        checkpoint()
         result.update(file=str(path), name=path.name)
-        stat = path.stat()
-        key = (str(path.absolute()), stat.st_mtime_ns, stat.st_size, stat.st_ino, stat.st_ctime_ns,
-               original.ALGORITHM_VERSION, original.SOURCE_SHA256)
-        if key in _CALC_CACHE:
-            _CALC_CACHE.move_to_end(key)
-            return deepcopy(_CALC_CACHE[key][1])
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
-        text, read_meta = original.load_text_prefer_tajm(str(path), LOGGER)
-        xs, ys, _ = original.extract_xy_from_file(original.parse_lines(text), LOGGER)
-        if len(xs) < 5:
-            raise ValueError(f"有效数据点不足（{len(xs)} 行）")
-        t1, t2, details = original.detect_T2_T1_super_gradient(xs, ys, LOGGER)
-        cache = original.build_curve_cache(xs, ys)
-        h1, h2 = (original.interpolate_curve_height(t, cache) for t in (t1, t2))
-        if not np.isfinite([t1, t2, h1, h2]).all():
-            raise ValueError("算法返回了非有限数值")
-        result.update(T1=t1, T2=t2, H=h2-h1, H1=h1, H2=h2, xs=xs, ys=ys,
-                      sha256=digest, details=details, algorithm=original.ALGORITHM_VERSION,
-                      algorithm_source_sha256=original.SOURCE_SHA256, reader=read_meta.get("used"),
-                      state="匹配 M…")
-        after = path.stat()
-        if (after.st_mtime_ns, after.st_size, after.st_ino, after.st_ctime_ns) != key[1:5]:
-            raise ValueError('数据文件在计算期间发生变化，请重试')
-        vector_bytes = sum(np.asarray(vector).nbytes * (4 if isinstance(vector, list) else 1) for vector in (xs, ys))
-        if vector_bytes <= 32*1024*1024:
-            for old in list(_CALC_CACHE):
-                if old[0] == key[0]: _CALC_CACHE.pop(old, None)
-            _CALC_CACHE[key] = (vector_bytes, deepcopy(result))
-            while len(_CALC_CACHE)>8 or sum(size for size, _ in _CALC_CACHE.values())>64*1024*1024:
-                _CALC_CACHE.popitem(last=False)
+        identity = os.path.normcase(os.path.abspath(path))
+        with _FILE_LOCKS_GUARD:
+            file_lock = _FILE_LOCKS.setdefault(identity, threading.Lock())
+        with file_lock:
+            checkpoint()
+            stat = path.stat()
+            checkpoint()
+            key = (str(path.absolute()), stat.st_mtime_ns, stat.st_size, stat.st_ino, stat.st_ctime_ns,
+                   original.ALGORITHM_VERSION, original.SOURCE_SHA256)
+            with _BATCH_LOCK:
+                checkpoint()
+                if key in _CALC_CACHE:
+                    _CALC_CACHE.move_to_end(key)
+                    return deepcopy(_CALC_CACHE[key][1])
+            # File reads can wait on a network share. They must not hold the
+            # common algorithm/render lock used by other files and reports.
+            raw = path.read_bytes()
+            checkpoint()
+            digest = hashlib.sha256(raw).hexdigest()
+            del raw
+            checkpoint()
+            text, read_meta = original.load_text_prefer_tajm(str(path), LOGGER)
+            checkpoint()
+            xs, ys, _ = original.extract_xy_from_file(original.parse_lines(text), LOGGER)
+            checkpoint()
+            if len(xs) < 5:
+                raise ValueError(f"有效数据点不足（{len(xs)} 行）")
+            with _BATCH_LOCK:
+                checkpoint()
+                t1, t2, details = original.detect_T2_T1_super_gradient(xs, ys, LOGGER)
+                cache = original.build_curve_cache(xs, ys)
+                h1, h2 = (original.interpolate_curve_height(t, cache) for t in (t1, t2))
+            checkpoint()
+            if not np.isfinite([t1, t2, h1, h2]).all():
+                raise ValueError("算法返回了非有限数值")
+            result.update(T1=t1, T2=t2, H=h2-h1, H1=h1, H2=h2, xs=xs, ys=ys,
+                          sha256=digest, details=details, algorithm=original.ALGORITHM_VERSION,
+                          algorithm_source_sha256=original.SOURCE_SHA256, reader=read_meta.get("used"),
+                          state="匹配 M…")
+            after = path.stat()
+            checkpoint()
+            if (after.st_mtime_ns, after.st_size, after.st_ino, after.st_ctime_ns) != key[1:5]:
+                raise ValueError('数据文件在计算期间发生变化，请重试')
+            vector_bytes = sum(np.asarray(vector).nbytes * (4 if isinstance(vector, list) else 1) for vector in (xs, ys))
+            if vector_bytes <= 32*1024*1024:
+                with _BATCH_LOCK:
+                    checkpoint()
+                    for old in list(_CALC_CACHE):
+                        if old[0] == key[0]: _CALC_CACHE.pop(old, None)
+                    _CALC_CACHE[key] = (vector_bytes, deepcopy(result))
+                    while len(_CALC_CACHE)>8 or sum(size for size, _ in _CALC_CACHE.values())>64*1024*1024:
+                        _CALC_CACHE.popitem(last=False)
     except Exception as exc:
-        result.update(error=str(exc), state="读取失败")
+        result.update(error=str(exc), state="已取消" if cancelled is not None and cancelled.is_set() else "读取失败")
     return result
 
 
@@ -115,13 +144,14 @@ def display_value(row, key):
 
 
 def table_text(rows, include_headers=True):
-    """Four tab-separated columns, directly pasteable into Excel/WPS."""
+    """Filename and four values, tab-separated for Excel/WPS."""
     buffer = StringIO(newline="")
     writer = csv.writer(buffer, delimiter="\t", lineterminator="\r\n")
     if include_headers:
-        writer.writerow(HEADERS)
+        writer.writerow(("文件名", *HEADERS))
     for row in rows:
-        writer.writerow([display_value(row, key) for key in KEYS])
+        name = row.get("name") or row.get("file") or ""
+        writer.writerow([Path(name).stem, *(display_value(row, key) for key in KEYS)])
     return buffer.getvalue()
 
 
@@ -131,6 +161,21 @@ def protect_output(path, rows):
         for source in (row.get("file"), row.get("mass_config"), row.get("mass_source", "").split(" [", 1)[0]):
             if source and os.path.normcase(str(Path(source).resolve())) == target:
                 raise ValueError("输出不能覆盖原始数据或称量表")
+
+
+def publish_export(temporary, path, rows):
+    """Unknown weighing sources require a new destination, with no overwrite race."""
+    if any('mass_config' in row and row['mass_config'] is None for row in rows):
+        try:
+            if os.name == 'nt':
+                os.rename(temporary, path)
+            else:
+                os.link(temporary, path)
+                os.unlink(temporary)
+        except FileExistsError:
+            raise ValueError('m 路径尚未确认，请使用新文件名导出，以免覆盖原始数据。') from None
+    else:
+        os.replace(temporary, path)
 
 
 def write_xlsx(rows, path):
@@ -185,7 +230,7 @@ def write_xlsx(rows, path):
     os.close(descriptor)
     try:
         workbook.save(temporary)
-        os.replace(temporary, path)
+        publish_export(temporary, path, rows)
     finally:
         workbook.close()
         Path(temporary).unlink(missing_ok=True)
@@ -208,13 +253,8 @@ def plot_paths(rows, directory):
     return result
 
 
-@serialized
 def write_plot(row, path):
     """V14 cross/temperature/height layout, with the app's white border and credit."""
-    from matplotlib.figure import Figure
-    from matplotlib.backends.backend_agg import FigureCanvasAgg
-    from matplotlib.ticker import MultipleLocator, AutoMinorLocator
-
     from .cloud_storage import resolve_source
     source_file = resolve_source(row["file"])
     if row.get("error") or row.get("T1") is None:
@@ -222,12 +262,35 @@ def write_plot(row, path):
     if "xs" not in row or "ys" not in row:
         row = dict(row)
         source = source_file
+        before = source.stat()
         if hashlib.sha256(source.read_bytes()).hexdigest() != row.get("sha256"):
             raise ValueError("原始文件已变化，请重新导入计算后出图")
         text, _ = original.load_text_prefer_tajm(str(source), LOGGER)
         row["xs"], row["ys"], _ = original.extract_xy_from_file(original.parse_lines(text), LOGGER)
+        after = source.stat()
+        if (after.st_mtime_ns, after.st_size, after.st_ino, after.st_ctime_ns) != (
+                before.st_mtime_ns, before.st_size, before.st_ino, before.st_ctime_ns):
+            raise ValueError("原始文件已变化，请重新导入计算后出图")
     path = Path(path)
     protect_output(path, [row])
+    image = _render_plot(row)
+    descriptor, temporary = tempfile.mkstemp(prefix="tma-plot-", suffix=".png", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, 'wb') as stream:
+            stream.write(image)
+        publish_export(temporary, path, [row])
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+    return str(path.resolve())
+
+
+@serialized
+def _render_plot(row):
+    """Serialize Matplotlib access while keeping file I/O outside its lock."""
+    from matplotlib.figure import Figure
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.ticker import MultipleLocator, AutoMinorLocator
+
     figure = Figure(figsize=(12.8, 7.2), dpi=150, facecolor="white")
     FigureCanvasAgg(figure)
     axis = figure.add_subplot(111)
@@ -255,13 +318,15 @@ def write_plot(row, path):
               transform=axis.transAxes, va="top", fontsize=10)
     figure.text(.97, .025, "Power By ZzzHe", ha="right", va="bottom", fontsize=10)
     figure.subplots_adjust(left=.085, right=.96, top=.9, bottom=.12)
-    descriptor, temporary = tempfile.mkstemp(prefix="tma-plot-", suffix=".png", dir=path.parent)
-    os.close(descriptor)
+    buffer = BytesIO()
     try:
-        figure.savefig(temporary, format="png", dpi=150, facecolor="white", bbox_inches=figure.bbox_inches.padded(.25),
-                       metadata={"Software": "ZzzHe TMA Analysis", "Author": "Power By ZzzHe"})
-        os.replace(temporary, path)
+        from .export_frame import export_frame, frame_color
+        from .sample_identity import recognize_sample
+        with export_frame(figure, frame_color([recognize_sample(row['name'])])):
+            figure.savefig(buffer, format="png", dpi=150, facecolor="white", bbox_inches=figure.bbox_inches.padded(.25),
+                           metadata={"Software": "ZzzHe TMA Analysis", "Author": "Power By ZzzHe"})
+        from .image_provenance import stamp_image
+        return stamp_image(buffer.getvalue())
     finally:
         figure.clear()
-        Path(temporary).unlink(missing_ok=True)
-    return str(path.resolve())
+        buffer.close()

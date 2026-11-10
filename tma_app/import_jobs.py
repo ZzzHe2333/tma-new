@@ -11,23 +11,29 @@ from PySide6.QtCore import QObject, QTimer, Signal, Slot
 _IMPORT_MASS_SLOTS = threading.BoundedSemaphore(2)
 
 
-def run_import(paths, reader, cancelled, events):
+def run_import(paths, reader, cancelled, events, known_paths=None):
     # No QObject or window is captured by this worker. A slow SMB read can
     # return after cancellation without accessing Qt or keeping the app open.
     from .mass_lookup import MassMatch
     datasets, failures, cache = [], [], {}
+    known = None if known_paths is None else {os.path.normcase(os.path.abspath(p)) for p in known_paths}
     try:
         for path in paths:
             if cancelled.is_set(): return
             events.put(('progress', f'正在读取 {Path(path).name}…'))
             try:
                 key=os.path.normcase(os.path.abspath(path))
+                if known is not None and key in known: continue
+                if known is not None: key=os.path.normcase(str(Path(path).resolve()))
+                if cancelled.is_set(): return
+                if known is not None and key in known: continue
                 if key not in cache: cache[key]=reader(path)
                 if cancelled.is_set(): return
                 dataset=deepcopy(cache[key])
                 dataset._import_ticket=uuid.uuid4().hex
                 dataset._mass_match=MassMatch(message='m 正在后台匹配')
                 datasets.append(dataset)
+                if known is not None: known.add(key)
             except Exception as exc:
                 failures.append(f'{Path(path).name}: {exc}')
         if cancelled.is_set(): return
@@ -41,16 +47,17 @@ class ImportWorker(QObject):
     progress=Signal(str)
     finished=Signal()
 
-    def __init__(self,paths,reader,parent=None):
+    def __init__(self,paths,reader,parent=None,*,known_paths=None):
         super().__init__(parent)
         self.paths=list(paths);self.reader=reader
+        self.known_paths=None if known_paths is None else list(known_paths)
         self.cancelled=threading.Event();self.events=queue.Queue()
         self.timer=QTimer(self);self.timer.setInterval(20)
         self.timer.timeout.connect(self.drain)
 
     def start(self):
         self.worker_thread=threading.Thread(target=run_import,
-            args=(self.paths,self.reader,self.cancelled,self.events),name='TMA-import',daemon=True)
+            args=(self.paths,self.reader,self.cancelled,self.events,self.known_paths),name='TMA-import',daemon=True)
         self.timer.start();self.worker_thread.start()
 
     def cancel(self):

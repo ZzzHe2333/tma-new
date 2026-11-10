@@ -2,6 +2,7 @@
 
 
 from PyInstaller.utils.hooks import copy_metadata
+from pathlib import Path
 
 a = Analysis(
     ['run.py'],
@@ -16,6 +17,14 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+# Directory workers must not create matplotlib temporary folders before run.py
+# can dispatch them: forced cancellation cannot run that hook's atexit cleanup.
+# Retain normal GUI cache isolation with a conditional version of that hook.
+if sum(name == 'pyi_rth_mplconfig' for name, _, _ in a.scripts) != 1:
+    raise RuntimeError('Expected exactly one matplotlib runtime hook')
+a.scripts = [(name, str(Path(SPECPATH) / 'tools/runtime_mpl_config.py'), kind)
+             if name == 'pyi_rth_mplconfig' else (name, path, kind)
+             for name, path, kind in a.scripts]
 pyz = PYZ(a.pure)
 
 exe = EXE(

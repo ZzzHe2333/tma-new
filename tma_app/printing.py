@@ -10,7 +10,7 @@ from PySide6.QtPrintSupport import QPrinter, QPrintDialog, QPrintPreviewDialog
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QFormLayout, QComboBox,
     QDoubleSpinBox, QLabel, QDialogButtonBox)
 
-from .path_settings import _settings_data, _save_data
+from .path_settings import _settings_data, _update_data
 
 PAPERS = (('A4', QPageSize.PageSizeId.A4), ('A3', QPageSize.PageSizeId.A3),
           ('A5', QPageSize.PageSizeId.A5), ('Letter', QPageSize.PageSizeId.Letter))
@@ -36,8 +36,7 @@ def settings():
 
 def save_settings(value):
     value = validate(value)
-    data = _settings_data(); data['printing'] = value
-    return _save_data(data)
+    return _update_data(lambda data: data.update(printing=value))
 
 
 def make_printer(value, size, *, title='TMA', output_pdf=None):

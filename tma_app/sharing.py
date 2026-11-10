@@ -7,11 +7,10 @@ from io import BytesIO
 import queue
 from urllib.parse import parse_qs, urlsplit, urlunsplit, urlencode
 
-import httpx
 from PIL import Image, PngImagePlugin
 
 from . import cloud_storage as cloud
-from .path_settings import _settings_data, _save_data
+from .path_settings import _settings_data, _update_data
 
 WECOM_IMAGE_LIMIT = 2 * 1024 * 1024
 
@@ -31,7 +30,10 @@ def webhook_url(value):
 
 
 def settings():
-    value = _settings_data().get('sharing', {})
+    return _parse_settings(_settings_data().get('sharing', {}))
+
+
+def _parse_settings(value):
     if not isinstance(value, dict):
         raise ValueError('分享配置格式无效')
     folder = cloud.remote_path(value.get('folder', '/TMA分享'))
@@ -42,16 +44,23 @@ def settings():
             'overwrite': value.get('overwrite', False) is True, 'webhook': secret}
 
 
-def save_settings(mount_id, folder, overwrite, webhook='', *, clear_webhook=False):
-    previous = settings()
-    value = {'mount_id': str(mount_id), 'folder': cloud.remote_path(folder),
-             'overwrite': bool(overwrite),
-             'webhook': '' if clear_webhook else previous['webhook']}
+def settings_change(mount_id, folder, overwrite, webhook=''):
+    value = {'mount_id': str(mount_id), 'folder': cloud.remote_path(folder), 'overwrite': bool(overwrite)}
     if webhook.strip():
         value['webhook'] = cloud.protect_password(webhook_url(webhook))
-    data = _settings_data()
-    data['sharing'] = value
-    _save_data(data)
+    return value
+
+
+def apply_settings(data, value, clear_webhook=False):
+    previous = _parse_settings(data.get('sharing', {}))
+    data['sharing'] = {**value, 'webhook': value.get('webhook', '' if clear_webhook else previous['webhook'])}
+
+
+def save_settings(mount_id, folder, overwrite, webhook='', *, clear_webhook=False):
+    value = settings_change(mount_id, folder, overwrite, webhook)
+    def update(data):
+        apply_settings(data, value, clear_webhook)
+    _update_data(update)
 
 
 def image_for_wecom(png):
@@ -75,6 +84,7 @@ def image_for_wecom(png):
 
 
 def send_wecom(secret, png):
+    import httpx
     url = webhook_url(cloud.protect_password(secret, decrypt=True))
     raw = image_for_wecom(png)
     payload = {'msgtype': 'image', 'image': {'base64': base64.b64encode(raw).decode('ascii'),
@@ -105,6 +115,7 @@ class ShareDAV(cloud.WebDAV):
         folder = cloud.remote_path(folder)
         if not filename or filename in ('.', '..') or any(c in filename for c in '/\\') or any(ord(c) < 32 for c in filename):
             raise ValueError('图片文件名无效')
+        import httpx
         destination = cloud.remote_path(folder.rstrip('/') + '/' + filename)
         try:
             with self.client() as client:

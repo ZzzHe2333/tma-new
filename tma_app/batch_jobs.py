@@ -22,7 +22,8 @@ def run_batch_job(action, requests, source, directory, cancelled, events):
             try:
                 if action == 'calculate':
                     record_event('batch.file.start', row=key, file=str(request))
-                    value = backend.calculate_file(request)
+                    value = backend.calculate_file(request, cancelled=cancelled)
+                    if cancelled.is_set(): break
                     result(key, value)
                     record_event('batch.file.result', row=key, file=str(request), error=value.get('error', ''))
                     if not value.get('error'): mass_requests.append((key, value))
@@ -34,10 +35,23 @@ def run_batch_job(action, requests, source, directory, cancelled, events):
                     result(key, {'xlsx': backend.write_xlsx(rows, path)})
             except Exception as exc:
                 result(key, {'error': str(exc), 'state': '读取失败'} if action == 'calculate' else {'export_error': str(exc)})
+        from .batch_sources import PendingMassSource
+        source_error = None
+        if mass_requests and not cancelled.is_set() and isinstance(source, PendingMassSource):
+            try:
+                source = source.resolve()
+                if not cancelled.is_set():
+                    for key, _ in mass_requests:
+                        result(key, {'mass_config': source})
+            except Exception as exc:
+                source_error = f'm 路径配置未能读取：{exc}'
+                source = None
         for key, value in mass_requests:
             if cancelled.is_set(): break
             record_event('batch.mass.start', row=key)
             try:
+                if source_error is not None:
+                    raise ValueError(source_error)
                 matched = backend.match_mass(value, source)
             except Exception as exc:
                 matched = dict(M=None, warning=f'M 未匹配：{exc}', state='M 未匹配', mass_source='', mass_config=source)

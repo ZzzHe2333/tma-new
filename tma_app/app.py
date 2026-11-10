@@ -144,7 +144,12 @@ class MainWindow(QMainWindow):
         from .mcp_service import McpService
         self.mcp_service = McpService()
         self._mcp_closed = False
+        self._mcp_settings_job = None
+        self._mcp_start_again = False
+        self._mcp_requested_revision = 0
+        self._startup_services_pending = True
         self.cloud_maintenance = None
+        self._cloud_schedule_pending = False
         self._cloud_usage = {}
         self._cloud_pending_use = set()
         self.cloud_touch_job = None
@@ -155,34 +160,25 @@ class MainWindow(QMainWindow):
         install_user_menu(self)
         from .achievement_ui import install as install_achievements
         install_achievements(self)
-        from .path_settings import refresh_in_background
-        refresh_in_background()
         self.statusBar().showMessage("就绪 · 拖入 TA 数据文件，或点击「导入数据」")
         self.redraw()
-        QTimer.singleShot(0, self.start_saved_mcp)
+        startup_revision = self.mcp_service.control_revision
+        QTimer.singleShot(0, lambda: self.start_saved_mcp(_expected_revision=startup_revision))
         self.cloud_timer = QTimer(self)
         self.cloud_timer.setInterval(60 * 60 * 1000)
         self.cloud_timer.timeout.connect(self.start_cloud_maintenance)
         self.cloud_timer.start()
-        QTimer.singleShot(0, lambda: self.start_cloud_maintenance(schedule=True))
-        QTimer.singleShot(0, lambda: self.notify_usage("登录软件", startup=True))
 
     def start_cloud_maintenance(self, *, schedule=False):
-        if self._mcp_closed or self.cloud_maintenance is not None:
+        if self._mcp_closed:
             return
-        from .path_settings import _settings_data
-        try:
-            if "cloud" not in _settings_data(): return
-        except (OSError, ValueError): return
-        from .cloud_dialog import CloudJob
-        from . import cloud_storage
-        def work(job):
-            result = {"cleanup": cloud_storage.cleanup()}
-            if schedule:
-                from .cloud_schedule import install_daily_task
-                result["schedule"] = install_daily_task()
-            return result
-        self.cloud_maintenance = job = CloudJob(work)
+        self._cloud_schedule_pending |= schedule
+        if self.cloud_maintenance is not None:
+            return
+        from .service_jobs import ServiceJob, maintain_cloud
+        scheduled = self._cloud_schedule_pending
+        self._cloud_schedule_pending = False
+        self.cloud_maintenance = job = ServiceJob(maintain_cloud, (scheduled,), self)
         job.done.connect(self.cloud_maintenance_finished)
         job.start()
 
@@ -190,7 +186,13 @@ class MainWindow(QMainWindow):
         self.start_cloud_maintenance(schedule=True)
 
     def cloud_maintenance_finished(self, result):
+        job = self.sender()
+        if job is not self.cloud_maintenance:
+            return
         self.cloud_maintenance = None
+        job.deleteLater()
+        if self._mcp_closed:
+            return
         if "error" in result:
             self.log.appendPlainText("云缓存清理：" + result["error"])
         else:
@@ -199,6 +201,8 @@ class MainWindow(QMainWindow):
                 self._cloud_schedule_status = status["message"]
                 for dialog in getattr(self, "cloud_dialogs", []):
                     dialog.schedule_status.setText(status["message"])
+        if self._cloud_schedule_pending:
+            self.start_cloud_maintenance(schedule=True)
 
     def show_cloud(self, *, target="import", selected_callback=None):
         from .cloud_dialog import CloudDialog
@@ -233,15 +237,68 @@ class MainWindow(QMainWindow):
         if "error" in value: self.log.appendPlainText("云缓存使用时间未更新：" + value["error"])
         if self._cloud_pending_use and not self._mcp_closed: self.touch_cloud_usage()
 
-    def start_saved_mcp(self):
+    def start_saved_mcp(self, *, _expected_revision=None):
         if self._mcp_closed:
             return
-        from .mcp_service import load_settings
+        if self._mcp_settings_job is not None:
+            if _expected_revision is None:
+                self._mcp_requested_revision = self.mcp_service.control_revision
+                self._mcp_start_again = True
+            return
+        self._mcp_requested_revision = (self.mcp_service.control_revision if _expected_revision is None
+                                        else _expected_revision)
+        from .path_settings import config_path
+        from .service_jobs import ServiceJob, read_configuration
+        self._mcp_settings_job = job = ServiceJob(read_configuration, (config_path(),), self)
+        job.done.connect(self.saved_mcp_ready)
+        job.start()
+
+    def saved_mcp_ready(self, result):
+        job = self.sender()
+        if job is not self._mcp_settings_job:
+            return
+        self._mcp_settings_job = None
+        job.deleteLater()
+        if self._mcp_closed:
+            return
+        allowed = self._mcp_requested_revision == self.mcp_service.control_revision
+        if self._mcp_start_again:
+            self._mcp_start_again = False
+            if allowed:
+                self.start_saved_mcp()
+                return
+        from .path_settings import cached_settings, config_path
+        if job.args[0] != config_path():
+            return
+        if 'error' in result:
+            if allowed:
+                self.mcp_service.state, self.mcp_service.error = 'error', result['error']
+                self.statusBar().showMessage('MCP 未启动：' + result['error'])
+            self._startup_services_pending = False
+            return
+        # A local save may have completed after the background read began.
+        snapshot = cached_settings()
+        data = snapshot[1] if snapshot is not None else result['value']['settings']
+        from .mcp_service import parse_settings
         try:
-            self.mcp_service.start(load_settings())
+            if allowed:
+                options = parse_settings(data.get('mcp', {}))
+                if options['enabled']:
+                    self.mcp_service.start(options)
+                else:
+                    self.mcp_service.stop(wait=False)
         except (ValueError, OSError) as exc:
             self.mcp_service.state, self.mcp_service.error = "error", str(exc)
             self.statusBar().showMessage("MCP 未启动：" + str(exc))
+        if self._startup_services_pending:
+            self._startup_services_pending = False
+            size_controller = self._ui_size_controller
+            if size_controller.request_revision == 0:
+                size_controller.selected = result['value']['size']
+                size_controller.sync()
+            if 'cloud' in data:
+                self.start_cloud_maintenance(schedule=True)
+            self.notify_usage('登录软件', startup=True)
 
     def show_mcp_settings(self):
         from .mcp_dialog import McpDialog
@@ -502,8 +559,13 @@ class MainWindow(QMainWindow):
         record_event('import.request',files=len(paths),synchronous=synchronous,queued=self.worker is not None)
         numeric_paths = [p for p in paths if Path(p).suffix[1:].isdigit()]
         if batch_results and not synchronous and len(numeric_paths) > 1:
-            from .path_settings import batch_popup_enabled
-            self.show_batch_analysis(numeric_paths, popup=batch_popup_enabled())
+            from .path_settings import cached_settings
+            snapshot = cached_settings()
+            ui = snapshot[1].get('ui', {}) if snapshot is not None else {}
+            popup = not isinstance(ui, dict) or ui.get('batch_popup', True) is not False
+            dialog = self.show_batch_analysis(numeric_paths, popup=popup and snapshot is not None)
+            if snapshot is None:
+                self.deferred_preferences().await_popup(dialog)
         if synchronous:
             datasets, failures = [], []
             for path in paths:
@@ -627,20 +689,22 @@ class MainWindow(QMainWindow):
             self.redraw()
             from .achievement_ui import record
             record(self, 'imports', len(datasets))
-            if len(datasets) == 1:
-                ds = datasets[0]
-                self.notify_usage("导入数据", (ds.name or ds.path.stem).strip(),
-                                  with_plot=True, path=str(ds.path))
-            else:
-                paths = [str(ds.path) for ds in datasets]
-                shown = paths[:20]
-                listed = "\n" + "\n".join(shown)
-                if len(paths) > len(shown):
-                    listed += f"\n… 共 {len(paths)} 个文件"
-                self.notify_usage("批量导入", with_plot=True, path=listed, separated=False)
+            if not getattr(self, '_import_batch', False):
+                self.notify_imported(datasets)
         self.statusBar().showMessage(f"已导入 {len(datasets)} 个文件；失败 {len(failures)} 个")
         if failures:
             self.warn("以下文件未能导入：\n" + "\n".join(failures))
+
+    def notify_imported(self, datasets):
+        if len(datasets) == 1:
+            ds = datasets[0]
+            self.notify_usage('导入数据', (ds.name or ds.path.stem).strip(), with_plot=True, path=str(ds.path))
+        elif datasets:
+            paths = [str(ds.path) for ds in datasets]
+            shown = paths[:20]
+            listed = '\n' + '\n'.join(shown)
+            if len(paths) > len(shown): listed += f'\n… 共 {len(paths)} 个文件'
+            self.notify_usage('批量导入', with_plot=True, path=listed, separated=False)
 
     def update_curve_mass(self, curve, result=None, *, source=None):
         metadata = curve.dataset.metadata
@@ -988,6 +1052,7 @@ class MainWindow(QMainWindow):
         if getattr(self, '_import_batch', False): return
         if not hasattr(self, "figure"):
             return
+        self.figure._notification_revision = getattr(self.figure, '_notification_revision', 0) + 1
         self.touch_cloud_usage()
         if hasattr(self, "span"):
             self.span.disconnect_events()
@@ -1684,10 +1749,12 @@ class MainWindow(QMainWindow):
         dialog.setModal(True); dialog.show(); return dialog
 
     def show_notification_settings(self):
-        from .notification_dialog import NotificationSettingsDialog
+        from .notification_dialog import NotificationSettingsDialog, authorize_access
         existing = getattr(self, "notification_settings_dialog", None)
         if existing is not None and existing.isVisible():
             existing.raise_(); return existing
+        if not authorize_access(self):
+            return
         try:
             dialog = NotificationSettingsDialog(self)
         except (ValueError, OSError) as exc:
@@ -1703,15 +1770,48 @@ class MainWindow(QMainWindow):
         Startup carries machine identity and both addresses; later events only
         need the machine code. Public-IP lookup runs on the worker thread.
         """
+        if self._closing: return
         try:
-            from .notifications import notify, settings, supports_image, machine_details, EVENT_KEYS
+            from .path_settings import cached_settings, config_path
+            pending = getattr(self, '_deferred_preferences', None)
+            if cached_settings() is None or (pending is not None and pending.notices):
+                from .deferred_preferences import Notice
+                notice = Notice(str(event or ''), str(batch or ''), str(path or ''), tuple((str(k), str(v or '')) for k, v in (fields or [])),
+                                separated, startup, with_plot, self.notification_plot_context() if with_plot else None,
+                                str(config_path()))
+                self.deferred_preferences().enqueue(notice)
+                return
+            self.send_usage_notice(event, batch, with_plot=with_plot, startup=startup, path=path,
+                                   fields=fields, separated=separated)
+        except Exception:
+            pass
+
+    def deferred_preferences(self):
+        if getattr(self, '_deferred_preferences', None) is None:
+            from .deferred_preferences import DeferredPreferences
+            self._deferred_preferences = DeferredPreferences(self)
+        return self._deferred_preferences
+
+    def send_usage_notice(self, event, batch='', *, with_plot=False, startup=False, path='', fields=None, separated=None):
+        from .deferred_preferences import Notice
+        plot = None
+        deferred = isinstance(event, Notice)
+        if deferred:
+            notice = event
+            event, batch, path, fields = notice.event, notice.batch, notice.path, notice.fields
+            with_plot, startup, separated, plot = notice.with_plot, notice.startup, notice.separated, notice.plot
+        try:
+            from .notifications import notify, runtime_settings as settings, supports_image, machine_details, EVENT_KEYS
             config = settings()
             if not config.get('enabled') or not config.get('target'):return
             event_key = EVENT_KEYS.get(str(event).strip())
             if event_key is not None and not config.get('events',{}).get(event_key,True):return
             png = None
             if with_plot and config.get('attach_image') and supports_image(config.get('provider')):
-                png = self._current_plot_png()
+                if deferred:
+                    if plot is not None: png = self.notification_png(plot)
+                else:
+                    png = self._current_plot_png()
             extra = list(fields or [])
 
             def details():
@@ -1725,12 +1825,54 @@ class MainWindow(QMainWindow):
 
     def _current_plot_png(self):
         """Render the active plot once; only called when image notifications are on."""
+        return self.notification_png()
+
+    def notification_plot_context(self):
+        import weakref
+        figure = getattr(self, 'figure', None)
+        if figure is None: return None
+        doc = self.active_document() if hasattr(self, 'active_document') else None
+        options = self.plot_options.get(doc.key, {}) if doc is not None else {}
+        return (weakref.ref(figure), getattr(figure, '_notification_revision', 0),
+                weakref.ref(doc) if doc is not None else None,
+                {**{key: options.get(key, '') for key in ('export_title', 'export_align')},
+                 '_sample_frame_color': self.export_frame_color(),
+                 '_sample_hidden': getattr(doc, 'sample_hidden', False),
+                 '_source_mode': getattr(doc, 'source_mode', 0)})
+
+    def export_frame_color(self):
+        from .export_frame import dataset_frame_color
+        return dataset_frame_color([curve.dataset for curve in self.visible_curves()])
+
+    def notification_png(self, context=None):
+        return self.plot_png(context)
+
+    def plot_png(self, context=None):
+        """Render export-quality PNG bytes without resolving sources or writing files."""
         try:
-            import tempfile
-            with tempfile.TemporaryDirectory(prefix='ZzzHeTMA-notify-') as directory:
-                path = Path(directory) / 'plot.png'
-                self.write_plot(path)
-                return path.read_bytes()
+            from io import BytesIO
+            from contextlib import nullcontext
+            figure = self.figure
+            from .export_frame import export_frame
+            color = self.export_frame_color()
+            heading = self.output_heading() if hasattr(self, 'output_heading') else nullcontext()
+            if context is not None:
+                reference, revision, document, options = context
+                color = options.get('_sample_frame_color', color)
+                figure = reference()
+                if figure is None or getattr(figure, '_notification_revision', 0) != revision: return None
+                if document is not None:
+                    doc = document()
+                    from shiboken6 import isValid
+                    if doc is None or not isValid(doc) or self.documents.get(doc.key) is not doc: return None
+                heading = self.output_heading(figure=figure, options=options) if hasattr(self, 'output_heading') else nullcontext()
+            with heading, export_frame(figure, color):
+                buffer = BytesIO()
+                figure.savefig(buffer, format='png', dpi=300, facecolor='white',
+                               bbox_inches=figure.bbox_inches.padded(.25),
+                               metadata={'Author': 'Power By ZzzHe', 'Software': 'Power By ZzzHe'})
+                from .image_provenance import stamp_image
+                return stamp_image(buffer.getvalue())
         except Exception:
             return None
 
@@ -1743,8 +1885,19 @@ class MainWindow(QMainWindow):
         options = {"metadata": metadata[suffix]} if suffix in metadata else {}
         # Expand the full page instead of using a tight crop, so headers and
         # annotations keep their positions with an extra white border outside.
-        self.figure.savefig(path, dpi=300, facecolor="white",
-                            bbox_inches=self.figure.bbox_inches.padded(0.25), **options)
+        from .export_frame import export_frame
+        with export_frame(self.figure, self.export_frame_color()):
+            if suffix in ('.png', '.tif', '.tiff'):
+                from io import BytesIO
+                from .image_provenance import stamp_image
+                buffer = BytesIO()
+                fmt = 'PNG' if suffix == '.png' else 'TIFF'
+                self.figure.savefig(buffer, format=fmt.lower(), dpi=300, facecolor="white",
+                                    bbox_inches=self.figure.bbox_inches.padded(0.25), **options)
+                Path(path).write_bytes(stamp_image(buffer.getvalue(), fmt))
+            else:
+                self.figure.savefig(path, dpi=300, facecolor="white",
+                                    bbox_inches=self.figure.bbox_inches.padded(0.25), **options)
 
     def write_data(self, path, curve):
         self.protect_output(path, str(path) + ".meta.json")
@@ -1833,9 +1986,16 @@ class MainWindow(QMainWindow):
         if self._closing:
             event.accept(); return
         self._closing = True
+        if getattr(self, '_deferred_preferences', None) is not None:
+            self._deferred_preferences.clear()
         achievements = getattr(self, 'achievement_controller', None)
         if achievements is not None: achievements.detach(self)
         self._mcp_closed = True
+        self._startup_services_pending = False
+        self._mcp_start_again = False
+        if self._mcp_settings_job is not None:
+            self._mcp_settings_job.cancel(); self._mcp_settings_job.deleteLater()
+            self._mcp_settings_job = None
         self._pending_import_paths = []
         if self.worker is not None:
             self.worker.cancel();self.worker.deleteLater();self.worker=None
@@ -1852,6 +2012,10 @@ class MainWindow(QMainWindow):
         for job in (self.cloud_maintenance,self.cloud_touch_job):
             if job is not None:job.cancelled.set()
         for dialog in self.findChildren(QDialog):
+            stop_sharing=getattr(dialog,'shutdown_sharing',None)
+            if stop_sharing is not None:stop_sharing()
+            stop_file_scan=getattr(dialog,'shutdown_file_scan',None)
+            if stop_file_scan is not None:stop_file_scan()
             stop_calculation=getattr(dialog,'shutdown_calculation',None)
             if stop_calculation is not None:stop_calculation()
             stop_test=getattr(dialog,'stop_mass_test',None)
@@ -1889,8 +2053,17 @@ def main():
     ui_menu_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-ui-menu"
     ui_size_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-ui-size"
     cache_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-cache"
+    notification_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-notifications"
+    directory_scan_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-directory-scan"
+    startup_services_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-startup-services"
+    cold_import_verify = len(sys.argv) > 4 and sys.argv[1] == "--verify-cold-import"
+    config_transaction_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-config-transactions"
+    batch_admission_verify = len(sys.argv) > 4 and sys.argv[1] == "--verify-batch-admission"
+    diagnostics_verify = len(sys.argv) > 4 and sys.argv[1] == "--verify-diagnostics-io"
+    overlay_import_verify = len(sys.argv) > 4 and sys.argv[1] == "--verify-overlay-import"
     mass_settings_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-mass-settings"
     sharing_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-sharing"
+    sharing_settings_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-sharing-settings"
     batch_live_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-batch-live"
     batch_stress_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-batch-stress"
     mass_normalization_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-mass-normalization"
@@ -1900,7 +2073,7 @@ def main():
     batch_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-batch"
     report_verify = len(sys.argv) > 2 and sys.argv[1] == "--verify-report"
     verify_mode = len(sys.argv) > 2 and sys.argv[1] in ("--verify-overlay-user", "--verify-user-state", "--verify-launch", "--verify-ui-menu", "--verify-ui-size", "--verify-cache", "--verify-mass-settings", "--verify-sharing", "--verify-batch", "--verify-batch-stress", "--verify-batch-live", "--verify-report", "--verify-mcp", "--verify-cloud", "--verify-recommendation", "--verify-mass-normalization")
-    verify_mode = verify_mode or mass_gui_verify or mass_continuation_verify or settings_storage_verify or printing_verify or edited_area_verify or help_verify or close_verify or picker_verify or achievement_verify or responsiveness_verify or performance_verify or core_verify or calculation_verify or undo_verify or import_continuation_verify or document_release_verify
+    verify_mode = verify_mode or sharing_settings_verify or directory_scan_verify or cold_import_verify or startup_services_verify or diagnostics_verify or batch_admission_verify or config_transaction_verify or overlay_import_verify or notification_verify or mass_gui_verify or mass_continuation_verify or settings_storage_verify or printing_verify or edited_area_verify or help_verify or close_verify or picker_verify or achievement_verify or responsiveness_verify or performance_verify or core_verify or calculation_verify or undo_verify or import_continuation_verify or document_release_verify
     if verify_mode:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     application = QApplication(sys.argv)
@@ -1922,6 +2095,42 @@ def main():
         window.showMaximized()
     else:
         window.show()
+    if directory_scan_verify:
+        from .directory_scan_qa import verify
+        verify(window, Path(sys.argv[2]))
+        return
+    if sharing_settings_verify:
+        from .sharing_settings_qa import verify
+        verify(window, Path(sys.argv[2]))
+        return
+    if cold_import_verify:
+        from .cold_import_qa import verify
+        verify(window, Path(sys.argv[2]), [Path(arg).absolute() for arg in sys.argv[3:]])
+        return
+    if startup_services_verify:
+        from .startup_services_qa import verify
+        verify(window, Path(sys.argv[2]))
+        return
+    if diagnostics_verify:
+        from .diagnostics_qa import verify
+        verify(window, Path(sys.argv[2]), [Path(arg).absolute() for arg in sys.argv[3:]])
+        return
+    if batch_admission_verify:
+        from .batch_admission_qa import verify
+        verify(window, Path(sys.argv[2]), [Path(arg).absolute() for arg in sys.argv[3:]])
+        return
+    if config_transaction_verify:
+        from .config_transaction_qa import verify
+        verify(window, Path(sys.argv[2]))
+        return
+    if overlay_import_verify:
+        from .overlay_import_qa import verify
+        verify(window, Path(sys.argv[2]), [Path(arg).absolute() for arg in sys.argv[3:]])
+        return
+    if notification_verify:
+        from .notification_qa import verify
+        verify(window, Path(sys.argv[2]))
+        return
     if mass_gui_verify:
         from .mass_gui_qa import verify
         verify(window,Path(sys.argv[2]),[Path(arg).absolute() for arg in sys.argv[3:]])

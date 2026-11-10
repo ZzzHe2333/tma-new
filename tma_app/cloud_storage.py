@@ -21,7 +21,7 @@ from urllib.parse import quote, unquote, urljoin, urlsplit, urlunsplit
 
 from defusedxml import ElementTree as ET
 
-from .path_settings import config_path, _settings_data, _save_data
+from .path_settings import config_path, _settings_data, _update_data
 
 DAV = "{DAV:}"
 _DOWNLOAD_LOCK = threading.RLock()
@@ -36,7 +36,12 @@ def cache_root():
 
 
 def settings():
-    value = _settings_data().get("cloud", {})
+    return _parse_settings(_settings_data().get("cloud", {}))
+
+
+def _parse_settings(value):
+    if not isinstance(value, dict):
+        raise ValueError("云盘配置格式无效")
     hours = value.get("retention_hours", 72)
     if type(hours) not in (int, float) or not 1 <= hours <= 87600:
         raise ValueError("云文件保留时间须为 1–87600 小时")
@@ -57,9 +62,9 @@ def save_settings(mounts, retention_hours=72):
         validate_mount(mount)
     if len({mount["id"] for mount in mounts}) != len(mounts):
         raise ValueError("云盘标识重复")
-    data = _settings_data()
-    data["cloud"] = {"retention_hours": retention_hours, "mounts": mounts}
-    _save_data(data)
+    from copy import deepcopy
+    value = {"retention_hours": retention_hours, "mounts": deepcopy(mounts)}
+    _update_data(lambda data: data.update(cloud=value))
 
 
 def normalize_url(value):

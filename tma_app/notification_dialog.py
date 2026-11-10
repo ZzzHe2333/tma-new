@@ -15,6 +15,19 @@ from . import cloud_storage as cloud
 from . import notifications
 
 
+def authorize_access(owner):
+    """Authenticate before constructing the settings form or reading its data."""
+    from . import notify_guard
+    text, ok = QInputDialog.getText(owner, '打开通知设置', '请输入密码：',
+                                    QLineEdit.EchoMode.Password)
+    if not ok:
+        return False
+    allowed, message = notify_guard.verify(text)
+    if not allowed:
+        owner.warn(message or '密码不正确，无法打开通知设置。')
+    return allowed
+
+
 class NotificationSettingsDialog(QDialog):
     def __init__(self, owner):
         super().__init__(owner)
@@ -105,7 +118,7 @@ class NotificationSettingsDialog(QDialog):
         layout.addWidget(events)
 
         preview = QLabel(
-            '登录软件：\n日期：2026-10-27\n时间：11:22:55\n行为：登录软件\n内网：192.168.0.191\n公网：27.152.26.88\n'
+            '通知格式示例（以下并非本机信息）：\n登录软件：\n日期：2026-10-27\n时间：11:22:55\n行为：登录软件\n内网：192.168.0.191\n公网：27.152.26.88\n'
             '名字：电脑名\n机器码：123E-45F6-7894-4567\n\n'
             '导入 / 批量导入 / 批量处理 / 复制到excal / 批量出图：行为 + 路径（批量时一行一个）+ 机器码\n'
             '单样品报告：行为 + TMA源 / 粒径源 / 粒径名 / 数据 / 样品报告名字 / 保存路径 + 机器码')
@@ -235,8 +248,6 @@ class NotificationSettingsDialog(QDialog):
         if self.busy:
             self.feedback.setText('正在发送测试通知，请等待完成后保存。')
             return
-        if not self.confirm_password():
-            return
         provider = self.current_provider()
         try:
             notifications.save_settings(
@@ -256,20 +267,6 @@ class NotificationSettingsDialog(QDialog):
             self.feedback.setText(str(exc))
             return
         super().accept()
-
-    def confirm_password(self):
-        """修改通知需要密码：本地只存加盐 scrypt 摘要，错误次数过多会退避。"""
-        from . import notify_guard
-        text, ok = QInputDialog.getText(self, '修改通知设置', '请输入密码：',
-                                        QLineEdit.EchoMode.Password)
-        if not ok:
-            self.feedback.setText('已取消：未输入密码，通知设置未保存。')
-            return False
-        allowed, message = notify_guard.verify(text)
-        if not allowed:
-            self.feedback.setText(message or '密码不正确，通知设置未保存。')
-            return False
-        return True
 
     def reject(self):
         if self.busy:

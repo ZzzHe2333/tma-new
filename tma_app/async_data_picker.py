@@ -10,32 +10,11 @@ import time
 from PySide6.QtCore import QDir,QIdentityProxyModel,Qt,QTimer,QAbstractTableModel,QModelIndex,QItemSelection,QItemSelectionModel
 from PySide6.QtWidgets import (QDialog,QFileDialog,QTreeView,QVBoxLayout,QHBoxLayout,
     QLabel,QLineEdit,QPushButton,QComboBox,QAbstractItemView,QDialogButtonBox)
+from .directory_scan import scan_directory, LatestScanWorker
 
 PATH_ROLE=int(Qt.ItemDataRole.UserRole)+1
 DIR_ROLE=PATH_ROLE+1
 SORT_ROLE=PATH_ROLE+2
-_slots=threading.BoundedSemaphore(4)
-
-
-def scan_directory(directory,cancelled,events):
-    # Windows shell icon/drive providers and QFileSystemModel can make GUI
-    # calls to unavailable mapped drives. Only this daemon touches a directory.
-    if not _slots.acquire(blocking=False):
-        events.put(('error','仍有目录在读取，请稍候后刷新，或使用本地路径。'));return
-    try:
-        rows=[]
-        with os.scandir(directory) as entries:
-            for entry in entries:
-                if cancelled.is_set():return
-                try:
-                    is_dir=entry.is_dir(follow_symlinks=False)
-                    info=entry.stat(follow_symlinks=False)
-                    rows.append((entry.name,entry.path,is_dir,info.st_size,info.st_mtime))
-                except OSError:continue
-        if not cancelled.is_set():events.put(('rows',rows))
-    except OSError as exc:
-        if not cancelled.is_set():events.put(('error',f'目录未能读取：{exc}'))
-    finally:_slots.release()
 
 
 class EntryInfo:
@@ -61,7 +40,8 @@ class DirectoryModel(QAbstractTableModel):
             if col==0:return name
             if col==1:return '' if is_dir else f'{size/1024:,.1f} KB'
             if col==2:return '文件夹' if is_dir else (Path(name).suffix or '文件')
-            return time.strftime('%Y/%m/%d %H:%M',time.localtime(stamp))
+            try:return time.strftime('%Y/%m/%d %H:%M',time.localtime(stamp))
+            except (OSError, ValueError, OverflowError):return ''
     def replace(self,rows):self.beginResetModel();self.rows=rows;self.endResetModel()
     def sort(self,column,order=Qt.SortOrder.AscendingOrder):
         self.owner._column,self.owner._descending=column,order==Qt.SortOrder.DescendingOrder
@@ -140,6 +120,7 @@ class DataFileDialog(QDialog):
         self._navigation=0;self._view_token=0;self._column=3;self._descending=True
         self._cancelled=threading.Event();self._events=queue.Queue()
         self._view_worker=LatestViewWorker()
+        self._scan_worker=LatestScanWorker(scan_directory)
         layout=QVBoxLayout(self);layout.setContentsMargins(14,14,14,14)
         top=QHBoxLayout();self.back=QPushButton('返回');self.back.clicked.connect(self.go_back);top.addWidget(self.back)
         up=QPushButton('上一级');up.clicked.connect(self.go_up);top.addWidget(up)
@@ -184,7 +165,7 @@ class DataFileDialog(QDialog):
         self.model.replace([]);self._loading=True;self._started=time.monotonic()
         self.feedback.setText('正在后台读取目录… 可随时取消或切换文件夹。');self.back.setEnabled(bool(self._history))
         self.buttons.button(QDialogButtonBox.StandardButton.Open).setEnabled(False)
-        threading.Thread(target=scan_directory,args=(directory,self._cancelled,self._events),name='TMA-file-list',daemon=True).start()
+        self._scan_worker.submit((directory,self._cancelled,self._events))
         self.poll.start();self.sort_by_time()
 
     def directory(self):return QDir(self._directory)
@@ -246,6 +227,7 @@ class DataFileDialog(QDialog):
         if not self._selected:self.feedback.setText('请先选择文件，或等待目录读取完成后输入文件名。');return
         if not self.multiple:self._selected=self._selected[:1]
         self.stop();super().accept()
-    def stop(self):self._cancelled.set();self._view_worker.close();self.poll.stop();self.sort_timer.stop()
+    def stop(self):self._cancelled.set();self._scan_worker.close();self._view_worker.close();self.poll.stop();self.sort_timer.stop()
+    def shutdown_file_scan(self):self.stop()
     def reject(self):self.stop();super().reject()
     def closeEvent(self,event):self.stop();super().closeEvent(event)

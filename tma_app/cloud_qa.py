@@ -29,6 +29,9 @@ def fixture_server(files=None):
             return True
 
         def do_PROPFIND(self):
+            # Consume the request body before closing an HTTP/1.0 connection;
+            # unread bytes can make Windows reset it before the reply arrives.
+            self.rfile.read(int(self.headers.get('Content-Length', '0')))
             if not self.authorized(): return
             directory = unquote(urlsplit(self.path).path).rstrip("/") + "/"
             if directory not in self.server.directories:

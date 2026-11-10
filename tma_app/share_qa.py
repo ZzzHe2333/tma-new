@@ -8,6 +8,8 @@ from io import BytesIO
 import json
 import os
 import threading
+import tempfile
+import time
 import traceback
 from urllib.parse import unquote
 import uuid
@@ -15,10 +17,93 @@ import uuid
 import httpx
 from PIL import Image
 from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QTimer, Qt
 
 from . import __version__, cloud_storage as cloud, sharing
 from .batch_qa import wait_until
 from .reader import read_dataset
+
+
+def _verify_preparation(window, expected, report):
+    from . import path_settings
+    from .classic import ClassicMainWindow
+    read, protect, temporary, deliver = (path_settings._read_settings, window.protect_output,
+        tempfile.TemporaryDirectory, sharing.share_job)
+    entered, release = threading.Event(), threading.Event()
+    ticks, reads, deliveries = [], [], []
+    timer = QTimer(); timer.timeout.connect(lambda: ticks.append(1)); timer.start(5)
+    dialog = fresh = None
+    def forbidden(*args, **kwargs): raise AssertionError('Share attempted temporary/source I/O')
+    def blocked(*args, **kwargs):
+        assert threading.current_thread() is not threading.main_thread()
+        reads.append(1); entered.set(); assert release.wait(15)
+        return read(*args, **kwargs)
+    try:
+        wait_until(lambda: not window._startup_services_pending)
+        window.protect_output = forbidden; tempfile.TemporaryDirectory = forbidden
+        path_settings._read_settings = blocked
+        started = time.perf_counter(); dialog = window.show_share()
+        report['share_window_with_blocked_config_seconds'] = time.perf_counter() - started
+        assert report['share_window_with_blocked_config_seconds'] < .5
+        wait_until(entered.is_set); wait_until(lambda: bool(dialog.png))
+        from io import BytesIO
+        from PIL import Image
+        from .image_provenance import verify_image
+        with Image.open(BytesIO(dialog.png)) as actual, Image.open(BytesIO(expected)) as reference:
+            assert actual.size == reference.size
+            assert actual.convert('RGBA').tobytes() == reference.convert('RGBA').tobytes()
+        assert verify_image(BytesIO(dialog.png))['status'] == 'verified'
+        baseline = len(ticks); wait_until(lambda: len(ticks) >= baseline + 8)
+        assert not dialog.send_button.isEnabled()
+        worker = dialog._configuration_job.thread
+        started = time.perf_counter(); dialog.close()
+        assert time.perf_counter() - started < .5 and not dialog.isVisible()
+        release.set(); wait_until(lambda: not worker.is_alive())
+        QApplication.processEvents()
+        assert not dialog.isVisible() and not dialog.send_button.isEnabled()
+        report['checks'].append('share_snapshot_matches_export_without_source_resolution_or_temp_files_blocked_config_keeps_gui_alive_close_ignores_late_load')
+
+        path_settings._read_settings = read
+        tempfile.TemporaryDirectory = temporary; window.protect_output = protect
+        sharing.share_job = lambda *args: deliveries.append(args)
+        dialog = window.show_share(); wait_until(dialog.send_button.isEnabled)
+        entered.clear(); release.clear(); reads.clear()
+        path_settings._read_settings = blocked
+        started = time.perf_counter(); dialog.send(); dialog.send()
+        report['enqueue_share_while_config_blocked_seconds'] = time.perf_counter() - started
+        assert report['enqueue_share_while_config_blocked_seconds'] < .5
+        wait_until(entered.is_set)
+        baseline = len(ticks); wait_until(lambda: len(ticks) >= baseline + 8)
+        assert dialog.preparing and dialog.busy and len(reads) == 1 and not deliveries
+        worker = dialog._preparation_job.thread
+        dialog.close(); assert not dialog.isVisible()
+        release.set(); wait_until(lambda: not worker.is_alive())
+        QApplication.processEvents(); assert not deliveries
+        report['checks'].append('send_configuration_check_is_background_duplicate_click_coalesces_cancelled_preparation_never_sends')
+
+        path_settings._read_settings = read
+        fresh = ClassicMainWindow(); fresh.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
+        fresh.start_cloud_maintenance = lambda **kwargs: None
+        fresh.show(); wait_until(lambda: not fresh._startup_services_pending)
+        fresh.finish_import([c.dataset for c in window.visible_curves()], [])
+        dialog = fresh.show_share(); wait_until(dialog.send_button.isEnabled)
+        entered.clear(); release.clear(); reads.clear()
+        path_settings._read_settings = blocked
+        dialog.send(); wait_until(entered.is_set)
+        worker = dialog._preparation_job.thread
+        started = time.perf_counter(); fresh.close()
+        report['close_during_share_preparation_seconds'] = time.perf_counter() - started
+        assert report['close_during_share_preparation_seconds'] < .5 and not dialog.isVisible()
+        release.set(); wait_until(lambda: not worker.is_alive())
+        QApplication.processEvents(); assert not deliveries
+        report['checks'].append('closing_main_window_cancels_share_preparation_without_late_network_send')
+        report['share_preparation_gui_heartbeats'] = len(ticks)
+    finally:
+        release.set(); timer.stop()
+        path_settings._read_settings = read; window.protect_output = protect
+        tempfile.TemporaryDirectory, sharing.share_job = temporary, deliver
+        if dialog is not None: dialog.close()
+        if fresh is not None: fresh.close()
 
 
 def verify(window, output, paths):
@@ -26,6 +111,8 @@ def verify(window, output, paths):
     report = {'version': __version__, 'status': 'failed', 'checks': []}
     original_appdata = os.environ.get('LOCALAPPDATA')
     original_client = httpx.Client
+    original_maintenance = window.start_cloud_maintenance
+    window.start_cloud_maintenance = lambda **kwargs: None
     server = None
     os.environ['LOCALAPPDATA'] = str(output.parent / ('sharing-fixture-' + uuid.uuid4().hex[:8]))
     try:
@@ -64,8 +151,9 @@ def verify(window, output, paths):
         document = window.active_document()
         image_path = output.with_suffix('.export.png')
         window.write_plot(image_path)
+        _verify_preparation(window, image_path.read_bytes(), report)
         window.grab().save(str(output.with_suffix('.main.png')))
-        dialog = window.show_share(); wait_until(lambda: bool(dialog.png))
+        dialog = window.show_share(); wait_until(dialog.send_button.isEnabled)
         assert dialog.filename.text() == window.default_plot_filename()
         assert dialog.dav.isChecked() and dialog.wecom.isChecked()
         with Image.open(image_path) as normal, Image.open(BytesIO(dialog.png)) as snapshot:
@@ -89,7 +177,7 @@ def verify(window, output, paths):
                              'background_two_channel_send_keeps_active_document']
         dialog.grab().save(str(output.with_suffix('.sent.png')))
         dialog.close()
-        settings_dialog = window.show_sharing_settings(); QApplication.processEvents()
+        settings_dialog = window.show_sharing_settings(); wait_until(settings_dialog.save_button.isEnabled)
         settings_dialog.grab().save(str(output.with_suffix('.settings.png')))
         settings_dialog.reject()
         assert before == {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}
@@ -99,6 +187,7 @@ def verify(window, output, paths):
         report['error'] = traceback.format_exc()
     finally:
         httpx.Client = original_client
+        window.start_cloud_maintenance = original_maintenance
         if server is not None:
             server.shutdown(); server.server_close(); thread.join(timeout=3)
         if original_appdata is None: os.environ.pop('LOCALAPPDATA', None)

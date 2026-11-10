@@ -13,7 +13,7 @@ import threading
 import time
 from weakref import WeakValueDictionary
 
-from .path_settings import config_path, _settings_data, _save_data
+from .path_settings import config_path, _settings_data, _update_data
 
 MISS_RECHECK_SECONDS = 300
 FAILURE_RETRY_SECONDS = 60
@@ -32,7 +32,10 @@ def refresh_hours():
 def save_refresh_hours(value):
     if type(value) not in (int, float) or not math.isfinite(value) or not 1 <= value <= 720:
         raise ValueError('m 缓存有效期须为 1–720 小时')
-    data = _settings_data(); data['mass_cache'] = {'refresh_hours': float(value)}; _save_data(data)
+    def update(data):
+        previous = data.get('mass_cache', {})
+        data['mass_cache'] = {**(previous if isinstance(previous, dict) else {}), 'refresh_hours': float(value)}
+    _update_data(update)
 
 
 def folder(): return config_path().parent / 'cache' / 'mass'

@@ -270,6 +270,8 @@ class ClassicMainWindow(MainWindow):
         settings_menu.addAction("通知…", self.show_notification_settings).setObjectName("NotificationSettings1")
         from .ui_size import add_size_menu
         self.ui_size_menu = add_size_menu(self, settings_menu)
+        from .color_theme import add_menu as add_color_menu
+        add_color_menu(self, settings_menu)
 
         def append(parent, item):
             caption, name = item["caption"], item["name"]
@@ -318,6 +320,7 @@ class ClassicMainWindow(MainWindow):
                 self.window_menu = parent
             if menu["caption"]=="工具":
                 parent.addSeparator();parent.addAction("通用信号处理…",self.show_processing)
+                parent.addAction("图片鉴定…", self.identify_exported_image)
             if menu["caption"] == "文件":
                 action = QAction("批量处理 T1 / T2 / M / H…", self)
                 action.setObjectName("BatchAnalysis1")
@@ -924,6 +927,8 @@ class ClassicMainWindow(MainWindow):
             module = (field("Module").split() or ["TMA"])[0]
             source = str(ds.path)
             self.figure.text(.996, 1, f"{module} 文件: {source}", ha="right", va="top", fontsize=22*scale, fontfamily=PLOT_FONTS, color="black", parse_math=False, gid="tma-source")
+        from .header_privacy import apply_header_privacy
+        apply_header_privacy(self.figure, getattr(active, 'sample_hidden', False), getattr(active, 'source_mode', 0))
         self.figure.text(.996, .017, "Power By ZzzHe", ha="right", fontsize=20*scale, fontfamily="Times New Roman")
         if self._is_overlay(active.key): active.setWindowTitle(options["window_name"] or self._overlay_title(active.key))
         for curve, x, y in self._plot_artists:
@@ -978,6 +983,8 @@ class ClassicMainWindow(MainWindow):
             self._plot_resize_timer.start(60)
 
     def result_press(self, event):
+        if self.header_privacy_click(event):
+            return
         if (getattr(event, "canvas", self.canvas) is self.canvas and event.button == 1 and self.current_measurement() is None
                 and not self.range_enabled.isChecked() and not self.toolbar.mode and 0 in self.axes):
             legend = self.axes[0].get_legend()
@@ -1020,6 +1027,30 @@ class ClassicMainWindow(MainWindow):
                 self.touch()
             return
         MainWindow.result_release(self, event)
+
+    def header_privacy_click(self, event):
+        if event.button != 1 or event.canvas is not self.canvas:
+            return False
+        doc = self.active_document()
+        if not isinstance(doc, PlotDocument) or event.x is None or event.y is None:
+            return False
+        renderer = self.canvas.get_renderer()
+        for text in self.figure.texts:
+            if text.get_gid() not in ('tma-header', 'tma-source') or not text.get_visible():
+                continue
+            from .header_privacy import privacy_bounds
+            if not privacy_bounds(text, renderer).padded(5).contains(event.x, event.y):
+                continue
+            if text.get_gid() == 'tma-header':
+                doc.sample_hidden = not getattr(doc, 'sample_hidden', False)
+            else:
+                doc.source_mode = (getattr(doc, 'source_mode', 0) + 1) % 3
+            from .header_privacy import apply_header_privacy
+            apply_header_privacy(self.figure, getattr(doc, 'sample_hidden', False), getattr(doc, 'source_mode', 0))
+            self.figure._notification_revision = getattr(self.figure, '_notification_revision', 0) + 1
+            self.canvas.draw_idle()
+            return True
+        return False
 
     def edit_legend_options(self):
         doc = self.active_document()
@@ -1306,6 +1337,7 @@ class ClassicMainWindow(MainWindow):
             self._import_batch = False
         if datasets:
             self._show_document(datasets[-1].document_key)
+            self.notify_imported(datasets)
         else: self.redraw()
 
     def _finish_import_batch(self, datasets, failures):
@@ -1875,6 +1907,16 @@ class ClassicMainWindow(MainWindow):
         if old and old.isVisible():old.raise_();return old
         dialog=FileInfoDialog(self);self._register_temporary_dialog('file_information',dialog);dialog.show();return dialog
 
+    def identify_exported_image(self):
+        path, _ = QFileDialog.getOpenFileName(self, '图片鉴定', '', '图片 (*.png *.tif *.tiff *.jpg *.jpeg);;所有文件 (*)')
+        if not path: return
+        from .image_verification_dialog import ImageVerificationDialog
+        dialog = ImageVerificationDialog(self)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.show()
+        dialog.start(path)
+        return dialog
+
     def show_help_topics(self, topic='start'):
         from .help_topics import show
         return show(self, topic if isinstance(topic,str) else 'start')
@@ -2124,24 +2166,34 @@ class ClassicMainWindow(MainWindow):
             QApplication.clipboard().setPixmap(self.output_pixmap())
 
     @contextmanager
-    def output_heading(self):
+    def output_heading(self, *, figure=None, options=None):
         doc = self.active_document()
-        options = self.plot_options.get(doc.key, {}) if isinstance(doc, PlotDocument) else {}
+        options = options if options is not None else self.plot_options.get(doc.key, {}) if isinstance(doc, PlotDocument) else {}
+        axes = self.axes.values() if figure is None else figure.axes
+        figure = self.figure if figure is None else figure
         title = options.get("export_title", "")
-        originals = [(text, text.get_text(), text.get_visible(), text.get_position(), text.get_ha(), text.get_fontsize()) for text in self.figure.texts if text.get_gid() in ("tma-header", "tma-source")]
+        originals = [(text, text.get_text(), text.get_visible(), text.get_position(), text.get_ha(), text.get_fontsize()) for text in figure.texts if text.get_gid() in ("tma-header", "tma-source")]
         added = None
         try:
             if title:
                 header = next((item[0] for item in originals if item[0].get_gid() == "tma-header"), None)
-                if header is None: added = self.figure.text(.004, 1, title, ha="left", va="top", fontsize=18, fontfamily=PLOT_FONTS, parse_math=False)
+                if header is None: added = figure.text(.004, 1, title, ha="left", va="top", fontsize=18, fontfamily=PLOT_FONTS, parse_math=False)
                 else:
                     header.set_text(title)
                     align = options.get("export_align", "left")
                     header.set_ha(align); header.set_position(({"left": .004, "center": .5, "right": .996}[align], 1))
-                    available = (1-max(axis.get_position().y1 for axis in self.axes.values()))*self.figure.bbox.height
-                    header.set_fontsize(min(header.get_fontsize(), max(6, available/max(1, len(title.splitlines()))/1.5*72/self.figure.dpi)))
+                    available = (1-max(axis.get_position().y1 for axis in axes))*figure.bbox.height
+                    header.set_fontsize(min(header.get_fontsize(), max(6, available/max(1, len(title.splitlines()))/1.5*72/figure.dpi)))
                 for text, *_ in originals:
                     if text.get_gid() == "tma-source": text.set_visible(False)
+            from .header_privacy import masked_header
+            sample_hidden = options.get('_sample_hidden', getattr(doc, 'sample_hidden', False))
+            source_mode = options.get('_source_mode', getattr(doc, 'source_mode', 0))
+            for text in figure.texts:
+                if text.get_gid() == 'tma-header' or text is added:
+                    text.set_text(masked_header(text.get_text(), sample=True, mode=int(sample_hidden)))
+                elif text.get_gid() == 'tma-source':
+                    text.set_text(masked_header(text.get_text(), mode=source_mode))
             yield
         finally:
             for text, contents, visible, position, align, size in originals:
@@ -2153,7 +2205,9 @@ class ClassicMainWindow(MainWindow):
 
     def output_pixmap(self, *, dpi=150):
         buffer = BytesIO()
-        with self.output_heading(): self.figure.savefig(buffer, format="png", dpi=dpi, facecolor="white", bbox_inches=self.figure.bbox_inches.padded(0.25))
+        from .export_frame import export_frame
+        with self.output_heading(), export_frame(self.figure, self.export_frame_color()):
+            self.figure.savefig(buffer, format="png", dpi=dpi, facecolor="white", bbox_inches=self.figure.bbox_inches.padded(0.25))
         return QPixmap.fromImage(QImage.fromData(buffer.getvalue()))
 
     def toggle_legend(self):

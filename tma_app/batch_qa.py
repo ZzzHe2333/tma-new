@@ -53,6 +53,7 @@ def verify_batch(window, output, paths):
         os.environ["TMA_MASS_XLSX"] = str(sheet)
         window.import_files(paths[:2])
         dialog = window.batch_dialog
+        wait_until(dialog.isVisible)
         assert dialog.isVisible()
         wait_until(lambda: dialog.job is None and window.worker is None)
         assert len(dialog.rows) == 2 and all(row.get("M") for row in dialog.rows)
@@ -70,9 +71,11 @@ def verify_batch(window, output, paths):
         dialog.CopyBatch.click()
         clipboard = QApplication.clipboard().text()
         assert len(clipboard.splitlines()) == 3
-        assert all(len(line.split("\t")) == 4 for line in clipboard.splitlines())
+        copied = list(csv.reader(clipboard.splitlines(), delimiter="\t"))
+        assert all(len(line) == 5 for line in copied)
+        assert [line[0] for line in copied[1:]] == [path.stem for path in paths[:2]]
         output.with_suffix(".clipboard.tsv").write_text(clipboard, encoding="utf-8-sig")
-        report["checks"].append("latest_all_batch_filter_and_four_column_clipboard")
+        report["checks"].append("latest_all_batch_filter_and_five_column_clipboard")
         save_picker = QFileDialog.getSaveFileName
         folder_picker = QFileDialog.getExistingDirectory
         xlsx = output.with_suffix(".xlsx")
@@ -135,7 +138,7 @@ def verify_batch(window, output, paths):
             assert dialog.job is not None and all(button.isEnabled() for button in (dialog.CopyBatch,dialog.ExportBatchXlsx,dialog.ExportBatchPlots))
             dialog.grab().save(str(output.with_suffix('.waiting-m.png')))
             dialog.CopyBatch.click()
-            assert QApplication.clipboard().text().splitlines()[1].split('\t')[2]==''
+            assert QApplication.clipboard().text().splitlines()[1].split('\t')[3]==''
             QFileDialog.getSaveFileName=staticmethod(lambda *a,**kw:(str(pending_xlsx),''))
             QFileDialog.getExistingDirectory=staticmethod(lambda *a,**kw:str(pending_pngs))
             dialog.ExportBatchXlsx.click();wait_until(lambda:dialog.export_job is None)

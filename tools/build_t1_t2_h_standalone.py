@@ -7,6 +7,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class LocalFileReader(ast.NodeTransformer):
     """The portable reader uses local paths and has no cloud/app dependency."""
+    def visit_FunctionDef(self, node):
+        if node.name == 'sample_identity':
+            return None  # Application-only display classification is not needed here.
+        return self.generic_visit(node)
+
     def visit_ImportFrom(self, node):
         if node.level == 1 and node.module == "cloud_storage":
             return None

@@ -22,7 +22,12 @@ def free_port():
 
 def wait_running(service):
     deadline = time.monotonic() + 25
-    while service.state == "starting" and time.monotonic() < deadline:
+    while service.state not in ("running", "error") and time.monotonic() < deadline:
+        from PySide6.QtWidgets import QApplication
+        from PySide6.QtCore import QThread
+        app = QApplication.instance()
+        if app is not None and QThread.currentThread() == app.thread():
+            app.processEvents()
         time.sleep(.025)
     if service.state != "running":
         raise AssertionError(f"MCP 启动失败：{service.state} {service.error}")
