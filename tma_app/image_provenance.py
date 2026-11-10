@@ -7,11 +7,18 @@ from io import BytesIO
 import hashlib
 import hmac
 import json
+from functools import lru_cache
 
 from PIL import Image, PngImagePlugin
 
 TAG = 'ZzzHeTMA-Origin'
 _KEY = b'ZzzHeTMA-image-origin-v1-20261109'
+
+
+@lru_cache(maxsize=1)
+def local_machine_code():
+    from .notifications import machine_code
+    return machine_code()
 
 
 def _pixels(image):
@@ -32,9 +39,13 @@ def stamp_image(data, format='PNG'):
         info = dict(source.info)
     now = datetime.now().astimezone()
     from .frequency_watermark import embed
-    image = embed(image)
+    machine = local_machine_code()
+    from .machine_environment import snapshot
+    environment = snapshot()
+    image = embed(image, machine_code=machine)
     record = dict(schema=1, app='ZzzHe TMA Analysis', version=__version__,
-                  exported_at=now.isoformat(timespec='seconds'), pixels=_pixels(image))
+                  exported_at=now.isoformat(timespec='seconds'), pixels=_pixels(image), machine_code=machine,
+                  environment=environment)
     record['signature'] = _signature(record)
     payload = json.dumps(record, ensure_ascii=True, separators=(',', ':'))
     exif = image.getexif()
@@ -68,9 +79,9 @@ def verify_image(path):
                 payload = description[len(TAG)+1:]
         if not payload:
             from .frequency_watermark import detect
-            frequency = detect(image)
+            frequency = detect(image, extract_machine=True)
             return dict(status='frequency_only' if frequency['detected'] else 'missing',
-                        frequency=frequency)
+                        frequency=frequency, machine_code=frequency.get('machine_code'))
         try:
             record = json.loads(payload)
             signature = record.pop('signature')
@@ -80,7 +91,9 @@ def verify_image(path):
         except (ValueError, TypeError, KeyError, AttributeError):
             return dict(status='modified')
         return dict(status='verified' if valid else 'modified',
-                    exported_at=record.get('exported_at', ''), version=record.get('version', ''))
+                    exported_at=record.get('exported_at', ''), version=record.get('version', ''),
+                    machine_code=record.get('machine_code') if valid else None,
+                    environment=record.get('environment', {}) if valid else {})
 
 
 def verify_job(cancelled, path):

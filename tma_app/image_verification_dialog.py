@@ -65,6 +65,14 @@ class ImageVerificationDialog(QDialog):
             widget.setText('—')
             form.addRow(title, widget)
         self.hash_field.setToolTip('对所选图片整个文件计算的 SHA-256，包括图片内容与元数据。')
+        self.machine_field = QLineEdit('未读取')
+        self.machine_field.setReadOnly(True)
+        form.addRow('来源机器码', self.machine_field)
+        self.cpu_field = QLineEdit('未读取')
+        self.ip_field = QLineEdit('未读取')
+        for title, widget in (('来源 CPU', self.cpu_field), ('来源内网 IP', self.ip_field)):
+            widget.setReadOnly(True)
+            form.addRow(title, widget)
         self.fields = {}
         for name in ('日期', '时间', '时区', '版本'):
             label = QLabel('—')
@@ -107,6 +115,12 @@ class ImageVerificationDialog(QDialog):
         self.hash_field.setText(result.get('file_sha256', '无法计算'))
         self.hash_field.setCursorPosition(0)
         status = result.get('status')
+        self.machine_field.setText(result.get('machine_code') or '未读取（旧图或载荷未能通过校验）')
+        environment = result.get('environment') or {}
+        self.cpu_field.setText(environment.get('cpu_model') or '未记录')
+        self.cpu_field.setToolTip(environment.get('cpu_model') or '未记录')
+        self.ip_field.setText(environment.get('lan_ip') or '未记录')
+        self.ip_field.setToolTip('导出时使用的内网地址快照，最多缓存5分钟；不是当前查看电脑的地址。')
         passed = status == 'verified' and not event.get('error')
         captions = {'verified': ('鉴定通过', '检测到本软件来源标记，图片内容校验通过。'),
                     'frequency_only': ('检测到频域标记', '缺少完整性记录，仅可辅助判断来源，不能确认图片未被修改。'),

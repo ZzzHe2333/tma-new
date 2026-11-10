@@ -109,6 +109,8 @@ class MainWindow(QMainWindow):
         install_help(QApplication.instance())
         from .ui_size import install_runtime
         install_runtime(QApplication.instance())
+        from .machine_environment import snapshot as warm_local_environment
+        warm_local_environment()
         from .gui_gc import ensure_gui_gc
         ensure_gui_gc(QApplication.instance())
         # Windows' offscreen Qt plugin has no system-font enumeration. Register

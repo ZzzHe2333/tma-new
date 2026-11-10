@@ -64,14 +64,15 @@ def _detect_legacy(image):
     return dict(detected=score >= .94, score=score)
 
 
-def embed(image):
+def embed(image, machine_code=None):
     from .robust_watermark import embed as robust_embed
-    return robust_embed(_embed_legacy(image))
+    return robust_embed(_embed_legacy(image), machine_code)
 
 
-def detect(image):
+def detect(image, *, extract_machine=False):
     legacy = _detect_legacy(image)
-    if legacy['detected']: return {**legacy, 'scheme': 'legacy_dct_v1'}
+    if legacy['detected'] and not extract_machine: return {**legacy, 'scheme': 'legacy_dct_v1'}
     from .robust_watermark import detect as robust_detect
     robust = robust_detect(image)
+    if legacy['detected'] and not robust['detected']: return {**legacy,'scheme':'legacy_dct_v1'}
     return robust if robust['detected'] or robust['score'] > legacy['score'] else {**legacy,'scheme':'legacy_dct_v1'}
