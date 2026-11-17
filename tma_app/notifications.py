@@ -228,9 +228,20 @@ def settings():
     return _parse_settings(_settings_data().get('notifications', {}))
 
 
+def _bundled_notification_path():
+    import sys
+    from pathlib import Path
+    resources = getattr(sys, '_MEIPASS', None)
+    return Path(resources) / 'tma-private' / 'wecom.txt' if resources else None
+
+
 def runtime_settings():
     from .path_settings import runtime_settings_data
-    return _parse_settings(runtime_settings_data().get('notifications', {}))
+    config = _parse_settings(runtime_settings_data().get('notifications', {}))
+    bundled = _bundled_notification_path()
+    if bundled is not None and bundled.is_file():
+        config.update(provider='wecom', target='bundled-wecom')
+    return config
 
 
 def _parse_settings(data):
@@ -559,7 +570,13 @@ def _deliver(config, event, batch, png, details, path, separated):
     global _last_error
     try:
         from . import cloud_storage as cloud
-        url = normalize_target(config['provider'], cloud.protect_password(config['target'], decrypt=True))
+        if config['target'] == 'bundled-wecom':
+            try:
+                url = normalize_target('wecom', _bundled_notification_path().read_text(encoding='utf-8'))
+            except (AttributeError, OSError, ValueError):
+                raise ValueError('通知渠道不可用。') from None
+        else:
+            url = normalize_target(config['provider'], cloud.protect_password(config['target'], decrypt=True))
         items = details() if callable(details) else details
         text = format_message(event, batch, details=items, path=path, separated=separated)
         TEXT_SENDERS[config['provider']](url, event, text)

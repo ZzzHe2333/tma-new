@@ -230,6 +230,7 @@ class BatchDialog(QDialog):
         rows = [row for row in self.rows if key is None or row["batch_id"] == key]
         if self.issue_button.isChecked():
             rows = [row for row in rows if row.get("error") or row.get("warning") or row.get("export_error") or row["state"] in ("未完成", "已取消")]
+        rows.sort(key=backend.batch_order_key)
         self.view_rows = rows
         blocker = QSignalBlocker(self.table.selectionModel())
         self.table.result_model.set_rows(rows)
@@ -334,19 +335,17 @@ class BatchDialog(QDialog):
                     self._notify_paths("批量出图", [row for row in self.rows if row["id"] in keys])
         elif job is self.job:
             self.job=None
-            if not self._shutdown:
-                failed = sum(bool(row.get("error")) for row in self.rows)
-                missing = sum(row.get("state") == "M 未匹配" for row in self.rows)
-                self.feedback.setText(f"本次运行共 {len(self.rows)} 个文件；读取失败 {failed} 个；M 未匹配 {missing} 个。未选中行时处理当前筛选结果；关闭应用后清空批次。")
-                self.notify_batch()
+            if not self._shutdown and not job.cancelled.is_set():
+                keys = {key for key, _ in job.requests}
+                rows = [row for row in self.rows if row['id'] in keys]
+                failed = sum(bool(row.get('error')) for row in rows)
+                missing = sum(row.get('state') == 'M 未匹配' for row in rows)
+                self.feedback.setText(f'本次处理 {len(rows)} 个文件，读取失败 {failed} 个，M 未匹配 {missing} 个。')
+                self._notify_paths('批量处理', rows)
         else:return
         job.deleteLater()
         self.start_pending()
         self.update_progress();self.update_buttons()
-
-    def notify_batch(self):
-        """Batch-processing template: one path per line, no 批次, no blank line."""
-        self._notify_paths("批量处理", self.rows)
 
     def _notify_paths(self, event, rows):
         paths, seen = [], set()

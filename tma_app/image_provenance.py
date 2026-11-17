@@ -73,11 +73,17 @@ def verify_image(path):
     with Image.open(path) as image:
         image.load()
         payload = image.info.get(TAG)
-        if not payload:
-            description = image.getexif().get(270, '')
-            if isinstance(description, str) and description.startswith(TAG + ':'):
-                payload = description[len(TAG)+1:]
-        if not payload:
+        description = image.getexif().get(270, '')
+        if isinstance(description, str) and description.startswith(TAG + ':'):
+            exif_payload = description[len(TAG)+1:]
+            if payload is not None and payload != exif_payload:
+                try:
+                    if json.loads(payload) != json.loads(exif_payload):
+                        return dict(status='modified')
+                except (TypeError, ValueError):
+                    return dict(status='modified')
+            payload = exif_payload
+        if payload is None:
             from .frequency_watermark import detect
             frequency = detect(image, extract_machine=True)
             return dict(status='frequency_only' if frequency['detected'] else 'missing',

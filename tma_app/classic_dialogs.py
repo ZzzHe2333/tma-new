@@ -43,7 +43,7 @@ class CursorLimitsDialog(QDialog):
         from .measurement import point_coordinates
         self.owner, self.entry = owner, owner._pending_measurement
         self.data_limits=self.entry.get("purpose")=="data_limits"
-        self.read_only_y=self.data_limits or self.entry["kind"] in ("curve_value","alpha_at_x","alpha_secant","alpha_fit","step_transition","glass_transition","peak_max","onset_point","peak_linear","peak_sigmoid","slope")
+        self.read_only_y=self.data_limits or self.entry["kind"] in ("curve_value","alpha_at_x","alpha_secant","alpha_fit","step_transition","glass_transition","peak_max","onset_point","peak_linear","peak_sigmoid","slope","interval_area")
         self.at_y=self.entry["kind"]=="curve_value_y"
         self.setObjectName("CursorLimitsForm")
         self.setWindowTitle("手动界限")

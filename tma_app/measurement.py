@@ -10,7 +10,7 @@ from .transitions import KINDS as TRANSITION_KINDS
 from .peak_onset import KINDS as PEAK_ONSET_KINDS
 from .peak_integration import KINDS as INTEGRATION_KINDS
 
-POINT_KINDS = ("signal_max", "signal_change", "dimension_change", "height_change","slope")+INTEGRATION_KINDS+CURVE_VALUE_KINDS+ALPHA_KINDS+TRANSITION_KINDS+PEAK_ONSET_KINDS
+POINT_KINDS = ("signal_max", "signal_change", "dimension_change", "height_change","slope","interval_area")+INTEGRATION_KINDS+CURVE_VALUE_KINDS+ALPHA_KINDS+TRANSITION_KINDS+PEAK_ONSET_KINDS
 
 
 def annotation_key(text):
@@ -115,7 +115,7 @@ def point_values(x, y, kind, indices, positions=None, manual_y=None):
         raise ValueError("交互分析控制点无效")
     first, last = indices[0], indices[-1]
     coords = point_coordinates(xa, ya, indices, positions, manual_y)
-    if kind in ('slope',)+CURVE_VALUE_KINDS+ALPHA_KINDS+TRANSITION_KINDS+PEAK_ONSET_KINDS+INTEGRATION_KINDS and manual_y is not None and any(value is not None for value in manual_y):raise ValueError("曲线值坐标必须由曲线计算")
+    if kind in ('slope','interval_area')+CURVE_VALUE_KINDS+ALPHA_KINDS+TRANSITION_KINDS+PEAK_ONSET_KINDS+INTEGRATION_KINDS and manual_y is not None and any(value is not None for value in manual_y):raise ValueError("曲线值坐标必须由曲线计算")
     (x1, y1), (x2, y2) = coords[0], coords[-1]
     interpolated = positions is not None and any(float(p) != int(p) for p in positions)
     result = {"method": kind, "start_x": x1, "start_y": y1,
@@ -125,7 +125,7 @@ def point_values(x, y, kind, indices, positions=None, manual_y=None):
               "selection": "adjacent acquisition segment interpolation; no sorting" if interpolated else "explicit acquired sample indices; no interpolation or sorting"}
     if manual_y is not None and any(v is not None for v in manual_y):
         result["selection"] += "; explicitly entered Y coordinates"
-    if kind in ('slope',)+ALPHA_KINDS+TRANSITION_KINDS+PEAK_ONSET_KINDS+INTEGRATION_KINDS:return result
+    if kind in ('slope','interval_area')+ALPHA_KINDS+TRANSITION_KINDS+PEAK_ONSET_KINDS+INTEGRATION_KINDS:return result
     if kind in CURVE_VALUE_KINDS:
         at_y=kind=="curve_value_y"
         result.update(x=x1,y=y1,value=x1 if at_y else y1,
@@ -146,10 +146,10 @@ def point_values(x, y, kind, indices, positions=None, manual_y=None):
 
 def initial_indices(curve, domain, kind,config=None):
     x, y = curve.xy(domain)
-    if kind=='slope':
+    if kind in ('slope','interval_area'):
         from .data_limits import segments
         section=max(segments(curve.active_rows),key=lambda s:s.stop-s.start)
-        if section.stop-section.start<2:raise ValueError('斜率需要至少两个连续采集点')
+        if section.stop-section.start<2:raise ValueError('需要至少两个连续采集点')
         return [section.start,section.stop-1]
     if kind in INTEGRATION_KINDS:
         from .peak_integration import check_curve
@@ -257,6 +257,11 @@ class MeasurementArtists:
         if entry["kind"] in TRANSITION_KINDS:self.tangent_lines=[axis.plot([],[],color=curve.color,lw=.7,zorder=4,label="_transition_fit")[0] for _ in range(3)]
         if entry["kind"] in ALPHA_KINDS:self.alpha_line,=axis.plot([],[],color=curve.color,lw=.7,zorder=4,label="_alpha_fit")
         if entry['kind']=='slope':self.slope_line,=axis.plot([],[],color=curve.color,lw=.7,zorder=4,label='_slope_fit')
+        if entry['kind'] == 'interval_area':
+            from matplotlib.patches import Polygon
+            self.area_fill = Polygon(np.empty((0, 2)), edgecolor='none', alpha=.25,
+                                     visible=False, zorder=1, label='_signed_area_fill')
+            axis.add_patch(self.area_fill)
         self.update(active=None if entry['interactive']['confirmed'] else entry['interactive'].get('active_point',0))
 
     @property
@@ -265,6 +270,15 @@ class MeasurementArtists:
 
     def calculate(self,indices,positions=None,manual_y=None):
         values=point_values(self.x,self.y,self.entry['kind'],indices,positions,manual_y)
+        if self.entry['kind']=='interval_area':
+            if self.entry['interactive']['confirmed'] and 'area_profile' in self.entry['values']:
+                return dict(self.entry['values'])
+            from .area_calculation import calculate
+            try:
+                values.update(calculate(self.curve, self.domain, indices if positions is None else positions,
+                                        coordinate='signed_display_x', baseline='zero'))
+            except ValueError as exc:
+                values['fit_error'] = str(exc)
         if self.entry['kind']=='slope':
             if self.entry['interactive']['confirmed'] and 'fit_profile' in self.entry['values']:return dict(self.entry['values'])
             from .slope import values as compute
@@ -325,7 +339,27 @@ class MeasurementArtists:
         options = self.entry.get("annotation", {})
         dx=self.display_x_offset
         for marker, (x, y) in zip(self.markers, coords): marker.set_data([x+dx], [y])
-        if self.entry['kind']=='slope':
+        if self.entry['kind']=='interval_area':
+            color = options.get('area_fill_color')
+            profile = values.get('area_profile')
+            self.area_fill.set_visible(bool(color and profile))
+            if color and profile:
+                x = np.asarray(profile['x']) + dx
+                y = np.asarray(profile['signal'])
+                vertices = np.column_stack((x, y))
+                self.area_fill.set_xy(np.vstack(([x[0], 0], vertices, [x[-1], 0])))
+                self.area_fill.set_facecolor(color)
+            self.horizontal.set_visible(False)
+            self.arrow.set_visible(False)
+            self.annotation.xy = (coords[-1][0]+dx, coords[-1][1])
+            if 'fit_error' in values:
+                self.annotation.set_text(values['fit_error'])
+            else:
+                self.annotation.set_text(f"S = {values['net_area']:.6g} {values['area_unit']}")
+            for index, (text, (x, y)) in enumerate(zip(self.temps, coords), 1):
+                text.xy = (x+dx, y)
+                text.set_text(f'X{index} = {x:.6g} {xunit}')
+        elif self.entry['kind']=='slope':
             self.horizontal.set_visible(False);self.arrow.set_visible(False);self.slope_line.set_data([],[])
             self.annotation.xy=(coords[-1][0]+dx,coords[-1][1])
             if 'fit_error' in values:self.annotation.set_text(values['fit_error'])

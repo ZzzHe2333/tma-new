@@ -39,7 +39,7 @@ async def transport_checks(settings, files, directory):
     from mcp.client.streamable_http import streamable_http_client
     from openpyxl import load_workbook
     from PIL import Image
-    from .batch_analysis import calculate_file
+    from .batch_analysis import batch_order_key, calculate_file
 
     checks = []
     before = {str(path): hashlib.sha256(Path(path).read_bytes()).hexdigest() for path in files}
@@ -99,9 +99,10 @@ async def transport_checks(settings, files, directory):
                 xlsx = next(item["path"] for item in job["artifacts"] if item["type"] == "xlsx")
                 book = load_workbook(xlsx, data_only=True)
                 sheet = book.active
-                assert sheet.max_column == 4 and sheet.max_row == 4
-                for index, row in enumerate(job["rows"], 2):
-                    for column, key in enumerate(("T1", "T2", "M", "H"), 1):
+                assert sheet.max_column == 5 and sheet.max_row == 4
+                for index, row in enumerate(sorted(job["rows"], key=batch_order_key), 2):
+                    assert sheet.cell(index, 1).value == Path(row["name"]).stem
+                    for column, key in enumerate(("T1", "T2", "M", "H"), 2):
                         assert abs(sheet.cell(index, column).value - row[key]) < 1e-8
                 book.close()
                 csv_path = next(item["path"] for item in job["artifacts"] if item["type"] == "csv")

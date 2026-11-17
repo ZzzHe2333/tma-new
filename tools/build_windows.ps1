@@ -16,6 +16,8 @@ $distributionPath = if ([IO.Path]::IsPathRooted($DistPath)) { $DistPath } else {
 $packagePath = Join-Path $distributionPath 'ZzzHe TMA Analysis'
 $pythonExecutable = (Get-Command python.exe).Source
 $buildOriginalPath = $env:PATH
+$previousLocalBuild = $env:TMA_LOCAL_WINDOWS_BUILD
+$env:TMA_LOCAL_WINDOWS_BUILD = if ($LocalTestSigning) { "1" } else { "0" }
 $pythonDirectory = Split-Path -Parent $pythonExecutable
 # Dependency discovery must not pick unrelated ICU/API DLLs from tools such as
 # Poppler on the calling shell PATH. This affects this build process only.
@@ -54,5 +56,6 @@ try {
     }
 } finally {
     $env:PATH = $buildOriginalPath
+    $env:TMA_LOCAL_WINDOWS_BUILD = $previousLocalBuild
     Pop-Location
 }

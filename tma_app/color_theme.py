@@ -37,7 +37,7 @@ def _load(cancelled, path):
     for _, item in sorted(files, key=lambda row: row[0], reverse=True):
         try:
             key = json.loads(item.read_text(encoding='utf-8')).get('color')
-            if key in {row[0] for row in CHOICES}: return key
+            if isinstance(key, str) and key in {row[0] for row in CHOICES}: return key
         except (OSError, ValueError, AttributeError): pass
     return 'pink'
 
@@ -101,12 +101,14 @@ def add_menu(owner, settings):
         state['job'] = job
         def done(event):
             state['job'] = None
+            job.deleteLater()
+            if state['pending'] is not None:
+                begin_save()
+                return
             if event.get('error'):
                 owner.statusBar().showMessage('颜色保存失败：' + event['error'])
             else:
                 owner.statusBar().showMessage('界面颜色已保存，下次启动自动使用。')
-            job.deleteLater()
-            begin_save()
         job.done.connect(done); job.start()
 
     def choose(key):

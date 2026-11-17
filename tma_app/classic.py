@@ -20,16 +20,10 @@ from PySide6.QtWidgets import (
     QGroupBox, QCheckBox, QMessageBox, QMenu, QInputDialog, QStyle,
     QFileDialog, QSizePolicy,
 )
-from matplotlib.figure import Figure
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
-from matplotlib.ticker import MaxNLocator, AutoMinorLocator, MultipleLocator, FuncFormatter
-from matplotlib.lines import Line2D
-
 from .app import MainWindow
 from .workspace import default_plot_options, validate_plot_options, checkpoint_token
 from .preferences import preference_batch
 from .overlay_settings import fill_manual_limits
-from .legend import render_legend, apply_anchor, moved_anchor
 from . import __version__, APP_NAME
 from .theme import CUTE_STYLE, cute_palette, app_icon, action_icon, PastelMdiArea
 
@@ -41,6 +35,7 @@ PLOT_FONTS = ["Times New Roman", "SimSun", "Microsoft YaHei"]
 
 def nice_limits(values):
     """Enclose the actual samples with readable 1/2/5 ticks; never clip data."""
+    from matplotlib.ticker import MaxNLocator
     lo, hi = float(np.min(values)), float(np.max(values))
     if lo == hi:
         pad = max(1.0, abs(lo) * .05)
@@ -80,16 +75,6 @@ def classic_palette():
     return cute_palette()
 
 
-class PlotCanvas(FigureCanvasQTAgg):
-    """Do not allocate an Agg image for a not-yet-plotted MDI document."""
-    def __init__(self,figure):
-        self.plot_ready=False
-        super().__init__(figure)
-
-    def draw_idle(self):
-        if self.plot_ready:super().draw_idle()
-
-
 class PlotDocument(QMdiSubWindow):
     closed_document = Signal(object)
 
@@ -101,6 +86,7 @@ class PlotDocument(QMdiSubWindow):
         self.plot_axes = {}
         self.plot_ticks = {}
         self.plot_ranges = {}
+        from .plot_backend import Figure, PlotCanvas, NavigationToolbar2QT
         self.figure = Figure(facecolor="white")
         self.canvas = PlotCanvas(self.figure)
         # The toolbar keeps its canvas/figure alive. Own it with this document
@@ -314,6 +300,9 @@ class ClassicMainWindow(MainWindow):
         for menu in self.ui_model["menus"]:
             parent = self.menuBar().addMenu(menu["caption"])
             self.classic_menus[menu['name']] = parent
+            if menu["name"] == "Help1":
+                parent.addAction("检查更新…", self.show_update_dialog)
+                parent.addSeparator()
             for item in menu.get("children", []):
                 append(parent, item)
             if menu["name"] == "Window1":
@@ -344,9 +333,14 @@ class ClassicMainWindow(MainWindow):
         height.setObjectName("HeightChange")
         height.triggered.connect(lambda: self.start_point_measurement("height_change"))
         self.classic_actions["HeightChange"] = height
+        signed_area = QAction("两点积分 S（Y=0 基线）", self)
+        signed_area.setObjectName("SignedArea")
+        signed_area.triggered.connect(lambda: self.start_point_measurement('interval_area'))
+        self.classic_actions["SignedArea"] = signed_area
         for menu_action in self.menuBar().actions():
             if menu_action.text() == "分析":
                 menu = menu_action.menu()
+                menu.addAction(signed_area)
                 after = self.classic_actions.get("SignalChange1")
                 menu.insertAction(after, height)
         if hasattr(self, "window_menu"):
@@ -363,7 +357,13 @@ class ClassicMainWindow(MainWindow):
                 action=self.classic_actions.get(f"C{i}")
                 if action is not None:action.triggered.connect(lambda checked=False,action=action:self.copy_overlay(action.data()))
             self.update_overlay_copy_menu()
+        from .feature_usage_ui import install as install_feature_usage
+        install_feature_usage(self)
         for menu in self.findChildren(QMenu): menu.setToolTipsVisible(True)
+
+    def build_plot_canvas(self, layout):
+        # Classic mode builds real canvases only for opened MDI documents.
+        self.figure = self.canvas = self.toolbar = None
 
     def _build(self):
         MainWindow._build(self)
@@ -439,7 +439,7 @@ class ClassicMainWindow(MainWindow):
         self.batch_processing_button.setFixedSize(112, 24)
         self.batch_processing_button.setAutoDefault(False)
         self.batch_processing_button.setToolTip('批量处理 TMA 文件：选择多个数据文件，提取 T1、T2、M、H，查看本次或全部批次，并导出图片、XLSX 或复制表格。')
-        self.batch_processing_button.clicked.connect(self.show_batch_analysis)
+        self.batch_processing_button.clicked.connect(self.classic_actions["BatchAnalysis1"].trigger)
         commands.addWidget(self.batch_processing_button)
         self.single_report_button = QPushButton("单样品报告", self)
         self.single_report_button.setObjectName("SingleReportButton")
@@ -447,7 +447,7 @@ class ClassicMainWindow(MainWindow):
         self.single_report_button.setFixedSize(112, 24)
         self.single_report_button.setAutoDefault(False)
         self.single_report_button.setToolTip('单样品报告：选择 TMA 文件和粒径数据，核对编号、温度、质量等信息后生成 PDF；可选用 PDF 模板。')
-        self.single_report_button.clicked.connect(self.show_single_report)
+        self.single_report_button.clicked.connect(self.classic_actions["SingleReport1"].trigger)
         commands.addWidget(self.single_report_button)
         spacer = QWidget(self)
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -458,6 +458,8 @@ class ClassicMainWindow(MainWindow):
         self.share_button.setAutoDefault(False)
         self.share_button.setToolTip("分享当前活动图像，包括叠图：预览后发送到已配置的 WebDAV 或企业微信。可先在设置中配置分享渠道。")
         self.share_button.clicked.connect(self.show_share)
+        from .feature_usage import record as record_feature
+        self.share_button.clicked.connect(lambda: record_feature("Share", "分享"))
         commands.addWidget(self.share_button)
         self.classic_toolbar = toolbar
 
@@ -832,6 +834,9 @@ class ClassicMainWindow(MainWindow):
             return
         if hasattr(self, '_plot_resize_timer'):
             self._plot_resize_timer.stop()
+        from matplotlib.ticker import MaxNLocator, AutoMinorLocator, MultipleLocator, FuncFormatter
+        from matplotlib.lines import Line2D
+        from .legend import render_legend
         self.touch_cloud_usage()
         self._drag_legend = None
         self.figure, self.canvas, self.toolbar = active.figure, active.canvas, active.navigation
@@ -1004,6 +1009,7 @@ class ClassicMainWindow(MainWindow):
         MainWindow.result_press(self, event)
 
     def result_motion(self, event):
+        from .legend import apply_anchor, moved_anchor
         if self._drag_legend is not None:
             doc, legend, x, y, bounds, anchor, moved = self._drag_legend
             if event.canvas is not doc.canvas or event.x is None or event.y is None: return
@@ -1015,6 +1021,7 @@ class ClassicMainWindow(MainWindow):
         MainWindow.result_motion(self, event)
 
     def result_release(self, event):
+        from .legend import moved_anchor
         if self._drag_legend is not None:
             doc, legend, x, y, bounds, anchor, moved = self._drag_legend
             self._drag_legend = None
@@ -1095,6 +1102,7 @@ class ClassicMainWindow(MainWindow):
         menu.addSeparator()
         for name, label in (("Linear1", "线性峰值积分"), ("SigHorizontal1", "水平 S 形曲线峰值积分"), ("PeakMax1", "峰最大"), ("SignalMax1", "信号最大"), ("SignalChange1", "信号变化"), ("HeightChange", "高度差"), ("GlassTransition1", "玻璃化转变"),("StepTransition2","步阶转变"), ("OnsetPoint1", "始点"), ("Slope1", "斜率"), ("PeakRunningIntegral1", "执行积分"), ("CurveValueAtX1", "曲线值于X轴"), ("CurveValueAtY1", "曲线值于Y轴")):
             action(name, label)
+        action("SignedArea", "两点积分 S（Y=0 基线）")
         menu.addSeparator(); action("AnalysisOptions1", "分析选项")
         if self._measurement_artists and self.current_measurement() is None:
             menu.addSeparator()
@@ -1175,6 +1183,15 @@ class ClassicMainWindow(MainWindow):
         menu.addAction("隐藏此文字", lambda: self.style_result(entry, "hidden", True, label_key))
         self.add_label_visibility_actions(menu.addMenu("文字显隐"), entry)
         menu.addSeparator()
+        if entry['kind'] == 'interval_area' and 'interactive' in entry:
+            fill = menu.addMenu('积分区域填充')
+            current = entry.get('annotation', {}).get('area_fill_color')
+            for title, color in (('透明', None), ('灰色', '#808080'), ('红色', '#d93838')):
+                action = fill.addAction(title)
+                action.setCheckable(True)
+                action.setChecked(current == color)
+                action.triggered.connect(lambda checked=False, color=color: self.set_integral_fill(entry, color))
+            fill.addAction('自定义颜色…', lambda: self.choose_integral_fill(entry))
         if "interactive" in entry: menu.addAction("调整结果", lambda: self.edit_measurement(entry))
         if entry["kind"] in ("curve_value","curve_value_y"):menu.addAction("标注选项…",lambda:self.edit_point_label(entry))
         menu.addAction("删除结果", lambda: self.delete_result(entry))
@@ -1194,6 +1211,23 @@ class ClassicMainWindow(MainWindow):
         for key, caption, text in texts:
             action = menu.addAction(caption); action.setCheckable(True); action.setChecked(text.get_visible())
             action.triggered.connect(lambda checked, key=key: self.style_result(entry, "hidden", not checked, key))
+
+    def set_integral_fill(self, entry, color):
+        options = entry.setdefault('annotation', {})
+        if color is None:
+            options.pop('area_fill_color', None)
+        else:
+            options['area_fill_color'] = color
+        self.touch()
+        self.redraw()
+
+    def choose_integral_fill(self, entry):
+        from PySide6.QtGui import QColor
+        from PySide6.QtWidgets import QColorDialog
+        initial = entry.get('annotation', {}).get('area_fill_color', '#808080')
+        color = QColorDialog.getColor(QColor(initial), self, '选择积分区域颜色')
+        if color.isValid():
+            self.set_integral_fill(entry, color.name())
 
     def style_result(self, entry, key, value, label_key=None):
         options = entry.setdefault("annotation", {})
@@ -1916,6 +1950,10 @@ class ClassicMainWindow(MainWindow):
         dialog.show()
         dialog.start(path)
         return dialog
+
+    def show_update_dialog(self):
+        from .update_dialog import show
+        show(self)
 
     def show_help_topics(self, topic='start'):
         from .help_topics import show

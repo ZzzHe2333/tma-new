@@ -26,6 +26,10 @@ def _machine_bits(code):
 
 def _machine_code(coefficients):
     bits=coefficients[MA[:,0],MA[:,1]]>coefficients[MB[:,0],MB[:,1]]
+    return _decode_machine_bits(bits)
+
+
+def _decode_machine_bits(bits):
     payload=np.packbits(bits).tobytes()
     if payload[:4]!=b'ZM3\x00' or zlib.crc32(payload[:12]).to_bytes(4,'big')!=payload[12:]: return None
     code=payload[4:12].hex().upper()
@@ -93,7 +97,7 @@ def embed(image, machine_code=None):
     return output
 
 
-def detect(image):
+def detect(image, *, extract_machine=False):
     if min(image.size)<128: return dict(detected=False,score=0.,scheme='normalized_dct_v2')
     bounds = [_bounds(image), (0,0,image.width,image.height)]
     image = image.convert('L')
@@ -107,8 +111,10 @@ def detect(image):
             bits = coefficients[A[:,0],A[:,1]] > coefficients[B[:,0],B[:,1]]
             score = float(np.mean(bits == BITS))
             machine = _machine_code(coefficients) if score >= .94 else None
-            if score > best: best, best_padding, best_machine = score, float(padding), machine
-            elif machine is not None and score >= .94: best_machine = machine
-            if score == 1.:
-                return dict(detected=True,score=score,scheme='normalized_dct_v2',padding=float(padding),machine_code=machine)
+            if score > best:
+                best, best_padding = score, float(padding)
+            if machine is not None:
+                best_machine = machine
+            if best == 1. and (not extract_machine or best_machine is not None):
+                return dict(detected=True,score=best,scheme='normalized_dct_v2',padding=best_padding,machine_code=best_machine)
     return dict(detected=best>=.94,score=best,scheme='normalized_dct_v2',padding=best_padding,machine_code=best_machine)

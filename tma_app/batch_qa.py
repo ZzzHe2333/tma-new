@@ -89,9 +89,10 @@ def verify_batch(window, output, paths):
             from openpyxl import load_workbook
             workbook = load_workbook(xlsx, data_only=True)
             sheet_out = workbook.active
-            assert sheet_out.max_column == 4 and sheet_out.max_row == 3
+            assert sheet_out.max_column == 5 and sheet_out.max_row == 3
             for index, row in enumerate(dialog.view_rows, 2):
-                for column, key in enumerate(backend.KEYS, 1):
+                assert sheet_out.cell(index, 1).value == Path(row["name"]).stem
+                for column, key in enumerate(backend.KEYS, 2):
                     assert abs(sheet_out.cell(index, column).value - row[key]) < 1e-8
                 assert row["file"] in sheet_out.cell(index, 1).comment.text
             workbook.close()
@@ -143,7 +144,7 @@ def verify_batch(window, output, paths):
             QFileDialog.getExistingDirectory=staticmethod(lambda *a,**kw:str(pending_pngs))
             dialog.ExportBatchXlsx.click();wait_until(lambda:dialog.export_job is None)
             book=load_workbook(pending_xlsx,data_only=True)
-            assert book.active.max_row==2 and book.active.cell(2,3).value is None
+            assert book.active.max_row==2 and book.active.cell(2,4).value is None
             book.close()
             dialog.ExportBatchPlots.click();wait_until(lambda:dialog.export_job is None)
             pending_png=dialog.view_rows[0]['png'];assert Path(pending_png).is_file()

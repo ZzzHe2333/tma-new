@@ -3,12 +3,35 @@
 
 from PyInstaller.utils.hooks import copy_metadata
 from pathlib import Path
+import os
+import sys
+from tempfile import TemporaryDirectory
+
+private_webhook = os.environ.get("TMA_PRIVATE_WECOM_RESOURCE")
+private_temp = None
+if not private_webhook and os.environ.get("TMA_LOCAL_WINDOWS_BUILD") == "1":
+    import json
+    sys.path.insert(0, SPECPATH)
+    from tma_app.path_settings import config_path
+    from tma_app.cloud_storage import protect_password
+    from tma_app.sharing import webhook_url
+    settings = json.loads(config_path().read_text(encoding="utf-8-sig"))
+    try:
+        value = webhook_url(protect_password(settings["notifications"]["target"], decrypt=True))
+    except (KeyError, ValueError):
+        raise RuntimeError("Local build configuration is unavailable for this Windows account.") from None
+    private_temp = TemporaryDirectory(prefix="release-resource-")
+    resource = Path(private_temp.name) / "wecom.txt"
+    resource.write_text(value, encoding="utf-8")
+    private_webhook = str(resource)
+    del value
+private_resources = [(private_webhook, "tma-private")] if private_webhook else []
 
 a = Analysis(
     ['run.py'],
     pathex=[],
     binaries=[],
-    datas=[('tma_app\\assets', 'tma_app\\assets')] + copy_metadata('mcp'),
+    datas=[('tma_app\\assets', 'tma_app\\assets')] + copy_metadata('mcp') + private_resources,
     hiddenimports=['uvicorn.loops.asyncio', 'uvicorn.protocols.http.h11_impl', 'uvicorn.lifespan.on'],
     hookspath=[],
     hooksconfig={},
@@ -56,3 +79,6 @@ coll = COLLECT(
     upx_exclude=[],
     name='ZzzHe TMA Analysis',
 )
+
+if private_temp is not None:
+    private_temp.cleanup()

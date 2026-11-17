@@ -17,14 +17,14 @@ S 形基线以初始直线开始，用前次有符号累计面积分数加权两
 零基线积分并不等于绝对面积。TMA 尺寸面积不自动转换为焓、热量或结晶度。'''
 
 
-def statistics(q, residual):
+def statistics(q, residual, *, allow_backtracking=False):
     q, r = np.asarray(q, dtype=float), np.asarray(residual, dtype=float)
     if q.ndim!=1 or r.shape!=q.shape or len(q)<2 or not np.isfinite(q).all() or not np.isfinite(r).all():
         raise ValueError('面积计算需要至少两个有限配对样点')
     with np.errstate(over='ignore', invalid='ignore', divide='ignore'):
         dq=np.diff(q)
         if not np.isfinite(dq).all(): raise ValueError('积分坐标跨度超出有限范围')
-        if not np.any(dq) or (np.any(dq>0) and np.any(dq<0)):
+        if not np.any(dq) or (not allow_backtracking and np.any(dq>0) and np.any(dq<0)):
             raise ValueError('积分坐标须单向且跨度大于零；遇到回摆请按实际时间积分或缩小范围')
         a,b=r[:-1],r[1:];width=abs(dq)
         positive=(np.maximum(a,0)/2+np.maximum(b,0)/2)*width
@@ -59,7 +59,7 @@ def validate_snapshot(profile, values, point_count=None):
         if not np.isfinite(vectors[key]).all():raise ValueError('面积快照包含非有限数值')
     p=vectors['positions'];n=len(p)
     if any(len(v)!=n for v in vectors.values()) or np.any(np.diff(p)<=0) or p[0]<0 or (point_count is not None and p[-1]>point_count-1):raise ValueError('面积快照采集位置无效')
-    if profile['coordinate'] not in ('recorded_time','display_x') or profile['baseline_kind'] not in (*BASELINES,'sigmoid_horizontal') or not isinstance(profile['unit'],str):raise ValueError('面积快照方法或单位无效')
+    if profile['coordinate'] not in ('recorded_time','display_x','signed_display_x') or profile['baseline_kind'] not in (*BASELINES,'sigmoid_horizontal') or not isinstance(profile['unit'],str):raise ValueError('面积快照方法或单位无效')
     if profile['unit']!=values.get('area_unit'):raise ValueError('面积快照单位与结果不符')
     x,y,b=vectors['x'],vectors['signal'],vectors['baseline'];kind=profile['baseline_kind']
     if kind=='linear':
@@ -68,7 +68,8 @@ def validate_snapshot(profile, values, point_count=None):
     elif kind in BASELINES:expected_b=np.full_like(y,0 if kind=='zero' else y[0] if kind=='left' else y[-1])
     else:expected_b=b
     if not np.allclose(b,expected_b,rtol=1e-11,atol=1e-11):raise ValueError('面积快照基线与方法不符')
-    expected=statistics(vectors['q'],vectors['signal']-vectors['baseline'])
+    expected=statistics(vectors['q'],vectors['signal']-vectors['baseline'],
+                        allow_backtracking=profile['coordinate']=='signed_display_x')
     for key,number in expected.items():
         actual=values.get(key)
         if type(actual) not in (int,float) or not np.isfinite(actual) or not np.isclose(actual,number,rtol=1e-11,atol=1e-11):raise ValueError('面积结果与来源快照不符')
@@ -78,7 +79,7 @@ def validate_snapshot(profile, values, point_count=None):
 
 def calculate(curve,domain,positions,*,coordinate='recorded_time',baseline='linear'):
     from .transitions import _interval
-    if coordinate not in ('recorded_time','display_x') or baseline not in BASELINES:raise ValueError('面积方法无效')
+    if coordinate not in ('recorded_time','display_x','signed_display_x') or baseline not in BASELINES:raise ValueError('面积方法无效')
     x,y=curve.xy(domain)
     if len(positions)!=2 or any(type(v) not in (int,float) or not np.isfinite(v) or not 0<=v<len(x) for v in positions):raise ValueError('面积计算的两点位置无效')
     curve.validate_positions(positions);lo,hi=sorted(positions)
@@ -95,7 +96,7 @@ def calculate(curve,domain,positions,*,coordinate='recorded_time',baseline='line
         base=py[0]+(py[-1]-py[0])/(px[-1]-px[0])*(px-px[0])
     else:base=np.full_like(py,0 if baseline=='zero' else py[0] if baseline=='left' else py[-1])
     unit=f'{curve.result_unit}·{q_unit}'
-    result=statistics(q,py-base)
+    result=statistics(q,py-base,allow_backtracking=coordinate=='signed_display_x')
     result.update(integral=result['net_area'],value=result['net_area'],area_unit=unit,
         start_x=float(px[0]),stop_x=float(px[-1]),points=len(p),integration_domain=coordinate,
         baseline_kind=baseline,area_profile=snapshot(px,py,q,base,p,coordinate=coordinate,unit=unit,baseline_kind=baseline),

@@ -18,6 +18,7 @@ from weakref import WeakValueDictionary
 import numpy as np
 from . import piliang_core as original
 from .mass_lookup import lookup_record
+from .sample_identity import recognize_sample
 
 KEYS = ("T1", "T2", "M", "H")
 HEADERS = ("T1 (°C)", "T2 (°C)", "M (mg)", "H (µm)")
@@ -143,6 +144,16 @@ def display_value(row, key):
     return f"{value:.4f}"
 
 
+def batch_order_key(row):
+    """Sort production samples by year, month, day (when present) and sequence."""
+    filename = Path(row.get("file") or row.get("name") or "").stem
+    sample = recognize_sample(filename)
+    if sample and sample.kind in ("production_a", "production_b"):
+        day = sample.date.day if sample.date else 0
+        return (False, sample.year, sample.month, day, sample.sequence)
+    return (True, 0, 0, 0, 0)
+
+
 def table_text(rows, include_headers=True):
     """Filename and four values, tab-separated for Excel/WPS."""
     buffer = StringIO(newline="")
@@ -163,15 +174,19 @@ def protect_output(path, rows):
                 raise ValueError("输出不能覆盖原始数据或称量表")
 
 
+def _publish_new(temporary, path):
+    if os.name == 'nt':
+        os.rename(temporary, path)
+    else:
+        os.link(temporary, path)
+        os.unlink(temporary)
+
+
 def publish_export(temporary, path, rows):
     """Unknown weighing sources require a new destination, with no overwrite race."""
     if any('mass_config' in row and row['mass_config'] is None for row in rows):
         try:
-            if os.name == 'nt':
-                os.rename(temporary, path)
-            else:
-                os.link(temporary, path)
-                os.unlink(temporary)
+            _publish_new(temporary, path)
         except FileExistsError:
             raise ValueError('m 路径尚未确认，请使用新文件名导出，以免覆盖原始数据。') from None
     else:
@@ -179,7 +194,7 @@ def publish_export(temporary, path, rows):
 
 
 def write_xlsx(rows, path):
-    """Four numeric columns; file identity/status is stored in cell comments."""
+    """Write filenames as text alongside four numeric result columns."""
     from openpyxl import Workbook
     from openpyxl.comments import Comment
     from openpyxl.styles import Alignment, Font, PatternFill
@@ -194,16 +209,18 @@ def write_xlsx(rows, path):
     workbook.properties.title = "T1 T2 M H · V233"
     sheet = workbook.active
     sheet.title = "批量结果"
-    sheet.append(HEADERS)
-    for index, row in enumerate(rows, 2):
-        sheet.append([row.get(key) for key in KEYS])
+    sheet.append(("文件名", *HEADERS))
+    for index, row in enumerate(sorted(rows, key=batch_order_key), 2):
+        filename = Path(row.get("name") or row["file"]).stem
+        sheet.append([filename, *(row.get(key) for key in KEYS)])
+        sheet.cell(index, 1).data_type = "s"
         note = f"文件：{row['name']}\n路径：{row['file']}\n算法：V233\n状态：{row['state']}"
         if row.get("mass_source"):
             note += f"\nM 来源：{row['mass_source']}"
         if row.get("error") or row.get("warning"):
             note += "\n" + (row.get("error") or row.get("warning"))
         sheet.cell(index, 1).comment = Comment(note, "ZzzHe")
-        for column, key in enumerate(KEYS, 1):
+        for column, key in enumerate(KEYS, 2):
             cell = sheet.cell(index, column)
             cell.alignment = Alignment(horizontal="right")
             if key == "M":
@@ -218,12 +235,13 @@ def write_xlsx(rows, path):
     for cell in sheet[1]:
         cell.font = Font(name="Microsoft YaHei", bold=True, color="674B7B")
         cell.fill = PatternFill("solid", fgColor="EEE3F7")
-    for column in "ABCD":
+    sheet.column_dimensions["A"].width = 34
+    for column in "BCDE":
         sheet.column_dimensions[column].width = 23
     sheet.row_dimensions[1].height = 26
     sheet.freeze_panes = "A2"
     if rows:
-        table = Table(displayName="TMAResults", ref=f"A1:D{len(rows)+1}")
+        table = Table(displayName="TMAResults", ref=f"A1:E{len(rows)+1}")
         table.tableStyleInfo = TableStyleInfo(name="TableStyleLight20", showRowStripes=True)
         sheet.add_table(table)
     descriptor, temporary = tempfile.mkstemp(prefix="tma-batch-", suffix=".xlsx", dir=path.parent)
@@ -245,7 +263,7 @@ def plot_paths(rows, directory):
         stem = Path(row["file"]).stem
         candidate = Path(directory) / (stem + ".png")
         index = 2
-        while os.path.normcase(str(candidate)) in reserved or candidate.exists():
+        while os.path.normcase(str(candidate)) in reserved or os.path.lexists(candidate):
             candidate = Path(directory) / f"{stem} ({index}).png"
             index += 1
         reserved.add(os.path.normcase(str(candidate)))
@@ -253,7 +271,7 @@ def plot_paths(rows, directory):
     return result
 
 
-def write_plot(row, path):
+def write_plot(row, path, *, automatic_name=False):
     """V14 cross/temperature/height layout, with the app's white border and credit."""
     from .cloud_storage import resolve_source
     source_file = resolve_source(row["file"])
@@ -278,7 +296,16 @@ def write_plot(row, path):
     try:
         with os.fdopen(descriptor, 'wb') as stream:
             stream.write(image)
-        publish_export(temporary, path, [row])
+        if automatic_name:
+            while True:
+                try:
+                    _publish_new(temporary, path)
+                    break
+                except FileExistsError:
+                    path = plot_paths([row], path.parent)[0]
+                    protect_output(path, [row])
+        else:
+            publish_export(temporary, path, [row])
     finally:
         Path(temporary).unlink(missing_ok=True)
     return str(path.resolve())

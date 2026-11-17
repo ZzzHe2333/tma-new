@@ -19,23 +19,12 @@ from PySide6.QtWidgets import (
     QPlainTextEdit, QComboBox, QDoubleSpinBox, QSpinBox, QFormLayout,
     QGroupBox, QMessageBox, QColorDialog, QScrollArea, QCheckBox,QDialog,
 )
-import matplotlib
-
-matplotlib.use("QtAgg")
-matplotlib.rcParams.update({"font.family": "sans-serif", "font.sans-serif": ["Microsoft YaHei", "DejaVu Sans"],
-                          "axes.unicode_minus": False, "font.size": 9, "svg.fonttype": "none"})
-from matplotlib.figure import Figure
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
-from matplotlib.widgets import SpanSelector
-from matplotlib.text import Text
-
 from . import __version__, APP_NAME
 from .theme import CUTE_STYLE, cute_palette, app_icon
 from .reader import read_dataset
 from .numerics import analyze, process_signal
 from .workspace import Curve, PALETTE, save_session, load_session
 from .preferences import preference_batch
-from .measurement import MeasurementArtists,initial_indices,point_values,initial_y_point
 from .point_labels import CURVE_VALUE_KINDS
 from .peak_integration import KINDS as INTEGRATION_KINDS
 from .legacy_t1_t2_h import format_plot_temp_c
@@ -417,16 +406,7 @@ class MainWindow(QMainWindow):
         controls.addStretch()
         controls.addWidget(button("导出图像", self.export_plot))
         pl.addLayout(controls)
-        self.figure = Figure(facecolor="white")
-        self.canvas = FigureCanvasQTAgg(self.figure)
-        self.canvas.setMinimumHeight(260)
-        self.canvas.mpl_connect("motion_notify_event", self.cursor_motion)
-        self.canvas.mpl_connect("button_press_event", self.result_press)
-        self.canvas.mpl_connect("motion_notify_event", self.result_motion)
-        self.canvas.mpl_connect("button_release_event", self.result_release)
-        self.toolbar = NavigationToolbar2QT(self.canvas, self)
-        pl.addWidget(self.toolbar)
-        pl.addWidget(self.canvas, 1)
+        self.build_plot_canvas(pl)
         self.tabs.addTab(plotpage, "曲线叠加")
         self.table = QTableView()
         self.table.setAlternatingRowColors(True)
@@ -1050,10 +1030,25 @@ class MainWindow(QMainWindow):
     def display_x_offset(self,curve):
         return 0.
 
+    def build_plot_canvas(self, layout):
+        from .plot_backend import Figure, FigureCanvasQTAgg, NavigationToolbar2QT
+        self.figure = Figure(facecolor="white")
+        self.canvas = FigureCanvasQTAgg(self.figure)
+        self.canvas.setMinimumHeight(260)
+        self.canvas.mpl_connect("motion_notify_event", self.cursor_motion)
+        self.canvas.mpl_connect("button_press_event", self.result_press)
+        self.canvas.mpl_connect("motion_notify_event", self.result_motion)
+        self.canvas.mpl_connect("button_release_event", self.result_release)
+        self.toolbar = NavigationToolbar2QT(self.canvas, self)
+        layout.addWidget(self.toolbar)
+        layout.addWidget(self.canvas, 1)
+
     def redraw(self, *_):
         if getattr(self, '_import_batch', False): return
         if not hasattr(self, "figure"):
             return
+        from matplotlib.widgets import SpanSelector
+        from .measurement import MeasurementArtists
         self.figure._notification_revision = getattr(self.figure, '_notification_revision', 0) + 1
         self.touch_cloud_usage()
         if hasattr(self, "span"):
@@ -1230,6 +1225,7 @@ class MainWindow(QMainWindow):
 
     def layout_result_annotations(self, renderer=None):
         """Place result text inside the plot, avoiding other result text boxes."""
+        from matplotlib.text import Text
         if not self._result_annotations: return
         if renderer is None:
             self.canvas.draw()
@@ -1262,6 +1258,7 @@ class MainWindow(QMainWindow):
                     text.xyann = (origin[0], origin[1]-18*index)
 
     def result_press(self, event):
+        from matplotlib.text import Text
         if event.button != 1 or self.range_enabled.isChecked() or self.toolbar.mode:
             return
         if event.x is None or event.y is None: return
@@ -1409,7 +1406,46 @@ class MainWindow(QMainWindow):
                 self.result_table.setItem(row, col, item)
         self.result_table.scrollToBottom()
 
+    def signed_area_initial_positions(self, curve, fallback):
+        if curve.dataset.temperature_index is None:
+            return None
+        from .measurement import position_at_x
+        temperatures, signal = curve.xy('temperature')
+
+        def locate(t1, t2, anchors):
+            positions = [position_at_x(temperatures, value, anchor, curve.active_rows)
+                         for value, anchor in zip((t1, t2), anchors)]
+            if positions[0] == positions[1]:
+                raise ValueError('积分端点重合')
+            return positions
+
+        for result in reversed(self.results):
+            if (result.get('curve_id') != curve.uid or result.get('kind') != 'dimension_change'
+                    or result.get('domain') != 'temperature'
+                    or not result.get('interactive', {}).get('confirmed')):
+                continue
+            values = result['values']
+            anchors = result['interactive'].get('indices', fallback)
+            try:
+                return locate(values['T1'], values['T2'], anchors)
+            except (KeyError, ValueError):
+                continue
+
+        if len(temperatures) >= 6:
+            from .general_units import conversion
+            from .piliang_core import detect_T2_T1_super_gradient
+            try:
+                factor, origin, _ = conversion(curve.x_unit('temperature'), '°C', 'temperature')
+                converted = temperatures * factor + origin
+                t1, t2, _ = detect_T2_T1_super_gradient(converted.tolist(), signal.tolist(), None)
+                peak = int(np.argmax(signal))
+                return locate((t1-origin)/factor, (t2-origin)/factor, (peak, peak))
+            except (ValueError, ArithmeticError, IndexError):
+                pass
+        return None
+
     def start_point_measurement(self, kind, analysis_config=None):
+        from .measurement import initial_indices, point_values, initial_y_point
         visible = self.visible_curves()
         c = self.selected()
         if c not in visible: c = visible[0] if visible else None
@@ -1433,6 +1469,10 @@ class MainWindow(QMainWindow):
             indices = initial_indices(c, self.domain, kind,transition_config)
             x, y = c.xy(self.domain)
             positions=None;initial_target=None
+            if kind == 'interval_area':
+                positions = self.signed_area_initial_positions(c, indices)
+                if positions is not None:
+                    indices = [int(round(position)) for position in positions]
             if kind=="curve_value_y":
                 position,initial_target=initial_y_point(y,c.active_rows);positions=[position];indices=[int(round(position))]
             values = point_values(x,y,kind,indices,positions)
@@ -1469,6 +1509,8 @@ class MainWindow(QMainWindow):
                 from .alpha import alpha_values,validate_config
                 entry["alpha"]=validate_config(analysis_config)
                 entry["values"].update(alpha_values(c,entry,indices if positions is None else positions))
+            if kind == 'interval_area' and positions is not None:
+                entry['interactive'].update(positions=list(positions), initial_positions=list(positions))
             if kind=="curve_value_y":entry["interactive"].update(positions=positions,initial_positions=list(positions),target_y=initial_target,initial_target_y=initial_target)
             if kind in CURVE_VALUE_KINDS:
                 from .point_labels import default_options,validate_options,signal_snapshot
@@ -1516,6 +1558,8 @@ class MainWindow(QMainWindow):
                 label=f"数据界限：{values['start_x']:.6g} 至 {values['stop_x']:.6g}"
             elif pending.get('purpose')=='delete_peak':label='删除峰：选择已有峰积分范围内的点'
             elif pending["kind"] in ("alpha_at_x","alpha_secant","alpha_fit"):label=f"Alpha {values['alpha']:.6g} µm/m/°C"
+            elif pending['kind']=='interval_area':
+                label=values.get('fit_error', f"S = {values['net_area']:.6g} {values['area_unit']}" if 'net_area' in values else '拖动两点选择积分区间')
             elif pending['kind']=='slope':label=values.get('fit_error',f"斜率 {values.get('slope',0):.6g} {values.get('slope_unit','')}")
             elif pending['kind'] in INTEGRATION_KINDS:label=values.get('fit_error',f"峰面积 {values.get('integral',0):.6g} {values.get('area_unit','')}")
             elif pending['kind'] in ('peak_max','onset_point'):
@@ -1532,6 +1576,17 @@ class MainWindow(QMainWindow):
     def confirm_measurement(self):
         entry = self._pending_measurement
         if entry is None: return
+        if entry['kind']=='interval_area':
+            from .area_calculation import calculate
+            curve = next(c for c in self.curves if c.uid == entry['curve_id'])
+            state = entry['interactive']
+            try:
+                entry['values'].update(calculate(curve, entry['domain'], state.get('positions', state['indices']),
+                                                 coordinate='signed_display_x', baseline='zero'))
+                entry['values'].pop('fit_error', None)
+            except ValueError as exc:
+                self.statusBar().showMessage(str(exc), 8000)
+                return
         if entry['kind']=='slope':
             from .slope import values as compute
             curve=next(c for c in self.curves if c.uid==entry['curve_id'])
@@ -2097,6 +2152,13 @@ def main():
         window.showMaximized()
     else:
         window.show()
+    if len(sys.argv) == 3 and sys.argv[1] == '--verify-startup-window':
+        application.processEvents()
+        report = {'version': __version__, 'visible': window.isVisible(),
+                  'matplotlib_loaded': 'matplotlib' in sys.modules}
+        Path(sys.argv[2]).write_text(json.dumps(report), encoding='utf-8')
+        window.close()
+        return
     if directory_scan_verify:
         from .directory_scan_qa import verify
         verify(window, Path(sys.argv[2]))
@@ -2260,6 +2322,8 @@ def main():
         window.close()
         return
     if verify_mode:
+        from matplotlib.text import Text
+        from .measurement import initial_indices
         output = Path(sys.argv[2])
         try:
             if "--modern" not in sys.argv:

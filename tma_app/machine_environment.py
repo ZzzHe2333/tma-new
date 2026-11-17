@@ -35,13 +35,16 @@ class Snapshot:
 
     def get(self):
         with self.lock:
-            if not self.running and (not self.value or time.monotonic()-self.updated>300):
+            if self.value and time.monotonic() - self.updated <= 300:
+                return dict(self.value)
+            if not self.running:
                 self.running=True
                 try:
                     threading.Thread(target=self.collect,name='TMA-local-environment',daemon=True).start()
                 except RuntimeError:
                     self.running=False
-            return dict(self.value) if self.value else {'cpu_model':'','lan_ip':'','status':'collecting'}
+            return {'cpu_model': self.value.get('cpu_model', ''), 'lan_ip': '',
+                    'status': 'collecting' if self.running else 'unavailable'}
 
     def collect(self):
         value={}

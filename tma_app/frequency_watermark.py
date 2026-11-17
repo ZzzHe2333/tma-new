@@ -28,7 +28,7 @@ def _blocks(rgb, locations):
                xx[:, None, None] + np.arange(8)[None, None, :], :]
 
 
-def _embed_legacy(image):
+def _embed_legacy(image, machine_code=None):
     locations = _locations(*image.size)
     if locations is None:
         return image.copy()
@@ -37,11 +37,19 @@ def _embed_legacy(image):
     blocks = _blocks(rgb, locations)
     luminance = blocks @ np.array([.299, .587, .114], dtype=np.float32)
     coefficients = dctn(luminance, axes=(-2, -1), norm='ortho')
-    a, b = coefficients[:, 2, 3].copy(), coefficients[:, 3, 2].copy()
-    signs = np.tile(_BITS, 3).astype(np.float32) * 2 - 1
-    adjustment = np.maximum(0, _STRENGTH - signs * (a - b)) * signs / 2
-    coefficients[:, 2, 3] += adjustment
-    coefficients[:, 3, 2] -= adjustment
+    def encode(bits, first, second):
+        signs = np.tile(bits, 3).astype(np.float32) * 2 - 1
+        a, b = coefficients[:, *first], coefficients[:, *second]
+        adjustment = np.maximum(0, _STRENGTH - signs * (a - b)) * signs / 2
+        a += adjustment
+        b -= adjustment
+
+    encode(_BITS, (2, 3), (3, 2))
+    if machine_code:
+        from .robust_watermark import _machine_bits
+        bits = _machine_bits(machine_code)
+        if bits is not None:
+            encode(bits, (1, 4), (4, 1))
     delta = idctn(coefficients, axes=(-2, -1), norm='ortho') - luminance
     updated = np.clip(np.rint(blocks + delta[..., None]), 0, 255)
     yy, xx = locations
@@ -52,7 +60,7 @@ def _embed_legacy(image):
     return result
 
 
-def _detect_legacy(image):
+def _detect_legacy(image, *, extract_machine=False):
     locations = _locations(*image.size)
     if locations is None: return dict(detected=False, score=0.)
     rgb = np.asarray(image.convert('RGB'), dtype=np.float32)
@@ -61,18 +69,23 @@ def _detect_legacy(image):
     votes = (coefficients[:, 2, 3] > coefficients[:, 3, 2]).reshape(3, 128)
     bits = votes.sum(axis=0) >= 2
     score = float(np.mean(bits == _BITS))
-    return dict(detected=score >= .94, score=score)
+    result = dict(detected=score >= .94, score=score)
+    if result['detected'] and extract_machine:
+        from .robust_watermark import _decode_machine_bits
+        votes = (coefficients[:, 1, 4] > coefficients[:, 4, 1]).reshape(3, 128)
+        result['machine_code'] = _decode_machine_bits(votes.sum(axis=0) >= 2)
+    return result
 
 
 def embed(image, machine_code=None):
-    from .robust_watermark import embed as robust_embed
-    return robust_embed(_embed_legacy(image), machine_code)
+    # Sparse native-size blocks avoid a visible texture across the plot.
+    return _embed_legacy(image, machine_code)
 
 
 def detect(image, *, extract_machine=False):
-    legacy = _detect_legacy(image)
-    if legacy['detected'] and not extract_machine: return {**legacy, 'scheme': 'legacy_dct_v1'}
+    legacy = _detect_legacy(image, extract_machine=extract_machine)
+    if legacy['detected'] and (not extract_machine or legacy.get('machine_code')): return {**legacy, 'scheme': 'legacy_dct_v1'}
     from .robust_watermark import detect as robust_detect
-    robust = robust_detect(image)
+    robust = robust_detect(image, extract_machine=extract_machine)
     if legacy['detected'] and not robust['detected']: return {**legacy,'scheme':'legacy_dct_v1'}
     return robust if robust['detected'] or robust['score'] > legacy['score'] else {**legacy,'scheme':'legacy_dct_v1'}

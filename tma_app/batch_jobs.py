@@ -29,7 +29,7 @@ def run_batch_job(action, requests, source, directory, cancelled, events):
                     if not value.get('error'): mass_requests.append((key, value))
                 elif action == 'plot':
                     row, path = request
-                    result(key, {'png': backend.write_plot(row, path), 'export_error': ''})
+                    result(key, {'png': backend.write_plot(row, path, automatic_name=bool(directory)), 'export_error': ''})
                 elif action == 'xlsx':
                     rows, path = request
                     result(key, {'xlsx': backend.write_xlsx(rows, path)})

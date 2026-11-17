@@ -178,8 +178,7 @@ class BatchJobs:
                     if "png" in formats and not row.get("error"):
                         path = batch.plot_paths([row], folder)[0]
                         try:
-                            batch.write_plot(row, path)
-                            row["png"] = str(path.resolve())
+                            row["png"] = batch.write_plot(row, path, automatic_name=True)
                             with self.lock:
                                 job["artifacts"].append({"type": "png", "path": row["png"]})
                         except Exception as exc:

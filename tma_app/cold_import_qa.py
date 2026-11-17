@@ -68,8 +68,8 @@ def verify(window, output, paths):
         dialog.export_xlsx(); wait_until(lambda: dialog.export_job is None)
         book = load_workbook(target, data_only=True)
         try:
-            assert abs(book.active.cell(2, 1).value - dialog.rows[0]['T1']) < 1e-9
-            assert book.active.cell(2, 3).value is None
+            assert abs(book.active.cell(2, 2).value - dialog.rows[0]['T1']) < 1e-9
+            assert book.active.cell(2, 4).value is None
         finally:
             book.close()
         QFileDialog.getSaveFileName = staticmethod(lambda *a, **k: (str(weights), ''))

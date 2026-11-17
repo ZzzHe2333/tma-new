@@ -807,6 +807,11 @@ def load_session(path, include_plot_options=False):
                 validate_config(result.get("alpha"))
                 if result["domain"]!="temperature":raise ValueError("Alpha结果必须使用温度X轴")
             annotation = result.get("annotation", {})
+            if result['kind'] == 'interval_area' and 'area_fill_color' in annotation:
+                color = annotation['area_fill_color']
+                if (not isinstance(color, str) or len(color) != 7 or color[0] != '#'
+                        or any(ch not in '0123456789abcdefABCDEF' for ch in color[1:])):
+                    raise ValueError('积分区域颜色无效')
             if result["kind"] in ("curve_value","curve_value_y"):
                 from .point_labels import validate_options,validate_signal
                 validate_options(annotation.get("point_label"));validate_signal(result.get("point_signal"),curve.dataset)
