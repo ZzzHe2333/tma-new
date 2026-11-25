@@ -53,13 +53,13 @@ def saved_size(*, primary=None, data=None):
         for _, path in sorted(existing, key=lambda item: item[0], reverse=True):
             try:
                 value = json.loads(path.read_text(encoding='utf-8')).get('size')
-                if value in {key for key, _, _ in PRESETS}: return value
+                if isinstance(value, str) and value in {key for key, _, _ in PRESETS}: return value
             except (OSError, ValueError, AttributeError): continue
         if data is None:
             from .path_settings import _read_settings
             data = _read_settings(primary=profile)[1]
         value = data.get('ui', {}).get('size', 'standard')
-        return value if value in {key for key, _, _ in PRESETS} else 'standard'
+        return value if isinstance(value, str) and value in {key for key, _, _ in PRESETS} else 'standard'
     except (OSError, ValueError, AttributeError): return 'standard'
 
 
@@ -83,7 +83,7 @@ def save_size(key, *, path=None):
 
 def active_size():
     value = os.environ.get('ZZZHE_TMA_UI_SIZE_ACTIVE', 'standard')
-    return value if value in {key for key, _, _ in PRESETS} else 'standard'
+    return value if isinstance(value, str) and value in {key for key, _, _ in PRESETS} else 'standard'
 
 
 def factor(): return next(scale for key, _, scale in PRESETS if key == active_size())
@@ -108,7 +108,7 @@ def saved_icon_size(*, primary=None):
     for _, candidate in sorted(candidates, key=lambda item: item[0], reverse=True):
         try:
             key = json.loads(candidate.read_text(encoding='utf-8')).get('size')
-            if key in {item[0] for item in PRESETS}: return key
+            if isinstance(key, str) and key in {item[0] for item in PRESETS}: return key
         except (OSError, ValueError, AttributeError): pass
     return 'standard'
 

@@ -61,6 +61,16 @@ def _boolean(value, label):
     return value
 
 
+def _validate_label_style(style):
+    if not isinstance(style, dict) or set(style) - {"bold", "italic", "size", "hidden"}:
+        raise ValueError("独立文字格式无效")
+    for flag in ("bold", "italic", "hidden"):
+        if flag in style:
+            _boolean(style[flag], flag)
+    if "size" in style and not 6 <= _number(style["size"], "字号") <= 72:
+        raise ValueError("字号必须为6至72")
+
+
 def _limits(value, label):
     if value is None:
         return None
@@ -88,6 +98,7 @@ def default_plot_options():
             "overlay_auto": default_auto_styles(), "overlay_configure": default_auto_configure(),
             "axis_flags": [{"line": False, "color": False, "symbol": False} for _ in range(4)],
             "export_title": "", "export_align": "left", "window_name": "", "mass_normalization_titles": None,
+            "temperature_references": [],
             "legend_anchor": None, "x_domain": None, "secondary_x": False, "signal_defaults": None,"smoothing_rules":[],"overlay_members":None,"axis_x_offsets":[0.]*4,"point_label_options":default_options(),"alpha_smoothing_width":None,"unit_defaults":None,"transition_options":None,"signal_change_options":None,"peak_onset_options":None,"integration_options":None,"sigmoid_iterations":None,"auto_limits_rules":[]}
 
 
@@ -134,6 +145,9 @@ def validate_plot_options(options):
         elif key == "mass_normalization_titles":
             if value is not None and (not isinstance(value,dict) or set(value)!={'title','window_name','export_title'}):raise ValueError('统一化原始标题无效')
             result[key]=None if value is None else {name:_text(text,name,80 if name=='window_name' else 4096) for name,text in value.items()}
+        elif key == "temperature_references":
+            from .temperature_reference import validate_lines
+            result[key] = validate_lines(value)
         elif key == "export_align":
             if value not in ("left", "center", "right"): raise ValueError("绘图标题对齐方式无效")
             result[key] = value
@@ -825,12 +839,9 @@ def load_session(path, include_plot_options=False):
             label_styles = annotation.get("label_styles", {})
             if not isinstance(label_styles, dict): raise ValueError("独立文字格式无效")
             for label_key, label_style in label_styles.items():
-                if label_key not in ("result", "t1", "t2", "t3", "t4", "t5", "t6", "onset") + tuple(f"info{i}" for i in range(1, 100)) or not isinstance(label_style, dict) or set(label_style) - {"bold", "italic", "size", "hidden"}:
+                if label_key not in ("result", "t1", "t2", "t3", "t4", "t5", "t6", "onset") + tuple(f"info{i}" for i in range(1, 100)):
                     raise ValueError("独立文字格式无效")
-                for flag in ("bold", "italic", "hidden"):
-                    if flag in label_style: _boolean(label_style[flag], flag)
-                if "size" in label_style and not 6 <= _number(label_style["size"], "字号") <= 72:
-                    raise ValueError("字号必须为6至72")
+                _validate_label_style(label_style)
             offsets = annotation.get("label_offsets", {})
             if not isinstance(offsets, dict): raise ValueError("温度标签位置无效")
             for key, value in offsets.items():

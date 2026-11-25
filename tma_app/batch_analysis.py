@@ -337,12 +337,14 @@ def _render_plot(row):
     axis.xaxis.set_minor_locator(MultipleLocator(10))
     axis.yaxis.set_minor_locator(AutoMinorLocator())
     axis.grid(which="major", color="#e6e0e9", linestyle="--", lw=.4)
-    axis.set_xlabel("温度(°C)")
-    axis.set_ylabel("尺寸变化(µm)")
-    figure.text(.085, .965, row["name"], ha="left", va="top", fontsize=12, parse_math=False)
+    # Batch and MCP exports can run before the first Qt plot chooses its fonts.
+    fonts = ["Microsoft YaHei", "SimSun", "DejaVu Sans"]
+    axis.set_xlabel("温度(°C)", fontfamily=fonts)
+    axis.set_ylabel("尺寸变化(µm)", fontfamily=fonts)
+    figure.text(.085, .965, row["name"], ha="left", va="top", fontsize=12, fontfamily=fonts, parse_math=False)
     mass = "未匹配" if row.get("M") is None else f"{row['M']:.2f} mg"
     axis.text(.02, .96, "方法日志：30 ℃ 平衡，施加 0.06 N\n                    20 ℃/min加热至 250 ℃\n称取质量：" + mass,
-              transform=axis.transAxes, va="top", fontsize=10)
+              transform=axis.transAxes, va="top", fontsize=10, fontfamily=fonts)
     figure.text(.97, .025, "Power By ZzzHe", ha="right", va="bottom", fontsize=10)
     figure.subplots_adjust(left=.085, right=.96, top=.9, bottom=.12)
     buffer = BytesIO()

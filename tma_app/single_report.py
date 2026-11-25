@@ -102,6 +102,7 @@ def read_tma(path, source, algorithm="auto"):
     path = resolve_source(path)
     if not path.is_file():
         raise ValueError("请选择有效的 TMA 数据文件")
+    before = _source_fingerprint(path.stat())
     text, _ = core.load_text_prefer_tajm(str(path), LOGGER)
     xs, ys, _ = core.extract_xy_from_file(core.parse_lines(text), LOGGER)
     if len(xs) < 5:
@@ -118,7 +119,10 @@ def read_tma(path, source, algorithm="auto"):
     # The supplied UI calculates density from its displayed/edited H value.
     if mg is not None:
         fields["TMA"] = f"{core.calc_tma_from_m_h(mg, float(fields['H'])):.3f}"
-    return dict(file=str(path), sha256=digest(path), xs=xs, ys=ys, fields=fields, details=details,
+    checksum = digest(path)
+    if _source_fingerprint(path.stat()) != before:
+        raise ValueError("TMA 文件在读取期间发生变化，请重新读取")
+    return dict(file=str(path), sha256=checksum, xs=xs, ys=ys, fields=fields, details=details,
                 algorithm=algorithm, mass_source=mass.source, mass_config=source,
                 warning="" if mg is not None else mass.message)
 
@@ -189,22 +193,22 @@ def read_particle(path, sample_name="", record_index=None, *, require_match=Fals
         records, checksum = p9m_data(path)
         keys = _batch_keys(Path(sample_name).stem)
         matches = [i for i, record in enumerate(records) if keys & (_batch_keys(record.sample_no) | _batch_keys(record.sample_name))]
+        default_index = None
+        if len(matches) == 1:
+            default_index = matches[0]
+        elif len(matches) > 1:
+            averages = [i for i in matches if records[i].is_average]
+            if len(averages) == 1:
+                default_index = averages[0]
+                result['warning'] = f'匹配 {len(matches)} 条测量记录，默认选择唯一平均记录，可手动选择此文件中的任意记录。'
+        elif len(records) == 1 and not require_match:
+            default_index = 0
+        index = default_index if record_index is None else record_index
+        result.update(records=records, sha256=checksum, selected_index=index, matched_indices=matches,
+                      default_index=default_index, method='P9M 原始记录')
         if expected_revision and checksum != expected_revision:
-            result.update(records=records, sha256=checksum, matched_indices=matches, method="P9M 原始记录",
-                          warning="粒径数据集已更新，已清除旧记录选择；请重新选择测量记录。")
+            result.update(selected_index=None, warning="粒径数据集已更新，已清除旧记录选择；请重新选择测量记录。")
             return result
-        index = record_index
-        if index is None:
-            if len(matches) == 1:
-                index = matches[0]
-            elif len(matches) > 1:
-                averages = [i for i in matches if records[i].is_average]
-                if len(averages) == 1:
-                    index = averages[0]
-                    result["warning"] = f"匹配 {len(matches)} 条测量记录，已选唯一平均记录，可在粒径记录中切换。"
-            elif len(records) == 1 and not require_match:
-                index = 0
-        result.update(records=records, sha256=checksum, selected_index=index, matched_indices=matches, method="P9M 原始记录")
         if index is None:
             result["warning"] = "此 P9M 有多条记录，请选择要使用的粒径记录"
             return result
@@ -214,6 +218,7 @@ def read_particle(path, sample_name="", record_index=None, *, require_match=Fals
         result["fields"] = {"D50": core._p9m_n3(record.d50), "SPAN": core._p9m_n3(record.span),
                             "particle_time": measurement_datetime(record.measurement_time)}
         return result
+    before = _source_fingerprint(path.stat())
     result["sha256"] = digest(path)
     values = {}
     if suffix == ".pdf":
@@ -238,6 +243,8 @@ def read_particle(path, sample_name="", record_index=None, *, require_match=Fals
         result["method"] = "图片 OCR"
     else:
         raise ValueError("粒径文件支持 P9M、PDF、PNG、JPG、TIFF")
+    if _source_fingerprint(path.stat()) != before:
+        raise ValueError("粒径文件在读取期间发生变化，请重新读取")
     for key in ("D50", "SPAN"):
         value = values.get(key)
         if value is not None and math.isfinite(value) and (value > 0 if key == "D50" else value >= 0):

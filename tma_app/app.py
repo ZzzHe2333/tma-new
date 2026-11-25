@@ -1115,7 +1115,16 @@ class MainWindow(QMainWindow):
                             and r.get("curve_id", c.uid) == c.uid
                             and r["signal"] == c.result_label and r["operations"] == c.operations
                             and r["transform"] == c.result_transform(self.domain)]
-                for result in matching[-6:]:
+                document = self.active_document() if hasattr(self, 'active_document') else None
+                document_key = document.key if document is not None else None
+                if c.mass_normalization_mg is not None and c.appearance_mode == 'overlay':
+                    from .mass_normalization import MARKER_KINDS
+                    matching = [r for r in matching if r.get('kind') not in MARKER_KINDS
+                                or r.get('normalized_document') == document_key]
+                matching = [r for r in matching if not r.get('normalized_document')
+                            or r['normalized_document'] == document_key]
+                displayed = matching if any(r.get("normalized_document") for r in matching) else matching[-6:]
+                for result in displayed:
                     if "interactive" in result:
                         editor = MeasurementArtists(axis,c,result,self.domain,display_x_offset=dx)
                         self._measurement_artists.append(editor)
@@ -1227,6 +1236,7 @@ class MainWindow(QMainWindow):
         """Place result text inside the plot, avoiding other result text boxes."""
         from matplotlib.text import Text
         if not self._result_annotations: return
+        from .temperature_reference import KIND as TEMPERATURE_REFERENCE
         if renderer is None:
             self.canvas.draw()
             renderer = self.canvas.get_renderer()
@@ -1234,11 +1244,23 @@ class MainWindow(QMainWindow):
                     for editor in self._measurement_artists for text in editor.temps if text.get_visible()]
         for result, annotation in self._result_annotations:
             if not annotation.get_visible() or not annotation.get_text(): continue
-            if getattr(annotation, "_tma_offset_key", None) is not None:
+            key = getattr(annotation, "_tma_offset_key", None)
+            reference = result["kind"] == TEMPERATURE_REFERENCE
+            if key is not None and not reference:
                 continue  # Temperature labels retain their independent offsets.
             bounds = annotation.axes.bbox
-            if "offset" not in result.get("annotation", {}):
-                candidates = [(dx, dy) for dy in (18, 75, -65, 135, -125, 195, -185, 250) for dx in (12, -140, 150, -270, 280)]
+            options = result.get("annotation", {})
+            if reference and not bounds.contains(*annotation.axes.transData.transform(annotation.xy)):
+                continue
+            manual_offset = key in options.get("label_offsets", {}) if reference else "offset" in options
+            if not manual_offset:
+                if reference:
+                    annotation.update_positions(renderer)
+                    width = Text.get_window_extent(annotation, renderer).width * 72 / self.figure.dpi
+                    candidates = [(dx, dy) for dy in (8, -18, 24, -34, 40, -50, 56, -66, 72, -82)
+                                  for dx in (8, -width - 8, width + 16, -2 * width - 16)]
+                else:
+                    candidates = [(dx, dy) for dy in (18, 75, -65, 135, -125, 195, -185, 250) for dx in (12, -140, 150, -270, 280)]
                 chosen = None
                 for offset in candidates:
                     annotation.xyann = offset
@@ -1247,7 +1269,10 @@ class MainWindow(QMainWindow):
                     inside = box.x0 >= bounds.x0 + 4 and box.x1 <= bounds.x1 - 4 and box.y0 >= bounds.y0 + 4 and box.y1 <= bounds.y1 - 4
                     if inside and not any(box.overlaps(other) for other in occupied):
                         chosen = offset; break
-                annotation.xyann = chosen or (12, 18)
+                if chosen is not None:
+                    annotation.xyann = chosen
+                elif not reference:
+                    annotation.xyann = (12, 18)
             annotation.update_positions(renderer)
             occupied.append(Text.get_window_extent(annotation, renderer).expanded(1.04, 1.12))
         for editor in self._measurement_artists:
@@ -1421,6 +1446,7 @@ class MainWindow(QMainWindow):
 
         for result in reversed(self.results):
             if (result.get('curve_id') != curve.uid or result.get('kind') != 'dimension_change'
+                    or (result.get('normalized_document') and result['normalized_document'] != curve.active_overlay_key)
                     or result.get('domain') != 'temperature'
                     or not result.get('interactive', {}).get('confirmed')):
                 continue
@@ -1451,6 +1477,10 @@ class MainWindow(QMainWindow):
         if c not in visible: c = visible[0] if visible else None
         if c is None: return
         try:
+            from .mass_normalization import MARKER_KINDS
+            if kind in MARKER_KINDS and c.mass_normalization_mg is not None and c.appearance_mode == 'overlay':
+                self.statusBar().showMessage('请先在单图修改标记，再重新叠图并统一化。', 7000)
+                return
             if kind == "dimension_change" and (c.derived is not None or c.dataset.signals[c.y_index].unit.replace("μ", "µ") not in ("µm", "um")):
                 raise ValueError("尺寸变化需要选择 µm 尺寸信号")
             self.range_enabled.setChecked(False)
@@ -1640,6 +1670,9 @@ class MainWindow(QMainWindow):
         if entry is None:
             entry = next((editor.entry for editor in reversed(self._measurement_artists) if any(editor.entry is result for result in self.results)), None)
         if entry is None: return
+        if entry.get('normalized_document'):
+            self.statusBar().showMessage('请先在单图修改标记，再重新叠图并统一化。', 7000)
+            return
         self.cancel_measurement(redraw=False)
         self._editing_measurement = entry
         self._pending_measurement = deepcopy(entry)

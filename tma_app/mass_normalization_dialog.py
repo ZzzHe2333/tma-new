@@ -62,7 +62,10 @@ class MassNormalizationDialog(QDialog):
         self.buttons.accepted.connect(self.accept);self.buttons.rejected.connect(self.reject)
         bottom.addWidget(self.buttons);layout.addLayout(bottom)
         self.update_validity()
-        QTimer.singleShot(0,self.auto_read)
+        self._initial_lookup_timer = QTimer(self)
+        self._initial_lookup_timer.setSingleShot(True)
+        self._initial_lookup_timer.timeout.connect(self.auto_read)
+        self._initial_lookup_timer.start(0)
 
     def changed(self,row):
         if not self._auto_filling:self._manual_rows.add(row)
@@ -88,6 +91,7 @@ class MassNormalizationDialog(QDialog):
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(valid)
 
     def stop_lookup(self):
+        self._initial_lookup_timer.stop()
         if self.mass_job is not None:
             self.mass_job.cancel();self.mass_job.deleteLater();self.mass_job=None
         self.refresh_button.setEnabled(True)

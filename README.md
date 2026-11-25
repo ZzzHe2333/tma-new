@@ -1,6 +1,6 @@
 # ZzzHe TMA Analysis
 
-基于 Python + PySide6（Qt）的热分析数据读取与处理软件。以本机 Universal Analysis 2000 v4.5 的功能资料为参考，优先实现 TMA 数据处理闭环；目前版本 **1.2.2**，并非原软件全部功能的等价替代。
+**1.2.3** 使用 Python 和 PySide6（Qt）读取、绘制和分析 TMA 数据，界面参考 Universal Analysis 2000 v4.5。
 
 在「帮助 → 检查更新」可从 GitHub Releases 检查和下载新版。代理可填 `http://127.0.0.1:7897`，下载加速地址可填带 `{url}` 的 HTTPS 模板。下载完成后校验 GitHub 记录的 SHA-256，再保存 ZIP；解压到新目录后启动新版。发布时需在 GitHub Release 上传 `ZzzHe-TMA-Analysis-<版本>.zip`，标签格式为 `<版本>` 或 `v<版本>`。
 
@@ -80,7 +80,7 @@
 
 ## 启动
 
-- 已打包版本：打开 `dist-1.1.24\ZzzHe TMA Analysis\ZzzHe TMA Analysis.exe`。移动程序时请保留整个 `ZzzHe TMA Analysis` 文件夹。
+- Windows 版请先完整解压 ZIP，再打开 `ZzzHe TMA Analysis\ZzzHe TMA Analysis.exe`。移动程序时请保留整个 `ZzzHe TMA Analysis` 文件夹。
 - 源码版本：双击 `launch.cmd`，或在项目目录运行 `python run.py`。
 - 新环境安装：Python 3.11+，运行 `python -m pip install -r requirements.txt`。
 - 也可 `python run.py "D:\实验\样本.001" "D:\实验\样本.002"`，按参数顺序导入。

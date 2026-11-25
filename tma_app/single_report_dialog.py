@@ -4,6 +4,8 @@ from __future__ import annotations
 from copy import deepcopy
 from pathlib import Path
 import threading
+import secrets
+import string
 
 from PySide6.QtCore import QObject, Qt, Signal, Slot, QUrl
 from PySide6.QtGui import QDesktopServices
@@ -45,6 +47,17 @@ class ReportJob(QObject):
                     algorithm=self.request["algorithm"], record_index=self.request["record_index"],
                     particle_revision=self.request.get("particle_revision"), progress=self.notify, parts=self.parts)
                 result = dict(kind="read", data=data, parts=self.parts)
+            elif self.action == 'refresh_mass':
+                from .mass_lookup import lookup_record
+                self.notify('正在强制刷新 M 缓存…')
+                match = lookup_record(Path(self.request['tma_path']).name,
+                                      source=self.request['mass_source'], force=True)
+                if match.unavailable or '暂不可用' in match.message:
+                    raise ValueError(match.message or 'M 数据源暂不可用')
+                if match.value is None:
+                    raise ValueError(match.message or '未匹配到当前样品的 M')
+                mg = match.value * (1000 if match.unit == 'g' else 1)
+                result = dict(kind='mass_refreshed', mass=mg, source=match.source)
             elif self.action == "recommend":
                 from .particle_recommendation import recommend
                 data = recommend(self.request["sample"], self.request["folder"], cancelled=self.cancelled, progress=self.notify)
@@ -182,6 +195,10 @@ class SingleReportDialog(QDialog):
         self.read_button = QPushButton("读取信息")
         self.read_button.setObjectName("ReadSingleReport")
         self.read_button.clicked.connect(self.read_information)
+        self.refresh_mass_button = QPushButton('刷新 M 缓存')
+        self.refresh_mass_button.setObjectName('RefreshReportMass')
+        self.refresh_mass_button.setToolTip('强制重新读取称量数据，更新当前样品的 M 和 TMA 密度。')
+        self.refresh_mass_button.clicked.connect(self.refresh_mass)
         self.generate_button = QPushButton("生成 PDF")
         self.generate_button.setObjectName("primary")
         self.generate_button.clicked.connect(self.generate)
@@ -190,7 +207,7 @@ class SingleReportDialog(QDialog):
         self.open_button.clicked.connect(self.open_report)
         close = QPushButton("关闭")
         close.clicked.connect(self.reject)
-        for button in (self.read_button, self.generate_button, self.open_button, close):
+        for button in (self.read_button, self.refresh_mass_button, self.generate_button, self.open_button, close):
             button.setAutoDefault(False)
             bottom.addWidget(button)
         layout.addLayout(bottom)
@@ -210,9 +227,15 @@ class SingleReportDialog(QDialog):
             menu = QMenu(button)
             menu.addAction("本地文件…", callback)
             def selected(path):
-                edit.setText(path)
-                if name == "ReportTmaPath": self.read_information(parts=("tma",))
-                elif name == "ReportParticlePath": self.read_information(parts=("particle",))
+                if self.job is not None:
+                    self.log.appendPlainText("正在处理报告，请在完成后重新选择云盘文件。")
+                    return
+                if name == "ReportTmaPath":
+                    self.select_tma(path)
+                else:
+                    edit.setText(path)
+                    if name == "ReportParticlePath":
+                        self.read_information(parts=("particle",))
             menu.addAction("云盘文件…", lambda: self.owner.show_cloud(selected_callback=selected))
             button.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
             button.customContextMenuRequested.connect(lambda point: menu.exec(button.mapToGlobal(point)))
@@ -233,16 +256,19 @@ class SingleReportDialog(QDialog):
             "TMA 数据 (*.0?? *.1?? *.2?? *.3?? *.4?? *.5?? *.6?? *.7?? *.8?? *.9?? *.txt);;所有文件 (*)",owner=self.owner,multiple=False)
         path=paths[0] if paths else ''
         if path:
-            self.tma_path.setText(path)
-            self.read_information(parts=("tma", "particle") if self.particle_path.text().lower().endswith(".p9m") else ("tma",))
+            self.select_tma(path)
+
+    def select_tma(self, path):
+        self.tma_path.setText(str(path))
+        parts = ("tma", "particle") if self.particle_path.text().strip().strip('"').lower().endswith(".p9m") else ("tma",)
+        self.read_information(parts=parts)
 
     def use_selected(self):
         curve = self.owner.selected()
         if curve is None:
             self.log.appendPlainText("主窗口尚未选中数据，请选择一个 TMA 文件。")
             return
-        self.tma_path.setText(str(curve.dataset.path))
-        self.read_information(parts=("tma", "particle") if self.particle_path.text().lower().endswith(".p9m") else ("tma",))
+        self.select_tma(curve.dataset.path)
 
     def choose_particle(self):
         path, _ = QFileDialog.getOpenFileName(self, "选择粒径文件", particle_folder(),
@@ -265,9 +291,20 @@ class SingleReportDialog(QDialog):
         if path:
             self.template_path.setText(path)
 
+    def refresh_output_name(self, source):
+        if not source:
+            self.output_path.clear()
+            return
+        previous = self.output_path.text().strip().strip('"')
+        folder = Path(previous).parent if previous else Path(source).parent
+        suffix = ''.join(secrets.choice(string.ascii_uppercase) for _ in range(4))
+        self.output_path.setText(str(folder / f'{Path(source).stem}_{suffix}.pdf'))
+
     def choose_output(self):
-        source = self.tma_path.text().strip()
-        default = self.output_path.text().strip() or (str(Path(source).with_name(Path(source).stem + "_报告.pdf")) if source else str(Path(import_folder() or Path.home()) / "单样品报告.pdf"))
+        source = self.tma_path.text().strip().strip('"')
+        if not self.output_path.text().strip() and source:
+            self.refresh_output_name(source)
+        default = self.output_path.text().strip() or str(Path(import_folder() or Path.home()) / '单样品报告.pdf')
         path, _ = QFileDialog.getSaveFileName(self, "保存单样品报告", default, "PDF 报告 (*.pdf)")
         if path:
             self.output_path.setText(path if path.lower().endswith(".pdf") else path + ".pdf")
@@ -280,7 +317,10 @@ class SingleReportDialog(QDialog):
         if part == "tma":
             path = self.tma_path.text().strip().strip('"')
             self.fields["sample_name"].setText(Path(path).stem if path else "")
-            if self.particle_path.text().strip().lower().endswith(".p9m"):
+            if path != getattr(self, '_output_source', None):
+                self._output_source = path
+                self.refresh_output_name(path)
+            if self.particle_path.text().strip().strip('"').lower().endswith(".p9m"):
                 self.source_changed("particle")
         else:
             self.record_box.blockSignals(True)
@@ -317,6 +357,7 @@ class SingleReportDialog(QDialog):
                     self.data.get("fields", {}).pop(key, None)
                 self.last_output = ""
                 self.open_button.setEnabled(False)
+                self.populate_records(particle)
                 self.status.setText("请选择测量记录")
 
     def restore_particle_selection(self):
@@ -338,6 +379,18 @@ class SingleReportDialog(QDialog):
         except (ValueError, OSError) as exc:
             self.log.appendPlainText(str(exc))
 
+    def refresh_mass(self):
+        if self.job is not None:
+            return
+        request = self.request()
+        if not request['tma_path']:
+            self.status.setText('请先选择 TMA 文件。')
+            return
+        if not request['mass_source']:
+            self.status.setText('请先在数据路径设置中配置 M 数据源。')
+            return
+        self.start_job(ReportJob('refresh_mass', request))
+
     def start_job(self, job):
         self.job = job
         job.progress.connect(self.show_progress)
@@ -345,6 +398,7 @@ class SingleReportDialog(QDialog):
         self.inputs_group.setEnabled(False)
         self.info_group.setEnabled(False)
         self.read_button.setEnabled(False)
+        self.refresh_mass_button.setEnabled(False)
         self.generate_button.setEnabled(False)
         self.open_button.setEnabled(False)
         self.progress.show()
@@ -371,19 +425,28 @@ class SingleReportDialog(QDialog):
             if key in self.fields:
                 self.fields[key].setText(str(value))
         self.data["fields"] = {key: edit.text() for key, edit in self.fields.items()}
-        particle = self.data.get("particle")
+        self.populate_records(self.data.get("particle"))
+
+    def populate_records(self, particle):
         self.record_box.blockSignals(True)
         self.record_box.clear()
         if particle and particle["records"]:
             self.record_box.addItem("请选择测量记录", None)
-            indices = particle.get("matched_indices") or list(range(len(particle["records"])))
-            if particle["selected_index"] is not None and particle["selected_index"] not in indices:
-                indices = [*indices, particle["selected_index"]]
-            for index in indices:
+            matches = set(particle.get('matched_indices', []))
+            for index in range(len(particle['records'])):
                 record = particle["records"][index]
                 label = f"{record.record_id or index+1} · {record.sample_name or record.sample_no} · {record.measurement_time}"
                 if record.is_average:
                     label += " · 平均"
+                markers = []
+                if index in matches:
+                    markers.append('名称匹配')
+                if index == particle.get('default_index'):
+                    markers.append('系统默认')
+                if index == particle['selected_index']:
+                    markers.append('当前使用')
+                if markers:
+                    label += ' · ' + ' / '.join(markers)
                 self.record_box.addItem(label, index)
             self.record_box.setCurrentIndex(max(0, self.record_box.findData(particle["selected_index"])))
             self.record_row.show()
@@ -398,6 +461,7 @@ class SingleReportDialog(QDialog):
         self.inputs_group.setEnabled(True)
         self.info_group.setEnabled(True)
         self.read_button.setEnabled(True)
+        self.refresh_mass_button.setEnabled(True)
         self.generate_button.setEnabled(True)
         self.open_button.setEnabled(bool(self.last_output))
         self.progress.hide()
@@ -409,7 +473,24 @@ class SingleReportDialog(QDialog):
             self.apply_data(result["data"], result["parts"])
             for message in result["data"]["errors"] + result["data"]["warnings"]:
                 self.log.appendPlainText(message)
-            self.log.appendPlainText("读取完成，请核对信息。")
+            if result["data"]["errors"]:
+                self.status.setText("读取遇到错误，请检查文件后重试。")
+            else:
+                self.log.appendPlainText("读取完成，请核对信息。")
+        elif result['kind'] == 'mass_refreshed':
+            self.fields['M'].setText(f"{result['mass']:.4f}")
+            self.update_density()
+            for key in ('M', 'TMA'):
+                text = self.fields[key].text()
+                self.data.setdefault('fields', {})[key] = text
+                if self.data.get('tma'):
+                    self.data['tma']['fields'][key] = text
+            if self.data.get('tma'):
+                self.data['tma'].update(mass_source=result['source'], mass_config=job.request['mass_source'])
+            self.last_output = ''
+            self.open_button.setEnabled(False)
+            self.status.setText('M 缓存已刷新，请核对后生成报告。')
+            self.log.appendPlainText(f"M = {result['mass']:.4f} mg，来源：{result['source']}")
         elif result["kind"] == "recommended":
             particle = result["data"]
             self.particle_path.setText(particle.get("recommended_path", particle["file"]))

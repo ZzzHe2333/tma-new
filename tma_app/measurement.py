@@ -519,6 +519,8 @@ class MeasurementArtists:
         return min(candidates)[1] if candidates else None
 
     def move(self, point, target_x):
+        if self.entry.get('normalized_document'):
+            raise ValueError('请先在单图修改标记，再重新叠图并统一化。')
         if self.entry["kind"]=="curve_value_y":
             target=float(np.clip(target_x,self.y.min(),self.y.max()))
             position=position_at_y(self.y,target,self.curve.active_rows)

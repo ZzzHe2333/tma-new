@@ -247,6 +247,7 @@ class ClassicMainWindow(MainWindow):
         callbacks = self._callbacks()
         settings_menu = self.menuBar().addMenu("设置")
         self.settings_menu = settings_menu
+        settings_menu.addAction("图片鉴定…", self.identify_exported_image)
         self.classic_menus = {'Settings': settings_menu}
         settings_menu.addAction("数据路径…", self.show_path_settings).setObjectName("PathSettings1")
         settings_menu.addAction("批量窗口设置…", self.show_path_settings).setObjectName("BatchWindowSettings1")
@@ -273,6 +274,7 @@ class ClassicMainWindow(MainWindow):
                 return
             if item.get("children"):
                 submenu = parent.addMenu(caption)
+                submenu.setParent(parent)
                 self.classic_menus[name] = submenu
                 from .ui_help import describe_action
                 submenu.menuAction().setToolTip(describe_action(name, caption))
@@ -299,6 +301,9 @@ class ClassicMainWindow(MainWindow):
 
         for menu in self.ui_model["menus"]:
             parent = self.menuBar().addMenu(menu["caption"])
+            parent.setParent(self.menuBar())
+            if menu["caption"] == "工具":
+                self.tools_menu = parent
             self.classic_menus[menu['name']] = parent
             if menu["name"] == "Help1":
                 parent.addAction("检查更新…", self.show_update_dialog)
@@ -309,7 +314,6 @@ class ClassicMainWindow(MainWindow):
                 self.window_menu = parent
             if menu["caption"]=="工具":
                 parent.addSeparator();parent.addAction("通用信号处理…",self.show_processing)
-                parent.addAction("图片鉴定…", self.identify_exported_image)
             if menu["caption"] == "文件":
                 action = QAction("批量处理 T1 / T2 / M / H…", self)
                 action.setObjectName("BatchAnalysis1")
@@ -337,12 +341,16 @@ class ClassicMainWindow(MainWindow):
         signed_area.setObjectName("SignedArea")
         signed_area.triggered.connect(lambda: self.start_point_measurement('interval_area'))
         self.classic_actions["SignedArea"] = signed_area
-        for menu_action in self.menuBar().actions():
-            if menu_action.text() == "分析":
-                menu = menu_action.menu()
-                menu.addAction(signed_area)
-                after = self.classic_actions.get("SignalChange1")
-                menu.insertAction(after, height)
+        temperature_reference = QAction("温度参考线…", self)
+        temperature_reference.setObjectName("TemperatureReference")
+        temperature_reference.setToolTip("在指定温度绘制竖线，为各曲线交点添加可拖动的纵坐标标签。")
+        temperature_reference.triggered.connect(lambda: self.edit_temperature_reference())
+        self.classic_actions["TemperatureReference"] = temperature_reference
+        analysis_menu = self.classic_menus.get('Analyze1')
+        if analysis_menu is not None:
+            analysis_menu.addAction(signed_area)
+            analysis_menu.addAction(temperature_reference)
+            analysis_menu.insertAction(self.classic_actions.get('SignalChange1'), height)
         if hasattr(self, "window_menu"):
             self.window_menu.aboutToShow.connect(self.update_window_menu)
         data_menu=self.classic_actions.get("DataLimits1")
@@ -386,6 +394,10 @@ class ClassicMainWindow(MainWindow):
         self.statusBar().setSizeGripEnabled(True)
         self.statusBar().setFixedHeight(19)
         self._make_toolbar()
+        from .feature_visibility import install as install_visibility
+        install_visibility(self)
+        from .settings_backup_ui import show as show_backup
+        self.settings_menu.addAction("设置备份…", lambda: show_backup(self))
 
     def show_path_settings(self):
         from .settings_dialog import SettingsDialog
@@ -951,6 +963,9 @@ class ClassicMainWindow(MainWindow):
         if options["secondary_x"] and self.domain in ("temperature", "time") and curves:
             from .secondary_axis import add_secondary_axis
             add_secondary_axis(base,curves[0],self.domain,PLOT_FONTS,scale,display_x_offset=self.display_x_offset(curves[0]))
+        if self.domain == "temperature" and options.get("temperature_references"):
+            from .temperature_reference import render
+            render(self, options["temperature_references"], PLOT_FONTS, max(8, 14*scale))
         active.plot_signature = signature
         active.plot_axes = dict(self.axes)
         active.plot_ticks = {i: (axis.get_xticks().copy(), axis.get_yticks().copy()) for i, axis in self.axes.items()}
@@ -982,6 +997,52 @@ class ClassicMainWindow(MainWindow):
         if (not getattr(self, '_closing', False) and isinstance(active, PlotDocument)
                 and getattr(active, 'layout_size', None) != active.canvas.get_width_height(physical=True)):
             self.redraw()
+
+    def edit_temperature_reference(self, entry=None):
+        from .temperature_reference import edit_dialog
+
+        doc = self.active_document()
+        if doc is None or not self._plot_artists:
+            self.statusBar().showMessage("请先打开一张温度曲线图。", 6000)
+            return
+        if self.domain != "temperature":
+            self.statusBar().showMessage("请先在「曲线图 → X 轴」中切换到温度。", 6000)
+            return
+        lo, hi = self.axes[0].get_xlim()
+        temperature = .5*lo + .5*hi if entry is None else entry["temperature"]
+        color = "#000000" if entry is None else entry["color"]
+        settings = edit_dialog(self, temperature, color, self._plot_artists[0][0].x_unit("temperature"),
+                               editing=entry is not None)
+        if settings is None or self.active_document() is not doc:
+            return
+        if entry is None:
+            self.plot_options[doc.key].setdefault("temperature_references", []).append(settings)
+        else:
+            entry.update(temperature=settings["temperature"], color=settings["color"])
+        self.touch()
+        self.redraw()
+
+    def temperature_reference_menu(self, entry, annotation=None):
+        menu = QMenu(self)
+        doc = self.active_document()
+
+        def remove():
+            options = self.plot_options[doc.key]
+            options["temperature_references"] = [item for item in options["temperature_references"] if item is not entry]
+            self.touch()
+            self.redraw()
+
+        if annotation is not None:
+            self.add_result_text_actions(menu, entry, annotation)
+            menu.addSeparator()
+        elif any(result is entry for result, _ in self._result_annotations):
+            self.add_label_visibility_actions(menu.addMenu("文字显隐"), entry)
+            menu.addSeparator()
+        menu.addAction("编辑参考线…", lambda: self.edit_temperature_reference(entry))
+        menu.addAction("删除参考线", remove)
+        if annotation is not None:
+            menu.addAction("复制纵坐标", lambda: QApplication.clipboard().setText(annotation.get_text()))
+        return menu
 
     def canvas_resized(self, event):
         if hasattr(self, "_plot_resize_timer") and event.canvas is self.canvas:
@@ -1065,9 +1126,9 @@ class ClassicMainWindow(MainWindow):
             dialog = self.show_overlay_options(); dialog.tabs.setCurrentIndex(3)
             return dialog
 
-    def create_plot_context_menu(self):
+    def create_plot_context_menu(self, *, configuration=False):
         """Use the same actions as the main menu, in the supplied popup order."""
-        if self.current_measurement() is not None:
+        if not configuration and self.current_measurement() is not None:
             return self.create_measurement_menu()
         menu = QMenu(self)
         def action(name, label=None):
@@ -1075,7 +1136,7 @@ class ClassicMainWindow(MainWindow):
             if existing:
                 if label is None: menu.addAction(existing)
                 else:
-                    clone = menu.addAction(label); clone.setEnabled(existing.isEnabled())
+                    clone = menu.addAction(label); clone.setObjectName(name); clone.setEnabled(existing.isEnabled())
                     clone.setToolTip(existing.toolTip()); clone.triggered.connect(existing.trigger)
         action("Open1", "打开")
         save = menu.addMenu("保存分析")
@@ -1103,18 +1164,25 @@ class ClassicMainWindow(MainWindow):
         for name, label in (("Linear1", "线性峰值积分"), ("SigHorizontal1", "水平 S 形曲线峰值积分"), ("PeakMax1", "峰最大"), ("SignalMax1", "信号最大"), ("SignalChange1", "信号变化"), ("HeightChange", "高度差"), ("GlassTransition1", "玻璃化转变"),("StepTransition2","步阶转变"), ("OnsetPoint1", "始点"), ("Slope1", "斜率"), ("PeakRunningIntegral1", "执行积分"), ("CurveValueAtX1", "曲线值于X轴"), ("CurveValueAtY1", "曲线值于Y轴")):
             action(name, label)
         action("SignedArea", "两点积分 S（Y=0 基线）")
+        action("TemperatureReference", "温度参考线…")
         menu.addSeparator(); action("AnalysisOptions1", "分析选项")
         if self._measurement_artists and self.current_measurement() is None:
             menu.addSeparator()
             menu.addAction("调整分析点", lambda: self.edit_measurement())
-        if self._result_annotations and self.current_measurement() is None:
+        analysis_labels = [(entry, text) for entry, text in self._result_annotations
+                           if "file" in entry or not configuration]
+        if analysis_labels and self.current_measurement() is None:
             labels_menu = menu.addMenu("分析文字显隐")
             added = set()
-            for entry, text in self._result_annotations:
+            for entry, text in analysis_labels:
                 if id(entry) in added: continue
                 added.add(id(entry))
-                caption = (text.get_text().splitlines() or ["分析结果"])[0]
-                submenu = labels_menu.addMenu(f"{Path(entry['file']).name} · {caption}")
+                if "file" in entry:
+                    caption = (text.get_text().splitlines() or ["分析结果"])[0]
+                    title = f"{Path(entry['file']).name} · {caption}"
+                else:
+                    title = f"温度参考线 · {entry['temperature']:.12g}"
+                submenu = labels_menu.addMenu(title)
                 self.add_label_visibility_actions(submenu, entry)
         if any(r.get("annotation", {}).get("hidden", False) for r in self.results):
             menu.addSeparator(); menu.addAction("显示隐藏结果", self.show_hidden_results)
@@ -1147,7 +1215,19 @@ class ClassicMainWindow(MainWindow):
         if selected_axis is not None:
             self.manual_rescale(selected_axis)
             return
+        x, y = self._context_point
+        base = self.axes.get(0)
+        if self.domain == "temperature" and base is not None and base.bbox.contains(x, y):
+            for entry in reversed(self.plot_options[doc.key].get("temperature_references", [])):
+                line_x = base.get_xaxis_transform().transform((entry["temperature"], .5))[0]
+                if abs(x - line_x) <= 5:
+                    menu = self.temperature_reference_menu(entry)
+                    menu.exec(doc.canvas.mapToGlobal(point))
+                    menu.deleteLater()
+                    return
         menu = self.create_plot_context_menu()
+        from .feature_visibility import filter_context
+        filter_context(self, menu)
         menu.exec(doc.canvas.mapToGlobal(point))
         menu.deleteLater()
 
@@ -1168,10 +1248,9 @@ class ClassicMainWindow(MainWindow):
                 if np.hypot(px-x,py-y)<=10:return editor.entry,editor.annotation
         return None
 
-    def create_result_context_menu(self, entry, annotation):
+    def add_result_text_actions(self, menu, entry, annotation):
         from .measurement import annotation_key
         label_key = annotation_key(annotation)
-        menu = QMenu(self); menu.setObjectName("ObjectPopupMenu")
         style = dict(entry.get("annotation", {}).get("text_style", {}))
         style.update(entry.get("annotation", {}).get("label_styles", {}).get(label_key, {}))
         for key, caption in (("bold", "粗体"), ("italic", "斜体")):
@@ -1180,23 +1259,32 @@ class ClassicMainWindow(MainWindow):
         sizes = menu.addMenu("字号")
         for size in (8, 10, 12, 14, 16, 18, 20, 24):
             action = sizes.addAction(str(size)); action.triggered.connect(lambda checked=False, size=size: self.style_result(entry, "size", size, label_key))
-        menu.addAction("隐藏此文字", lambda: self.style_result(entry, "hidden", True, label_key))
-        self.add_label_visibility_actions(menu.addMenu("文字显隐"), entry)
-        menu.addSeparator()
-        if entry['kind'] == 'interval_area' and 'interactive' in entry:
-            fill = menu.addMenu('积分区域填充')
-            current = entry.get('annotation', {}).get('area_fill_color')
-            for title, color in (('透明', None), ('灰色', '#808080'), ('红色', '#d93838')):
-                action = fill.addAction(title)
-                action.setCheckable(True)
-                action.setChecked(current == color)
-                action.triggered.connect(lambda checked=False, color=color: self.set_integral_fill(entry, color))
-            fill.addAction('自定义颜色…', lambda: self.choose_integral_fill(entry))
-        if "interactive" in entry: menu.addAction("调整结果", lambda: self.edit_measurement(entry))
-        if entry["kind"] in ("curve_value","curve_value_y"):menu.addAction("标注选项…",lambda:self.edit_point_label(entry))
-        menu.addAction("删除结果", lambda: self.delete_result(entry))
-        menu.addAction("隐藏结果", lambda: self.hide_result(entry))
-        menu.addAction("复制文字", lambda: QApplication.clipboard().setText(annotation.get_text().splitlines()[0] if getattr(annotation, '_tma_split', False) else annotation.get_text()))
+        if not entry.get('normalized_document'):
+            menu.addAction("隐藏此文字", lambda: self.style_result(entry, "hidden", True, label_key))
+            self.add_label_visibility_actions(menu.addMenu("文字显隐"), entry)
+
+    def create_result_context_menu(self, entry, annotation):
+        from .temperature_reference import KIND
+        if entry["kind"] == KIND:
+            return self.temperature_reference_menu(entry, annotation)
+        menu = QMenu(self); menu.setObjectName("ObjectPopupMenu")
+        self.add_result_text_actions(menu, entry, annotation)
+        if not entry.get('normalized_document'):
+            menu.addSeparator()
+            if entry['kind'] == 'interval_area' and 'interactive' in entry:
+                fill = menu.addMenu('积分区域填充')
+                current = entry.get('annotation', {}).get('area_fill_color')
+                for title, color in (('透明', None), ('灰色', '#808080'), ('红色', '#d93838')):
+                    action = fill.addAction(title)
+                    action.setCheckable(True)
+                    action.setChecked(current == color)
+                    action.triggered.connect(lambda checked=False, color=color: self.set_integral_fill(entry, color))
+                fill.addAction('自定义颜色…', lambda: self.choose_integral_fill(entry))
+            if "interactive" in entry: menu.addAction("调整结果", lambda: self.edit_measurement(entry))
+            if entry["kind"] in ("curve_value","curve_value_y"):menu.addAction("标注选项…",lambda:self.edit_point_label(entry))
+            menu.addAction("删除结果", lambda: self.delete_result(entry))
+            menu.addAction("隐藏结果", lambda: self.hide_result(entry))
+            menu.addAction("复制文字", lambda: QApplication.clipboard().setText(annotation.get_text().splitlines()[0] if getattr(annotation, '_tma_split', False) else annotation.get_text()))
         return menu
 
     def add_label_visibility_actions(self, menu, entry):
@@ -1206,7 +1294,11 @@ class ClassicMainWindow(MainWindow):
             if result is not entry or not text.get_text(): continue
             key = annotation_key(text)
             if entry['kind'] == 'glass_transition' and key.startswith('t'): continue
-            caption = (text.get_text().splitlines() or ["分析结果"])[0]
+            caption = getattr(text, "_tma_visibility_caption", None)
+            if caption is not None:
+                caption = f"{len(texts) + 1}. {caption}"
+            else:
+                caption = (text.get_text().splitlines() or ["分析结果"])[0]
             texts.append((key, caption, text))
         for key, caption, text in texts:
             action = menu.addAction(caption); action.setCheckable(True); action.setChecked(text.get_visible())
@@ -1230,12 +1322,14 @@ class ClassicMainWindow(MainWindow):
             self.set_integral_fill(entry, color.name())
 
     def style_result(self, entry, key, value, label_key=None):
+        if entry.get('normalized_document') and key == 'hidden': return
         options = entry.setdefault("annotation", {})
         style = options.setdefault("text_style", {}) if label_key is None else options.setdefault("label_styles", {}).setdefault(label_key, {})
         style[key] = value
         self.touch(); self.redraw()
 
     def delete_result(self, entry):
+        if entry.get('normalized_document'): return
         children={c.uid for c in self.curves if c.derived is not None and c.derived['parent_id']==entry.get('analysis_id')}
         if children:self.remove_derived_curves(children)
         self.results[:] = [result for result in self.results if result is not entry]
@@ -1250,6 +1344,7 @@ class ClassicMainWindow(MainWindow):
         self.sync_documents();self.rebuild_files()
 
     def hide_result(self, entry):
+        if entry.get('normalized_document'): return
         entry.setdefault("annotation", {})["hidden"] = True
         self.touch(); self.redraw()
 
@@ -1531,6 +1626,15 @@ class ClassicMainWindow(MainWindow):
         for curve in self.curves:
             state=curve.overlay_views.get(source_key)
             if state is not None:curve.overlay_views=dict(curve.overlay_views,**{key:deepcopy(state)})
+        copied_markers = []
+        for result in self.results:
+            if result.get('normalized_document') == source_key:
+                copied_result = deepcopy(result)
+                copied_result['normalized_document'] = key
+                copied_markers.append(copied_result)
+        if copied_markers:
+            self.results.extend(copied_markers)
+            self.refresh_results()
         doc=self._document(key)
         doc.curve_uids=list(self.documents[source_key].curve_uids or [])
         self.plot_options[key]["overlay_members"]=list(doc.curve_uids)
@@ -1577,6 +1681,8 @@ class ClassicMainWindow(MainWindow):
             self.sync_documents()
         else:
             self.plot_options.pop(doc.key,None)
+            from .mass_normalization import replace_document_markers
+            replace_document_markers(self, doc.key)
             for curve in self.curves:
                 if curve.active_overlay_key==doc.key:curve.activate_view(None)
                 curve.overlay_views={key:value for key,value in curve.overlay_views.items() if key!=doc.key}
