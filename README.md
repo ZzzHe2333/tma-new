@@ -1,6 +1,6 @@
 # ZzzHe TMA Analysis
 
-**1.2.3** 使用 Python 和 PySide6（Qt）读取、绘制和分析 TMA 数据，界面参考 Universal Analysis 2000 v4.5。
+**1.2.4** 使用 Python 和 PySide6（Qt）读取、绘制和分析 TMA 数据，界面参考 Universal Analysis 2000 v4.5。
 
 在「帮助 → 检查更新」可从 GitHub Releases 检查和下载新版。代理可填 `http://127.0.0.1:7897`，下载加速地址可填带 `{url}` 的 HTTPS 模板。下载完成后校验 GitHub 记录的 SHA-256，再保存 ZIP；解压到新目录后启动新版。发布时需在 GitHub Release 上传 `ZzzHe-TMA-Analysis-<版本>.zip`，标签格式为 `<版本>` 或 `v<版本>`。
 

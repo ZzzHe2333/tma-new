@@ -66,15 +66,36 @@ def verify(window,output,inputs):
         core.apply(window,doc,{c.uid:m for c,m in zip(window.curves,[.46,.55])})
         for curve in window.curves:np.testing.assert_array_equal(curve.xy()[1],saved[curve.uid])
         window.files.setCurrentItem(window.files.topLevelItem(0))
-        entry=window.start_point_measurement('signal_max');window.confirm_measurement()
-        assert np.isclose(entry['values']['max_y'],window.curves[0].xy()[1].max())
+        assert window.start_point_measurement('signal_max') is None
+        window.show_normal()
+        source = window.start_point_measurement('signal_max')
+        window.confirm_measurement()
+        window._show_document(doc.key)
+        core.apply(window, doc, {curve.uid: m for curve, m in zip(window.curves, [.46, .55])})
+        entry = next(result for result in window.results if result.get('normalized_document') == doc.key)
+        assert entry['curve_id'] == source['curve_id'] == window.curves[0].uid
+        assert np.isclose(entry['values']['max_y'], window.curves[0].xy()[1].max())
+
+        from .temperature_reference import validate_lines
+        x, y = window.curves[0].xy()
+        point = len(x) // 2
+        reference = validate_lines([{'temperature': float(x[point]), 'color': '#a52c83'}])[0]
+        window.plot_options[doc.key]['temperature_references'] = [reference]
+        window.redraw()
+        labels = [label for result, label in window._result_annotations if result is reference]
+        assert any(label.xy == (x[point], y[point]) and label.get_color() == reference['color'] for label in labels)
+        assert any(text.get_gid() == 'tma-temperature-reference-caption' for text in window.axes[0].texts)
+        report['checks'].append('normalized_reference_height_and_temperature_caption')
+
         session=output.with_suffix('.tmas')
         save_session(session,window.curves,window.domain,window.results,window.plot_options)
         loaded,_,results,options=load_session(session,include_plot_options=True)
         for curve in loaded:
             curve.activate_view(doc.key)
             np.testing.assert_array_equal(curve.xy()[1],saved[curve.uid])
-        assert results[0]['values']==entry['values'] and options[doc.key]['window_name']=='Tong1-Tma'
+        assert any(result.get('normalized_document') == doc.key and result['values'] == entry['values'] for result in results)
+        assert options[doc.key]['window_name'] == 'Tong1-Tma'
+        assert options[doc.key]['temperature_references'] == [reference]
         report['checks'].append('repeat_not_cumulative_scaled_analysis_and_session_roundtrip')
         dialog=window.show_mass_normalization(doc);dialog.restore_original()
         for curve in window.curves:np.testing.assert_array_equal(curve.xy()[1],original[curve.uid][1])
