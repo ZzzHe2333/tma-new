@@ -21,15 +21,25 @@ def check_startup(executable):
         folder = Path(temporary).resolve()
         result = folder / "startup.json"
         env = os.environ.copy()
+        system = Path(env["SYSTEMROOT"])
+        # Exercise the bundled DLLs without picking up libraries from builds
+        # or development tools installed on the runner.
+        env["PATH"] = os.pathsep.join((str(system / "System32"), str(system)))
         env.update(
             LOCALAPPDATA=str(folder / "profile"),
             QT_QPA_PLATFORM="offscreen",
             ZZZHE_TMA_ACCOUNT_REGISTRY="0",
         )
-        subprocess.run(
-            [str(executable), "--verify-startup-window", str(result)],
-            cwd=folder, env=env, check=True, timeout=90,
-        )
+        try:
+            subprocess.run(
+                [str(executable), "--verify-startup-window", str(result)],
+                cwd=folder, env=env, check=True, timeout=90,
+            )
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            log = folder / "profile" / "ZzzHeTMA" / "logs" / "runtime.log"
+            if log.is_file():
+                print(log.read_text(encoding="utf-8", errors="replace")[-4000:])
+            raise
         report = json.loads(result.read_text(encoding="utf-8"))
         if report != {"version": __version__, "visible": True, "matplotlib_loaded": False}:
             raise ValueError(f"Unexpected startup report: {report}")
