@@ -1,4 +1,4 @@
-param([string]$DistPath = 'dist',[string]$SigningConfig = '',[switch]$RequireSignature,[switch]$LocalTestSigning)
+param([string]$DistPath = 'dist',[string]$SigningConfig = '',[switch]$RequireSignature,[switch]$LocalTestSigning,[switch]$SkipLegacyScripts)
 $ErrorActionPreference = 'Stop'
 $projectPath = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'windows_signing.ps1')
@@ -41,10 +41,12 @@ try {
         Copy-Item -LiteralPath $releaseNotes -Destination $docsDestination
         Copy-Item -LiteralPath $releaseNotes -Destination (Join-Path $packagePath 'RELEASE_NOTES.md')
     }
-    $powerDestination = Join-Path $packagePath 'power'
-    New-Item -ItemType Directory -Force -Path $powerDestination | Out-Null
-    foreach ($sourceName in @('piliang_tma_v14.py', 'one_BG_neibuban.py', 'one_BG_claude_v6.py')) {
-        Copy-Item -LiteralPath (Join-Path $projectPath "power\$sourceName") -Destination $powerDestination
+    if (-not $SkipLegacyScripts) {
+        $powerDestination = Join-Path $packagePath 'power'
+        New-Item -ItemType Directory -Force -Path $powerDestination | Out-Null
+        foreach ($sourceName in @('piliang_tma_v14.py', 'one_BG_neibuban.py', 'one_BG_claude_v6.py')) {
+            Copy-Item -LiteralPath (Join-Path $projectPath "power\$sourceName") -Destination $powerDestination
+        }
     }
     & $pythonExecutable -c 'import sys; from tools.build_t1_t2_h_standalone import build; build(sys.argv[1])' (Join-Path $packagePath 'T1-T2-H\extract_t1_t2_h.py')
     if ($LASTEXITCODE -ne 0) { throw 'Standalone T1/T2/H script build failed' }

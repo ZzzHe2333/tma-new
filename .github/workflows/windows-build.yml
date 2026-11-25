@@ -1,0 +1,55 @@
+name: Build Windows package
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/windows-build.yml'
+      - 'requirements.txt'
+      - 'ZzzHe TMA Analysis.spec'
+      - 'tools/build_windows.ps1'
+      - 'tools/package_cloud_windows.py'
+      - 'config/release-signing.example.json'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2025
+    timeout-minutes: 25
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.12'
+          architecture: x64
+
+      - name: Install build dependencies
+        run: python -m pip install -r requirements.txt "PyInstaller>=6.9,<7"
+
+      - name: Build unsigned Windows application
+        shell: pwsh
+        run: |
+          $env:TMA_PRIVATE_WECOM_RESOURCE = ''
+          & .\tools\build_windows.ps1 -DistPath dist-cloud -SigningConfig config/release-signing.example.json -SkipLegacyScripts
+
+      - name: Test startup and create ZIP
+        run: python -m tools.package_cloud_windows dist-cloud cloud-artifacts
+
+      - name: Upload ZIP and checksum
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ZzzHe-TMA-Analysis-Windows
+          path: |
+            cloud-artifacts/*.zip
+            cloud-artifacts/*.zip.sha256
+          if-no-files-found: error
+          compression-level: 0

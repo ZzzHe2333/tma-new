@@ -4,6 +4,8 @@
 
 在「帮助 → 检查更新」可从 GitHub Releases 检查和下载新版。代理可填 `http://127.0.0.1:7897`，下载加速地址可填带 `{url}` 的 HTTPS 模板。下载完成后校验 GitHub 记录的 SHA-256，再保存 ZIP；解压到新目录后启动新版。发布时需在 GitHub Release 上传 `ZzzHe-TMA-Analysis-<版本>.zip`，标签格式为 `<版本>` 或 `v<版本>`。
 
+云端打包在「Actions → Build Windows package」点击「Run workflow」。构建成功后，在该次运行的 Artifacts 下载 `ZzzHe-TMA-Analysis-Windows`，其中包含版本 ZIP 和 SHA-256 校验文件。云端构建使用未签名配置，企业微信通知可在安装后自行配置。
+
 1.1.31：批量结果按生产号排序，Excel 新增文件名列。
 
 1.1.30：修复导出图表中央的灰纹，保留图片鉴定与机器码记录。
